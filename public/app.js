@@ -157,6 +157,7 @@ function lastText(m){
   if(!m)return 'Нет сообщений';if(m.del)return 'Сообщение удалено';if(m.sys)return m.sys;
   if(m.call)return (m.call.kind==='video'?'📹 ':'📞 ')+(m.call.group?'Групповой звонок'+(m.call.dur?', '+durText(m.call.dur):''):m.call.missed?'Пропущенный звонок':'Звонок, '+durText(m.call.dur));
   const who=m.from===S.me.id?'Вы: ':'';if(m.sticker)return who+'Стикер';
+  if(m.once)return who+'🔥 '+ONCE_K[m.once.k][1]+' · 1 просмотр';
   if(m.media)return who+({voice:'🎤 Голосовое',round:'⭕ Видеосообщение',video:'🎬 Видео'}[m.media.k]||'')+(m.media.dur?' '+clock(m.media.dur):'')+(m.text?' '+m.text:'');if(m.story&&!m.text)return who+'Ответ на историю';return who+(m.img&&!m.text?'📷 Фото':(m.img?'📷 ':'')+m.text);
 }
 const sortedChats=()=>Object.values(S.chats).filter(c=>c.type!=='channel').sort((a,b)=>(b.type==='self')-(a.type==='self')||((b.last&&b.last.ts)||b.created)-((a.last&&a.last.ts)||a.created));
@@ -412,6 +413,7 @@ function renderMain(){
       <div class="comp-row">
         <button class="gbtn ic glass cbig" data-act="attach" title="Фото" aria-label="Прикрепить фото">${ic('clip')}</button>
         <div class="comp-in glass pill"><textarea id="txt" rows="1" placeholder="Сообщение" maxlength="4000" aria-label="Сообщение" enterkeyhint="send"></textarea>
+ ${c.type!=='self'?`<button class="gbtn ic oncebtn ${S.once?'on':''}" data-act="once" title="На 1 просмотр" aria-label="На 1 просмотр"><b>1</b></button>`:''}
           <button class="gbtn ic stkbtn" data-act="stk" title="Стикеры" aria-label="Стикеры">${ic('smile')}</button>
           <button class="sendb" data-act="send" aria-label="Отправить">${ic('send')}</button>
           <button class="sendb recb" id="recb" data-kind="${S.recKind||'voice'}" aria-label="${(S.recKind||'voice')==='round'?'Видеосообщение':'Голосовое сообщение'}" title="Удерживай — запись, нажми — сменить голос/видео">${ic((S.recKind||'voice')==='round'?'camera':'mic')}</button></div>
@@ -477,6 +479,7 @@ function msgHTML(c,m,prev,next){
   const fwd=m.fwd?`<div class="fwd">${ic('fwd')}Переслано от <b>${esc(nm(S.users[m.fwd.from])!=='?'?nm(S.users[m.fwd.from]):m.fwd.name)}</b></div>`:'';
   let inner;
   if(m.del)inner=`<span class="del">Сообщение удалено</span>${meta}`;
+  else if(m.once)inner=onceHTML(m,me)+(m.text?`<span class="txt">${linkify(m.text)}</span>`:'')+meta;
   else if(m.sticker){
     const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:''}${fwd}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
@@ -484,7 +487,7 @@ function msgHTML(c,m,prev,next){
   else if(m.media&&m.media.k==='round'){ /* video circle: no bubble, just the circle */
     const md=m.media,src=md.local||md.url,re3=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb rndb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:''}${fwd}
-      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="auto" disablepictureinpicture></video><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
+      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="auto" disablepictureinpicture></video><svg class="rring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
       <span class="rnd-t">${m.pending?`<i class="spin"></i>${md.progress||0}%`:clock(md.dur)}</span><span class="rnd-snd">${ic('vol')}</span></div>${meta}${re3}</div></div>`;
   }
   else if(m.call){
@@ -548,6 +551,33 @@ function bubbleSheet(){
     <div class="bgrid">${BFRAMES.map(([k,n])=>`<button class="bopt ${cur.f===k?'on':''}" data-act="bframe" data-v="${k}"><span class="bub sw${cur.s?' bs-'+cur.s:''}${k?' bf-'+k:''}">${k?'<i class="bfr"></i>':''}Аа</span><small>${n}</small></button>`).join('')}</div>
     <div class="btns"><button class="gbtn" data-act="bcancel">Отмена</button><button class="gbtn primary" data-act="bsave">Сохранить</button></div>`);
 }
+/* ---------- view once: a photo, video, voice or circle each person can open one time ---------- */
+const ONCE_K={photo:['📷','Фото'],video:['🎬','Видео'],voice:['🎤','Голосовое'],round:['⭕','Видеосообщение']};
+function renderOnceBtn(){const b=document.querySelector('.oncebtn');if(b)b.classList.toggle('on',!!S.once);const t=$('#txt');if(t)t.placeholder=S.once?'🔥 Фото, видео, голосовое или кружок — на 1 просмотр':'Сообщение'}
+function onceHTML(m,me){
+  const o=m.once,[e,label]=ONCE_K[o.k]||['🔥','Медиа'],seen=(o.seen||[]).includes(S.me.id),n=(o.seen||[]).length;
+  if(me)return `<div class="once mine"><span class="oic">🔥</span><span class="mid"><b>${e} ${label}</b><small>${m.pending?'Отправляется…':o.gone?'Просмотрено и удалено':n?'Просмотрели: '+n:'Ещё не открыли'} · 1 просмотр</small></span></div>`;
+  if(seen||o.gone)return `<div class="once done"><span class="oic">🔥</span><span class="mid"><b>${e} ${label}</b><small>Просмотрено</small></span></div>`;
+  return `<button class="once open" data-act="onceopen" data-id="${m.id}"><span class="oic">🔥</span><span class="mid"><b>${e} ${label}${o.dur?' · '+clock(o.dur):''}</b><small>Нажмите, чтобы посмотреть · 1 раз</small></span></button>`;
+}
+let OV=null;
+async function onceOpen(id){
+  if(OV)return;const c=S.cur;
+  let r;try{r=await api('/api/once/open',{chat:c,id})}catch(e){toast(e.message);return}
+  OV={id};const el=document.createElement('div');el.id='oncev';el.className='oncev';
+  const no='oncontextmenu="return false" draggable="false"';
+  const body=r.k==='photo'?`<img src="${r.url}" alt="" ${no}>`
+    :r.k==='voice'?`<div class="ov-voice"><div class="ov-ic">🎤</div><div class="ov-bar"><i id="ovp"></i></div><audio src="${r.url}" autoplay></audio></div>`
+    :`<video class="${r.k==='round'?'ov-round':''}" src="${r.url}" autoplay playsinline ${r.k==='video'?'controls':''} controlslist="nodownload noplaybackrate" disablepictureinpicture disableremoteplayback ${no}></video>`;
+  el.innerHTML=`<div class="ov-top"><span>🔥 Одноразовое ${ONCE_K[r.k][1].toLowerCase()} — исчезнет после просмотра</span><button class="gbtn ic" data-act="onceclose" aria-label="Закрыть">${ic('x')}</button></div><div class="ov-body">${body}</div>`;
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  document.body.appendChild(el);VP.a.pause();
+  const media=el.querySelector('video,audio');
+  if(media){media.play().catch(()=>{});media.onended=()=>setTimeout(onceClose,500);
+    if(r.k==='voice')media.ontimeupdate=()=>{const p=$('#ovp');if(p&&media.duration)p.style.width=(media.currentTime/media.duration*100)+'%'};
+    if(r.k==='round')el.querySelector('.ov-body').addEventListener('click',()=>media.paused?media.play():media.pause())}
+}
+function onceClose(){const el=$('#oncev');if(el){el.querySelectorAll('video,audio').forEach(v=>{v.pause();v.removeAttribute('src');v.load()});el.remove()}OV=null}
 const clock=s=>{s=Math.round(s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 function voiceHTML(m){
   const md=m.media,w=md.wave&&md.wave.length?md.wave:Array.from({length:32},(_,i)=>8+((i*7)%11)),playing=VP.id===m.id;
@@ -575,7 +605,7 @@ function roundTap(el){
   if(v.dataset.snd){v.pause();v.muted=true;v.loop=true;delete v.dataset.snd;el.classList.remove('snd');return}
   document.querySelectorAll('.rnd video[data-snd]').forEach(o=>{o.pause();o.muted=true;o.loop=true;delete o.dataset.snd;o.closest('.rnd').classList.remove('snd')});
   VP.a.pause();v.dataset.snd=1;v.muted=false;v.loop=false;v.currentTime=0;v.play().catch(()=>{});el.classList.add('snd');
-  const ring=el.querySelector('.ring circle');
+  const ring=el.querySelector('.rring circle');
   v.ontimeupdate=()=>{if(v.duration&&ring)ring.style.strokeDashoffset=String(302*(1-v.currentTime/v.duration))};
   v.onended=()=>{delete v.dataset.snd;v.muted=true;v.loop=true;el.classList.remove('snd');if(ring)ring.style.strokeDashoffset='302';v.play().catch(()=>{})};
 }
@@ -657,7 +687,8 @@ function sendMsg(img){
   const tmp={id:cid,from:S.me.id,ts:Date.now(),text,pending:true};if(img)tmp.img=img;
   if(S.reply)tmp.reply={id:S.reply.m.id,from:S.reply.m.from,text:(S.reply.m.text||'📷 Фото').slice(0,120)};
   (S.msgs[c.id]=S.msgs[c.id]||[]).push(tmp);
-  wsSend({t:'send',chat:c.id,text,img,reply:S.reply&&S.reply.m.id,cid});
+  const once=!!(img&&S.once&&c.type!=='self');if(once){tmp.once={k:'photo',seen:[]};S.once=false;renderOnceBtn()}
+  wsSend({t:'send',chat:c.id,text,img,once,reply:S.reply&&S.reply.m.id,cid});
   S.reply=null;t.value='';S.draft[c.id]='';autosize(t);renderCtx();renderMsgs(true);
 }
 /* images are shrunk in the browser before sending: max 1600 px, JPEG */
@@ -684,13 +715,19 @@ function uploadMedia(blob,kind,onProgress){
     const x=new XMLHttpRequest();x.open('POST','/api/upload?kind='+kind);x.setRequestHeader('Content-Type',blob.type||'application/octet-stream');
     x.upload.onprogress=e=>{if(e.lengthComputable&&onProgress)onProgress(Math.round(e.loaded/e.total*100))};
     x.onload=()=>{let j=null;try{j=JSON.parse(x.responseText)}catch(e){}x.status===200&&j?ok(j):bad(new Error((j&&j.error)||'Не удалось отправить файл'))};
-    x.onerror=()=>bad(new Error('Нет связи с сервером'));x.send(blob);
+    x.onerror=()=>bad(new Error('Нет связи с сервером'));
+    /* no progress for 40 seconds (the server is restarting, the connection dropped): give up and say so */
+    let last=Date.now();const p0=x.upload.onprogress;x.upload.onprogress=e=>{last=Date.now();p0(e)};
+    const wd=setInterval(()=>{if(Date.now()-last>40e3){clearInterval(wd);x.abort();bad(new Error('Файл не отправился: нет связи с сервером. Попробуй ещё раз'))}},2000);
+    x.onloadend=()=>clearInterval(wd);
+    x.send(blob);
   });
 }
 /* a message that shows at once with a progress bar while its file uploads */
 async function sendMedia(blob,media,text){
   const c=S.chats[S.cur];if(!c)return;
   const cid='c'+(++cidN)+Date.now(),tmp={id:cid,from:S.me.id,ts:Date.now(),text:text||'',pending:true,media:Object.assign({local:URL.createObjectURL(blob),progress:0},media)};
+  const once=!!(S.once&&c.type!=='self');if(once){tmp.once={k:media.k,dur:media.dur,seen:[]};S.once=false;renderOnceBtn()}
   if(S.reply){tmp.reply={id:S.reply.m.id,from:S.reply.m.from,text:(S.reply.m.text||'').slice(0,120)}}
   const reply=S.reply&&S.reply.m.id;S.reply=null;renderCtx();
   (S.msgs[c.id]=S.msgs[c.id]||[]).push(tmp);renderMsgs(true);
@@ -699,7 +736,7 @@ async function sendMedia(blob,media,text){
     const r=await uploadMedia(blob,media.k,p=>{tmp.media.progress=p;if(Date.now()-last>250){last=Date.now();const el=document.querySelector(`.m[data-id="${cid}"] .rnd-t, .m[data-id="${cid}"] .vm-t, .m[data-id="${cid}"] .vid-t`);if(el)el.innerHTML=(media.k==='round'?'<i class="spin"></i>':'')+p+'%'}});
     tmp.media.url=r.url;
     const out={k:media.k,url:r.url,dur:media.dur};if(media.wave)out.wave=media.wave;if(media.mirror)out.mirror=1;if(media.w){out.w=media.w;out.h=media.h}if(media.poster)out.poster=media.poster;
-    if(!wsSend({t:'send',chat:c.id,text:text||'',media:out,reply,cid}))throw new Error('Нет связи. Переподключаемся…');
+    if(!wsSend({t:'send',chat:c.id,text:text||'',media:out,once,reply,cid}))throw new Error('Нет связи. Переподключаемся…');
   }catch(e){toast(e.message);const l=S.msgs[c.id],i=l.indexOf(tmp);if(i>=0)l.splice(i,1);renderMsgs()}
 }
 /* a video from the gallery: its length, size and a still picture for the bubble */
@@ -955,7 +992,7 @@ function onWS(m){
       const c=S.chats[m.chat];if(!c)return;
       const l=S.msgs[m.chat]||(S.cur===m.chat?(S.msgs[m.chat]=[]):null);
       if(l){if(!l.some(x=>x.id===m.msg.id)){
-        if(m.msg.from===S.me.id){const i=l.findIndex(x=>x.pending&&(m.msg.media?x.media&&x.media.url===m.msg.media.url:!x.media&&x.text===m.msg.text&&!!x.img===!!m.msg.img));if(i>=0){if(l[i].media&&l[i].media.local)setTimeout(()=>URL.revokeObjectURL(l[i]&&l[i].media&&l[i].media.local||''),30000);l.splice(i,1)}}
+        if(m.msg.from===S.me.id){const i=l.findIndex(x=>x.pending&&(m.msg.once?x.once&&x.once.k===m.msg.once.k&&(x.text||'')===(m.msg.text||'')&&(x.once.k==='photo'||x.media&&x.media.url):m.msg.media?x.media&&x.media.url===m.msg.media.url:!x.media&&x.text===m.msg.text&&!!x.img===!!m.msg.img));if(i>=0){if(l[i].media&&l[i].media.local)setTimeout(()=>URL.revokeObjectURL(l[i]&&l[i].media&&l[i].media.local||''),30000);l.splice(i,1)}}
         l.push(m.msg)}}
       c.last=m.msg;
       if(S.typing[m.chat])delete S.typing[m.chat][m.msg.from];
@@ -2254,7 +2291,7 @@ document.addEventListener('click',async e=>{
     case 'send':sendMsg();$('#txt')&&!touch&&$('#txt').focus();break;
     case 'attach':$('#file').click();break;
     case 'older':loadOlder();break;
-    case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts'))break;msgMenu(id,e.clientX,e.clientY);break;
+    case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="onceopen"]'))break;msgMenu(id,e.clientX,e.clientY);break;
     case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}
     case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});useRe(el.dataset.e);closeLayer();navigator.vibrate&&navigator.vibrate(8);break;
@@ -2355,6 +2392,9 @@ document.addEventListener('click',async e=>{
     case 'bframe':S.bdraft.f=el.dataset.v;bubbleSheet();break;
     case 'bcancel':S.bdraft=null;closeLayer();break;
     case 'bsave':try{const r=await api('/api/me/bubble',S.bdraft);S.me=Object.assign(S.me,r.me);S.users[S.me.id]=S.me;S.bdraft=null;closeLayer();renderMsgs();toast('Стиль сохранён ✨')}catch(err){toast(err.message)}break;
+    case 'once':S.once=!S.once;renderOnceBtn();toast(S.once?'🔥 Следующее фото, видео, голосовое или кружок можно будет посмотреть только 1 раз':'Обычная отправка',S.once?4500:1500);break;
+    case 'onceopen':onceOpen(el.dataset.id);break;
+    case 'onceclose':onceClose();break;
     case 'mute':{const c=S.chats[S.cur];if(!c)break;const r=await api('/api/chats/mute',{chat:c.id,on:!c.muted});S.chats[c.id]=r.chat;toast(r.chat.muted?'Уведомления чата выключены 🔕':'Уведомления чата включены 🔔');closeLayer();renderSide();break}
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;
@@ -2393,7 +2433,7 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
   lpT=setTimeout(()=>{lpFired=true;navigator.vibrate&&navigator.vibrate(12);msgMenu(b.dataset.id,t.clientX,t.clientY)},420)},{passive:true});
 ['touchend','touchmove','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
-if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"]'))e.stopImmediatePropagation()},true);
+if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"]'))e.stopImmediatePropagation()},true);
 addEventListener('hashchange',()=>{const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
   const pm=/^#pack\/(p[\w-]{4,20})$/.exec(location.hash);if(pm&&S.me){history.replaceState(null,'',location.pathname);packPreview(pm[1])}});
 addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur)});

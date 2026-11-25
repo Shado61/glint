@@ -3,14 +3,14 @@
    - The page itself is always asked from the server first (that is how a new version arrives), the saved copy only offline.
    - Pictures (/img/…) and the mask library never change: kept and shown instantly.
    - Push: message and call notifications even when Manasenger is closed. */
-const V='manasenger-v7',APP='mn-app',IMG='mn-img';
+const V='manasenger-v8',APP='mn-app',IMG='mn-img';
 self.addEventListener('install',e=>{self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>![V,APP,IMG].includes(k)).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 async function trim(name,max){const c=await caches.open(name),ks=await c.keys();if(ks.length>max)for(const k of ks.slice(0,ks.length-Math.round(max*.8)))await c.delete(k)}
 const keep=(name,max)=>req=>caches.open(name).then(c=>c.match(req).then(hit=>hit||fetch(req).then(r=>{if(r.ok&&r.status===200){c.put(req,r.clone());if(Math.random()<.05)trim(name,max)}return r})));
 self.addEventListener('fetch',e=>{
   const r=e.request,u=new URL(r.url);
-  if(r.method!=='GET'||u.origin!==location.origin||u.pathname.startsWith('/api/')||u.pathname.startsWith('/media/')||u.pathname==='/ws'||r.headers.has('range'))return;
+  if(r.method!=='GET'||u.origin!==location.origin||u.pathname.startsWith('/api/')||u.pathname.startsWith('/media/')||u.pathname.startsWith('/once/')||u.pathname==='/ws'||r.headers.has('range'))return;
   if(u.pathname.startsWith('/img/')||u.pathname.startsWith('/vendor/'))return e.respondWith(keep(IMG,600)(r));
   if(u.searchParams.has('v'))return e.respondWith(keep(APP,40)(r));
   e.respondWith(fetch(r,{cache:'no-store'}).then(res=>{if(res.ok){const c=res.clone();caches.open(V).then(x=>x.put(r,c))}return res})

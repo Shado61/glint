@@ -647,9 +647,9 @@ html,body{overscroll-behavior:none;overscroll-behavior-x:none}
 .bub.rndb{background:none!important;border:0!important;box-shadow:none!important;padding:0}
 .rnd{position:relative;width:min(62vw,240px);height:min(62vw,240px);border-radius:50%;overflow:hidden;cursor:pointer;background:#111}
 .rnd video{width:100%;height:100%;object-fit:cover;display:block}
-.rnd .ring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none}
-.rnd .ring circle{fill:none;stroke:#fff;stroke-width:2.5;stroke-dasharray:302;stroke-dashoffset:302;opacity:0;transition:opacity .2s}
-.rnd.snd .ring circle{opacity:.9}
+.rnd .rring{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg);pointer-events:none}
+.rnd .rring circle{fill:none;stroke:#fff;stroke-width:2.5;stroke-dasharray:302;stroke-dashoffset:302;opacity:0;transition:opacity .2s}
+.rnd.snd .rring circle{opacity:.9}
 .rnd-t{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);font-size:12px;font-weight:700;color:#fff;background:rgba(0,0,0,.45);padding:2px 8px;border-radius:999px}
 .rnd-snd{position:absolute;right:16%;bottom:12%;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;background:rgba(0,0,0,.45);color:#fff}.rnd-snd svg{width:14px;height:14px}
 .rnd.snd .rnd-snd{display:none}
@@ -756,7 +756,7 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .rnd video{position:relative;z-index:1;background:transparent;transition:opacity .2s}
 .rnd .rnd-p+video{opacity:0}.rnd .rnd-p+video.on{opacity:1}
 .rnd.mir video{transform:scaleX(-1)}
-.rnd .ring,.rnd-t,.rnd-snd{z-index:2}
+.rnd .rring,.rnd-t,.rnd-snd{z-index:2}
 
 /* ---------- group calls ---------- */
 .gcall{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;background:radial-gradient(80% 60% at 30% 15%,#3a3d45,transparent 70%),#141518;color:#fff;padding:calc(10px + var(--safe-t)) 10px calc(14px + var(--safe-b))}
@@ -853,3 +853,22 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .bopt .bub.sw{display:inline-block;padding:6px 14px;font-weight:700;font-size:14px;margin:0}
 .bopt .bub.sw:not([class*=" bs-"]){background:var(--mine);color:#fff;border:1px solid rgba(255,255,255,.2)}
 .bopt .bub.sw[class*=" bf-"]{margin:0}
+
+/* ---------- view once ---------- */
+.oncebtn b{display:grid;place-items:center;width:20px;height:20px;border-radius:50%;border:2px dashed currentColor;font-size:11px;font-weight:800;line-height:1}
+.oncebtn.on{background:linear-gradient(135deg,#ff9a4c,#e8457c)!important;color:#fff}.oncebtn.on b{border-style:solid}
+.once{display:flex;align-items:center;gap:10px;min-width:210px;padding:4px 2px;text-align:left;color:inherit}
+.once .mid{display:flex;flex-direction:column}.once small{opacity:.75;font-size:12px}
+.once .oic{width:38px;height:38px;border-radius:50%;display:grid;place-items:center;font-size:19px;background:linear-gradient(135deg,#ff9a4c,#e8457c);flex:none}
+.once.done .oic{background:rgba(127,127,127,.35);filter:grayscale(1)}.once.done{opacity:.75}
+.once.open{cursor:pointer}.once.open:hover .oic{transform:scale(1.06)}
+.oncev{position:fixed;inset:0;z-index:70;background:#000;display:flex;flex-direction:column;color:#fff;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;animation:fade .2s}
+.ov-top{display:flex;align-items:center;gap:10px;justify-content:space-between;padding:calc(10px + var(--safe-t)) 12px 10px 16px;font-size:13.5px;opacity:.9}
+.ov-top .gbtn{color:#fff;background:rgba(255,255,255,.14)}
+.ov-body{flex:1;min-height:0;display:grid;place-items:center;padding:0 0 calc(16px + var(--safe-b))}
+.ov-body img,.ov-body video{max-width:100%;max-height:100%;object-fit:contain;pointer-events:none}
+.ov-body video[controls]{pointer-events:auto}
+.ov-body video.ov-round{width:min(80vw,420px);height:min(80vw,420px);border-radius:50%;object-fit:cover;transform:scaleX(-1)}
+.ov-voice{display:flex;flex-direction:column;align-items:center;gap:22px;width:min(80vw,380px)}
+.ov-ic{width:110px;height:110px;border-radius:50%;display:grid;place-items:center;font-size:48px;background:linear-gradient(135deg,#ff9a4c,#e8457c);animation:pulse 1.6s infinite}
+.ov-bar{width:100%;height:6px;border-radius:9px;background:rgba(255,255,255,.2);overflow:hidden}.ov-bar i{display:block;height:100%;width:0;background:#fff;transition:width .25s linear}

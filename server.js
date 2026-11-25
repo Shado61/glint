@@ -93,7 +93,8 @@ function chatFor(c,uid){
   const gr=GROOMS.get(c.id);if(gr)o.gcall=groomOut(gr);
   return o;
 }
-const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m;
+/* a view-once message never carries its photo or video to anyone: each person gets it once, through /api/once/open */
+const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m.once?(({img,media,...rest})=>Object.assign(rest,{once:{k:m.once.k,dur:m.once.dur||0,seen:m.once.seen||[],gone:!!m.once.gone}}))(m):m;
 const member=(c,uid)=>c&&c.members.includes(uid);
 
 /* ---------- fire streaks: both people write in a private chat every day; from 3 days in a row a fire appears ---------- */
@@ -191,6 +192,11 @@ function migrate(){
 
 /* ---------- videos, video circles and voice messages ---------- */
 const MEDIA_DIR=path.join(__dirname,'data','media');
+/* removes a file for good (used when a view-once message has been seen by everyone) */
+async function mediaDelete(id){
+  const m=DB.media[id];if(!m)return;delete DB.media[id];mark('x:'+id);
+  try{if(pool)await pool.query('DELETE FROM glint_media WHERE k=$1',[id]);else fs.unlinkSync(path.join(MEDIA_DIR,id))}catch(e){}
+}
 const MEDIA_MAX={voice:6e6,round:15e6,video:45e6},MEDIA_TYPES=/^(video\/(mp4|webm|quicktime|x-matroska|3gpp)|audio\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav))(;.*)?$/;
 const USER_QUOTA=800e6;
 async function mediaSave(id,buf){
@@ -219,13 +225,15 @@ async function upload(req,res,u,url){
   send(res,200,{url:'/media/'+id,id});
 }
 /* sends a file in pieces: phones ask for parts of a video (Range), that is how they seek and start fast */
-async function serveMedia(req,res,id){
+async function serveMedia(req,res,id,once){
   const m=DB.media[id];if(!m||!userOf(req))return send(res,404,{error:'нет'});
+  /* a view-once file is reachable only through its private link */
+  if(!once&&m.once)return send(res,404,{error:'нет'});
   const total=m.size;let start=0,end=total-1,code=200;
   const r=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range||'');
   if(r){if(r[1]==='')start=Math.max(0,total-(+r[2]));else{start=+r[1];if(r[2])end=Math.min(total-1,+r[2])}
     if(start>end||start>=total){res.writeHead(416,{'Content-Range':`bytes */${total}`});return res.end()}code=206}
-  const h=Object.assign({'Content-Type':m.t,'Accept-Ranges':'bytes','Cache-Control':'private, max-age=31536000, immutable','Content-Length':end-start+1},SEC);
+  const h=Object.assign({'Content-Type':m.t,'Accept-Ranges':'bytes','Cache-Control':once?'no-store, private':'private, max-age=31536000, immutable','Content-Length':end-start+1},SEC);
   if(code===206)h['Content-Range']=`bytes ${start}-${end}/${total}`;
   if(req.method==='HEAD'){res.writeHead(code,h);return res.end()}
   res.writeHead(code,h);
@@ -275,6 +283,34 @@ API['POST /api/logout']=(req,res,b)=>{
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
+const ONCE=new Map(); /* token -> {uid,img|media,exp} : a short-lived private link for one viewing */
+API['POST /api/once/open']=(req,res,b,u)=>{
+  need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');
+  const m=(DB.msgs[c.id]||[]).find(x=>x.id===String(b.id||''));if(!m||!m.once||m.del)throw E(404,'Сообщение не найдено');
+  if(m.from===u.id)throw E(403,'Своё одноразовое сообщение посмотреть нельзя');
+  if(m.once.gone||(m.once.seen||[]).includes(u.id))throw E(410,'Уже просмотрено');
+  m.once.seen=(m.once.seen||[]).concat(u.id);mark('m:'+c.id);
+  const t=rid(24);ONCE.set(t,{uid:u.id,img:m.img||null,media:m.media?m.media.url.slice(7):null,exp:now()+15*60e3});
+  for(const [k,v] of ONCE)if(v.exp<now())ONCE.delete(k);
+  /* everyone has seen it: the file is deleted a little later */
+  if(c.members.every(x=>x===m.from||m.once.seen.includes(x)))setTimeout(()=>onceGone(c,m),16*60e3);
+  toChat(c,{t:'upd',chat:c.id,msg:msgOut(m)});
+  return {url:'/once/'+t,k:m.once.k,dur:m.once.dur||0,w:m.media&&m.media.w,h:m.media&&m.media.h};
+};
+function onceGone(c,m){
+  if(!m.once||m.once.gone)return;m.once.gone=true;
+  if(m.img&&!Object.values(DB.msgs).some(l=>l.some(x=>x!==m&&x.img===m.img))){const h=m.img.replace(/^\/img\//,'');delete DB.imgs[h];IMGBUF.delete(h);mark('i:'+h)}
+  if(m.media){const id=m.media.url.slice(7);mediaDelete(id)}
+  delete m.img;delete m.media;mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(m)});
+}
+function serveOnce(req,res,t){
+  const o=ONCE.get(t),u=userOf(req);
+  if(!o||o.exp<now()||!u||u.id!==o.uid)return send(res,404,{error:'Ссылка устарела'});
+  if(o.img){const im=imgBuf(o.img.replace(/^\/img\//,''));if(!im)return send(res,404,{error:'нет'});
+    res.writeHead(200,Object.assign({'Content-Type':im.t,'Content-Length':im.b.length,'Cache-Control':'no-store, private','Content-Disposition':'inline'},SEC));return res.end(im.b)}
+  if(o.media)return serveMedia(req,res,o.media,true);
+  send(res,404,{error:'нет'});
+}
 API['POST /api/me/bubble']=(req,res,b,u)=>{
   need(u);const st=String(b.s||''),fr=String(b.f||'');
   if(!BUBBLE_STYLES.includes(st)||!BUBBLE_FRAMES.includes(fr))throw E(400,'Нет такого стиля');
@@ -762,6 +798,7 @@ function pushTo(uid,payload,opts){
 }
 const pushTitle=(c,uid)=>c.type==='dm'?null:c.type==='group'?(c.name||'Группа'):((DB.servers[c.server]||{}).name||'Сервер')+' · #'+(c.name||'канал');
 function pushPreview(m){
+  if(m.once)return '🔥 Одноразовое '+({photo:'фото',video:'видео',voice:'голосовое',round:'видеосообщение'}[m.once.k]||'сообщение');
   if(m.text)return m.text.slice(0,160);
   if(m.sticker)return '🎨 Стикер';if(m.img)return '📷 Фото';
   if(m.media)return m.media.k==='voice'?'🎤 Голосовое сообщение':m.media.k==='round'?'⭕ Видеосообщение':'🎬 Видео';
@@ -898,6 +935,9 @@ function handle(ws,u,m){
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:stk?'':text};
       if(stk){msg.sticker=stk.img;msg.pack=pk.id}else if(img)msg.img=putImg(img);
       if(media&&!stk){msg.media=media;if(media.k!=='video')msg.text=''}
+      /* view once: photo, video, voice or circle — each person can open it one time */
+      if(m.once&&!stk&&(msg.img||msg.media)&&c.type!=='self')msg.once={k:msg.img?'photo':msg.media.k,dur:msg.media?msg.media.dur:0,seen:[]};
+      if(msg.once&&msg.media){const md=DB.media[msg.media.url.slice(7)];if(md){md.once=true;mark('x:'+msg.media.url.slice(7))}}
       if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':r.sticker?'Стикер':r.media?{voice:'🎤 Голосовое',round:'⭕ Видеосообщение',video:'🎬 Видео'}[r.media.k]:'')).slice(0,120)}}
       sendMsgTo(c,u,msg);ws.send(JSON.stringify({t:'ack',cid:m.cid,id:msg.id}));
       return;
@@ -907,6 +947,7 @@ function handle(ws,u,m){
       if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
       const to=DB.chats[String(m.to||'')];if(!member(to,u.id))throw E(404,'Чат не найден');
       const src=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));if(!src||src.del||src.sys||src.call)throw E(404,'Сообщение не найдено');
+      if(src.once)throw E(403,'Одноразовое сообщение нельзя переслать');
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:src.text||''};
       if(src.img)msg.img=src.img;if(src.sticker){msg.sticker=src.sticker;if(src.pack)msg.pack=src.pack}if(src.media)msg.media=src.media;
       if(src.from!==u.id||src.fwd)msg.fwd=src.fwd||{from:src.from,name:(DB.users[src.from]||{}).name||''};
@@ -914,7 +955,7 @@ function handle(ws,u,m){
     }
     case 'star':{
       if(!member(c,u.id))return;const k=c.id+':'+String(m.id||'');
-      if(!(DB.msgs[c.id]||[]).some(x=>x.id===String(m.id)))return;
+      if(!(DB.msgs[c.id]||[]).some(x=>x.id===String(m.id)&&!x.once))return;
       u.stars=u.stars||[];const i=u.stars.indexOf(k);
       if(i>=0)u.stars.splice(i,1);else{u.stars.push(k);if(u.stars.length>1000)u.stars.shift()}
       mark('u:'+u.id);sendTo(u.id,{t:'stars',stars:u.stars});return;
@@ -1040,6 +1081,7 @@ const server=http.createServer(async(req,res)=>{
     }
     if(p==='/healthz')return send(res,200,{ok:true});
     if(p.startsWith('/media/')&&/^[0-9a-f]{24}$/.test(p.slice(7)))return serveMedia(req,res,p.slice(7));
+    if(p.startsWith('/once/')&&/^[\w-]{20,40}$/.test(p.slice(6)))return serveOnce(req,res,p.slice(6));
     if(p.startsWith('/img/')){ /* pictures: only for signed-in people; a link never changes, so the phone keeps it */
       const h=p.slice(5);if(!/^[0-9a-f]{24}$/.test(h)||!userOf(req))return send(res,404,{error:'нет'});
       const im=imgBuf(h);if(!im)return send(res,404,{error:'картинка удалена'});
