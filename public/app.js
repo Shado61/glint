@@ -199,7 +199,7 @@ function renderShell(){
 let sideQ=0;
 function renderSide(){if(sideQ)return;sideQ=requestAnimationFrame(()=>{sideQ=0;renderSideNow();renderRail()})}
 function renderSideNow(){
-  const el=$('#side');if(!el)return;
+  const el=$('#side');if(!el)return;queueSync();
   el.classList.toggle('has-voice',!!VC);
   if(S.view!=='home'&&S.servers[S.view]){el.innerHTML=serverSideHTML(S.servers[S.view])+voicePanelHTML();return}
   S.view='home';
@@ -283,7 +283,7 @@ let qT;async function searchUsers(){
 
 /* =================================================================== CHAT */
 function renderMain(){
-  const el=$('#main');if(!el)return;
+  const el=$('#main');if(!el)return;queueSync();
   const c=S.chats[S.cur];
   $('#app').classList.toggle('open',!!c);
   if(!c){el.innerHTML=`<div class="nochat">${avatar(S.me,'l',false)}<b style="font-size:20px;display:block;margin-bottom:6px">Привет, ${esc(S.me.name)}!</b>Выбери чат слева или найди друга по логину.<br>Твой логин: <b>@${esc(S.me.username)}</b></div>`;return}
@@ -907,7 +907,7 @@ function attachRemote(){
   if(v&&v.srcObject!==CALL.remote){v.srcObject=CALL.remote;v.play().catch(()=>{})}
 }
 function renderCall(){
-  if(!CALL)return;
+  if(!CALL)return;queueSync();
   let el=$('#callEl');
   if(CALL.min){if(el)el.style.display='none';renderMini();return}
   const mc=$('#miniCall');if(mc)mc.remove();
@@ -1182,15 +1182,19 @@ function svTick(){
 function svPause(on){if(!SV||SV.paused===on)return;if(on){SV.done+=performance.now()-SV.start;SV.paused=true}else{SV.start=performance.now();SV.paused=false}}
 function svNext(){if(!SV)return;cancelAnimationFrame(SV.raf);if(SV.si<svList().length-1){SV.si++;svShow()}else if(SV.ui<SV.order.length-1){SV.ui++;SV.si=0;const l=svList();const f=l.findIndex(x=>!x.seen);SV.si=f<0?0:f;svShow()}else svClose()}
 function svPrev(){if(!SV)return;cancelAnimationFrame(SV.raf);if(SV.si>0){SV.si--;svShow()}else if(SV.ui>0){SV.ui--;SV.si=0;svShow()}else{SV.si=0;svShow()}}
+function svNextUser(){if(!SV)return;cancelAnimationFrame(SV.raf);if(SV.ui<SV.order.length-1){SV.ui++;const f=svList().findIndex(x=>!x.seen);SV.si=f<0?0:f;svShow()}else svClose()}
+function svPrevUser(){if(!SV)return;cancelAnimationFrame(SV.raf);if(SV.ui>0){SV.ui--;SV.si=0;svShow()}else{SV.si=0;svShow()}}
 function svClose(){if(!SV)return;cancelAnimationFrame(SV.raf);SV.el.remove();SV=null;renderSide()}
 function agoText(ts){const m=Math.round((Date.now()-ts)/60e3);return m<1?'только что':m<60?m+' мин':Math.floor(m/60)+' ч'}
 function svBind(el){
   let downT=0,sy=0,held=false,ht;
-  el.addEventListener('pointerdown',e=>{if(e.target.closest('input,form,button,.sv-bottom'))return;downT=Date.now();sy=e.clientY;held=false;ht=setTimeout(()=>{held=true;svPause(true)},220)});
+  el.addEventListener('pointerdown',e=>{if(e.target.closest('input,form,button,.sv-bottom'))return;downT=Date.now();sy=e.clientY;SV.sx0=e.clientX;held=false;ht=setTimeout(()=>{held=true;svPause(true)},220)});
   el.addEventListener('pointerup',e=>{
     clearTimeout(ht);if(!downT)return;const dy=e.clientY-sy;downT=0;
     if(held){svPause(false);return}
-    if(dy>90){svClose();return}
+    const dx=e.clientX-SV.sx0;
+    if(dy>90&&Math.abs(dy)>Math.abs(dx)){svClose();return}
+    if(Math.abs(dx)>70&&Math.abs(dx)>Math.abs(dy)){dx<0?svNextUser():svPrevUser();return}
     const z=e.target.closest('[data-sv]');if(z&&z.dataset.sv==='prev')svPrev();else if(z&&z.dataset.sv==='next')svNext();
   });
   el.addEventListener('pointercancel',()=>{clearTimeout(ht);if(held)svPause(false);downT=0});
@@ -1408,7 +1412,7 @@ async function ownPack(){
   const r=await api('/api/packs',{name:'Мои стикеры'});S.packs=r.packs;return r.pack.id;
 }
 function renderStickers(){
-  const el=$('#stkp');if(!el)return;
+  const el=$('#stkp');if(!el)return;queueSync();
   document.querySelectorAll('.stkbtn').forEach(b=>b.classList.toggle('on',S.stk));
   if(!S.stk){el.innerHTML='';return}
   const p=curPack();
@@ -1496,24 +1500,124 @@ function chatWallSheet(){
     <div class="btns"><button class="gbtn" data-act="closemenu">Готово</button></div>`);
 }
 
-/* swipes on phones: from the left edge — back; a message to the left — reply */
+/* =================================================================== GESTURES AND "BACK"
+   The phone's back button / back gesture closes whatever is on top, one step at a time:
+   photo editor → camera → story → window or menu → stickers → call (goes small) → chat → server → chat list.
+   Only from the chat list does "back" leave the app. */
+function topLayer(){
+  if(SE)return 'editor';if(SC)return 'camera';if(SV)return 'story';
+  if($('#layer')&&$('#layer').innerHTML)return 'layer';
+  if(CALL&&!CALL.min&&CALL.state!=='ringing'&&$('#callEl'))return 'call';
+  if(S.cur&&S.stk)return 'stickers';
+  if(S.cur&&mobile())return 'chat';
+  if(mobile()&&S.view!=='home'&&S.servers[S.view])return 'server';
+  return null;
+}
+function goBack(){
+  switch(topLayer()){
+    case 'editor':SE.el.remove();SE=null;if(SC&&SC.fx&&SC.fx.alive)SC.fx.loop();return true;
+    case 'camera':scClose();return true;
+    case 'story':svClose();return true;
+    case 'layer':if(SV&&SV.paused)svPause(false);closeLayer();return true;
+    case 'call':CALL.min=true;renderCall();return true;
+    case 'stickers':S.stk=false;renderStickers();return true;
+    case 'chat':closeChat();return true;
+    case 'server':S.view='home';renderSide();return true;
+  }
+  return false;
+}
+/* one spare history entry is kept while something is open, so the system "back" comes to us instead of leaving the site */
+let backSkip=false;
+function queueSync(){clearTimeout(syncBack.t);syncBack.t=setTimeout(syncBack,80)}
+function syncBack(){
+  if(backSkip)return; /* a step back is already on its way */
+  const deep=!!topLayer(),guard=history.state&&history.state.mn;
+  if(deep&&!guard)history.pushState({mn:1},'',location.href);
+  else if(!deep&&guard){backSkip=true;history.back()}
+}
+addEventListener('popstate',()=>{
+  if(backSkip){backSkip=false;queueSync();return}
+  if(goBack()&&navigator.vibrate)navigator.vibrate(5);
+  setTimeout(syncBack,0);
+});
+/* after every tap, and when things open from the server (an incoming story, a window), keep the history entry in step */
+document.addEventListener('click',()=>setTimeout(syncBack,60));
+new MutationObserver(queueSync).observe(document.body,{childList:true});
+new MutationObserver(queueSync).observe($('#layer'),{childList:true});
+
+/* swipes */
 (function(){
-  let sx=0,sy=0,el=null,edge=false,bub=null,dx=0;
+  let sx=0,sy=0,st=0,mode=null,el=null,dx=0,dy=0,bub=null,lastTap={id:null,t:0};
+  const W=()=>innerWidth;
+  const ignore=t=>t.closest('input,textarea,[type=range],.ed-wrap,.sed-canvas,.fx-row,.stk-tabs,.stories,.local,.sv,.scam,.sed');
   document.addEventListener('touchstart',e=>{
-    if(!S.cur||e.touches.length>1)return;const t=e.touches[0];sx=t.clientX;sy=t.clientY;dx=0;
-    edge=sx<28&&mobile();bub=e.target.closest('.m:not(.sys)');if(bub&&!bub.querySelector('[data-act="msg"]'))bub=null;
+    if(e.touches.length>1){mode=null;return}
+    const t=e.touches[0],tg=e.target;sx=t.clientX;sy=t.clientY;st=Date.now();dx=dy=0;mode=null;el=null;bub=null;
+    if(!mobile()&&!touch)return;
+    const lay=$('#layer');
+    /* bottom windows and full photos: pull down to close */
+    const sh=tg.closest('.sheet,.lightbox');
+    if(sh&&!ignore(tg)&&(sh.classList.contains('lightbox')||sh.scrollTop<=0)){mode='sheet';el=sh;return}
+    if(lay&&lay.innerHTML)return;
+    /* call screen: pull down to make it small */
+    if(tg.closest('#callEl')&&!tg.closest('.bar,.local,.fx-panel')&&CALL&&CALL.state==='active'){mode='call';el=$('#callEl');return}
+    if(tg.closest('#callEl,.sv,.scam,.sed'))return;
+    /* from the left edge: back, the screen follows the finger */
+    if(sx<32&&mobile()&&(S.cur||(S.view!=='home'&&S.servers[S.view]))){mode='edge';el=S.cur?$('#main'):$('#side');return}
+    if(S.cur){bub=tg.closest('.m');if(bub&&!bub.querySelector('[data-act="msg"]'))bub=null;if(bub)mode='bubble';return}
+    /* chat list: swipe sideways to switch Chats / Contacts / Calls */
+    if(tg.closest('#side .list')&&S.view==='home'&&!ignore(tg))mode='tabs';
   },{passive:true});
   document.addEventListener('touchmove',e=>{
-    if(!S.cur)return;const t=e.touches[0];dx=t.clientX-sx;const dy=t.clientY-sy;
-    if(Math.abs(dy)>Math.abs(dx)){if(bub){bub.style.transform='';bub=null}return}
-    if(bub&&dx<0){bub.style.transform=`translateX(${Math.max(-70,dx)}px)`;clearTimeout(lpT)}
+    if(!mode)return;const t=e.touches[0];dx=t.clientX-sx;dy=t.clientY-sy;
+    if(mode==='edge'){
+      if(Math.abs(dy)>Math.abs(dx)&&Math.abs(dx)<12){mode=null;return}
+      if(S.cur)$('#app').classList.add('peek');
+      el.style.transition='none';el.style.transform=`translateX(${Math.max(0,dx)}px)`;return;
+    }
+    if(mode==='sheet'||mode==='call'){
+      if(dy<0||Math.abs(dx)>Math.abs(dy)*1.2){if(Math.abs(dx)>20)mode=null;return}
+      el.style.transition='none';
+      el.style.transform=el.classList.contains('sheet')&&mobile()?`translate(-50%,${dy}px)`:el.classList.contains('sheet')?`translate(-50%,calc(-50% + ${dy}px))`:`translateY(${dy}px)`;
+      if(mode==='call'||el.classList.contains('lightbox'))el.style.opacity=String(Math.max(.4,1-dy/600));
+      return;
+    }
+    if(mode==='bubble'){
+      if(Math.abs(dy)>Math.abs(dx)){if(bub)bub.style.transform='';mode=null;return}
+      if(dx<0){bub.style.transform=`translateX(${Math.max(-70,dx)}px)`;clearTimeout(lpT)}
+    }
   },{passive:true});
-  document.addEventListener('touchend',()=>{
-    if(edge&&dx>90){closeChat()}
-    if(bub){const id=bub.dataset.id;bub.style.transition='transform .2s';bub.style.transform='';setTimeout(()=>{if(bub)bub.style.transition=''},220);
-      if(dx<-60){const m=(S.msgs[S.cur]||[]).find(x=>x.id===id);if(m&&!m.del&&!m.pending&&!m.call){S.edit=null;S.reply={m};renderCtx();navigator.vibrate&&navigator.vibrate(10)}}}
-    edge=false;bub=null;
+  const settle=(node,ok,done)=>{node.style.transition='transform .22s ease, opacity .22s';
+    if(ok){done()}else{node.style.transform='';node.style.opacity='';setTimeout(()=>{node.style.transition=''},240)}};
+  document.addEventListener('touchend',e=>{
+    const v=Math.abs(dx)/Math.max(1,Date.now()-st),vy=dy/Math.max(1,Date.now()-st);
+    if(mode==='edge'&&el){
+      const node=el,go=dx>W()*.33||(dx>40&&v>.5);
+      settle(node,go,()=>{node.style.transform=`translateX(${W()}px)`;setTimeout(()=>{node.style.transition='';node.style.transform='';$('#app').classList.remove('peek');goBack();syncBack()},220)});
+      if(!go)setTimeout(()=>$('#app').classList.remove('peek'),240);
+      if(go&&navigator.vibrate)navigator.vibrate(8);
+    }
+    else if(mode==='sheet'&&el){const node=el,go=dy>110||(dy>30&&vy>.6);settle(node,go,()=>{node.style.transform+=' translateY(100vh)';setTimeout(()=>{closeLayer();if(SV&&SV.paused)svPause(false);syncBack()},180)})}
+    else if(mode==='call'&&el){const node=el,go=dy>120||(dy>40&&vy>.6);settle(node,go,()=>{setTimeout(()=>{node.style.transform='';node.style.opacity='';node.style.transition='';if(CALL){CALL.min=true;renderCall()}syncBack()},10)})}
+    else if(mode==='bubble'&&bub){
+      const id=bub.dataset.id;bub.style.transition='transform .2s';bub.style.transform='';const b=bub;setTimeout(()=>{b.style.transition=''},220);
+      if(dx<-60){const m=(S.msgs[S.cur]||[]).find(x=>x.id===id);if(m&&!m.del&&!m.pending&&!m.call){S.edit=null;S.reply={m};renderCtx();navigator.vibrate&&navigator.vibrate(10)}}
+      /* double tap on a message: ❤️ */
+      else if(Math.abs(dx)<10&&Math.abs(dy)<10&&Date.now()-st<250&&!e.target.closest('a,img.pic,[data-act="jump"],.reacts')){
+        const now=Date.now();
+        if(lastTap.id===id&&now-lastTap.t<320){lastTap={id:null,t:0};clearTimeout(lpT);const m=(S.msgs[S.cur]||[]).find(x=>x.id===id);
+          if(m&&!m.del&&!m.pending&&!m.call&&!m.sys){wsSend({t:'react',chat:S.cur,id,emoji:'❤️'});navigator.vibrate&&navigator.vibrate(10);
+            const h=document.createElement('span');h.className='dbl-heart';h.textContent='❤️';b.appendChild(h);setTimeout(()=>h.remove(),700)}}
+        else lastTap={id,t:now};
+      }
+    }
+    else if(mode==='tabs'&&Math.abs(dx)>80&&Math.abs(dx)>Math.abs(dy)*2){
+      const tabs=['chats','contacts','calls'],i=tabs.indexOf(S.tab),j=i+(dx<0?1:-1);
+      if(i>=0&&j>=0&&j<tabs.length){S.tab=tabs[j];S.q='';if(S.tab==='calls')S.calls=null;renderSide();navigator.vibrate&&navigator.vibrate(5)}
+    }
+    mode=null;el=null;bub=null;
   },{passive:true});
+  document.addEventListener('touchcancel',()=>{if(el){el.style.transform='';el.style.opacity='';el.style.transition=''}if(bub)bub.style.transform='';$('#app')&&$('#app').classList.remove('peek');mode=null;el=null;bub=null},{passive:true});
 })();
 
 /* =================================================================== EVENTS */
@@ -1653,7 +1757,7 @@ document.addEventListener('input',e=>{
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.matches('.sheet input:not([type=checkbox])')&&!e.isComposing){const b=e.target.closest('.sheet').querySelector('.gbtn.primary');if(b){e.preventDefault();b.click()}return}
   if(e.target.id==='txt'&&e.key==='Enter'&&!e.shiftKey&&!touch&&!e.isComposing){e.preventDefault();sendMsg()}
-  if(e.key==='Escape'){if($('#layer').innerHTML)closeLayer();else if(S.reply||S.edit){S.reply=S.edit=null;renderCtx()}}
+  if(e.key==='Escape'&&!SV){if($('#layer').innerHTML)closeLayer();else if(S.reply||S.edit){S.reply=S.edit=null;renderCtx()}else if(SE||SC)goBack()}
   if(e.target.id==='txt'&&e.key==='ArrowUp'&&!e.target.value){const l=S.msgs[S.cur]||[];const m=[...l].reverse().find(x=>x.from===S.me.id&&x.text&&!x.del&&!x.pending);if(m){e.preventDefault();S.edit={m};e.target.value=m.text;renderCtx()}}
 });
 document.addEventListener('change',async e=>{
@@ -1671,7 +1775,6 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
 ['touchend','touchmove','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"]'))e.stopImmediatePropagation()},true);
-addEventListener('popstate',()=>{if(mobile()&&S.cur&&!location.hash)closeChat()});
 addEventListener('hashchange',()=>{const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
   const pm=/^#pack\/(p[\w-]{4,20})$/.exec(location.hash);if(pm&&S.me){history.replaceState(null,'',location.pathname);packPreview(pm[1])}});
 addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur)});

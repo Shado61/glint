@@ -540,3 +540,21 @@ input[type=range]{width:100%;accent-color:var(--acc);height:28px}
 .stk-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:14px;color:var(--fg2)}
 .stk-empty b{color:var(--fg)}
 .stk-grid.prev{max-height:50vh;overflow-y:auto;margin:6px 0}
+
+/* gestures: while the chat is pulled from the left edge, the chat list shows underneath */
+@media (max-width:760px){
+  .app.open.peek{grid-template-columns:64px 1fr}
+  .app.open.peek .side,.app.open.peek .rail{display:flex}
+  .app.open.peek .main{display:flex;position:absolute;top:0;left:0;right:0;bottom:0;z-index:3;box-shadow:-12px 0 32px rgba(0,0,0,.45)}
+}
+@media (max-width:360px){.app.open.peek{grid-template-columns:56px 1fr}}
+.sheet::after{content:"";position:absolute;top:7px;left:50%;width:38px;height:5px;margin-left:-19px;border-radius:3px;background:rgba(160,185,215,.35);display:none}
+@media (max-width:760px){.sheet::after{display:block}}
+.bub{position:relative}
+.dbl-heart{position:absolute;left:50%;top:50%;font-size:34px;pointer-events:none;transform:translate(-50%,-50%) scale(.4);animation:dblh .7s ease-out forwards}
+@keyframes dblh{40%{transform:translate(-50%,-60%) scale(1.25);opacity:1}100%{transform:translate(-50%,-110%) scale(1);opacity:0}}
+/* sideways swipes are ours (tabs, back from a chat), not the browser's "previous page" */
+html,body{overscroll-behavior:none;overscroll-behavior-x:none}
+.list,.msgs,.sheet{overscroll-behavior-x:none}
+#side .list{touch-action:pan-y}
+@media (max-width:760px){.app.open.peek .main{background:#142030}:root.light .app.open.peek .main{background:#e6edf5}}
