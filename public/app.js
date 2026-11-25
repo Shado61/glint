@@ -687,7 +687,7 @@ async function startCall(chatId,kind){
   const c=S.chats[chatId];if(!c||c.type!=='dm')return;
   closeLayer();
   const peer=peerOf(c);
-  CALL={id:null,chat:chatId,peer,kind,dir:'out',state:'calling',mic:true,cam:kind==='video',screen:false,remote:new MediaStream(),pending:[],rs:{cam:false,screen:false,mic:true},q:'good',mask:'none',filter:'none'};
+  CALL={id:null,chat:chatId,peer,kind,dir:'out',state:'calling',mic:true,cam:kind==='video',screen:false,remote:new MediaStream(),pending:[],rs:{cam:false,screen:false,mic:true},q:'good',fxs:fxState()};
   renderCall();
   try{CALL.local=await getMedia(kind==='video');CALL.cam=CALL.local.getVideoTracks().length>0;renderCall()}
   catch(e){toast(e.message);cleanupCall();return}
@@ -781,7 +781,7 @@ async function onCallMsg(m){
   if(m.t==='call-incoming'){
     if(CALL||VC){wsSend({t:'call-reject',callId:m.callId});return}
     S.users[m.from.id]=Object.assign(S.users[m.from.id]||{},m.from);
-    CALL={id:m.callId,chat:m.chat,peer:S.users[m.from.id],kind:m.kind,dir:'in',state:'ringing',mic:true,cam:false,screen:false,remote:new MediaStream(),pending:[],rs:{cam:m.kind==='video',screen:false,mic:true},q:'good',mask:'none',filter:'none'};
+    CALL={id:m.callId,chat:m.chat,peer:S.users[m.from.id],kind:m.kind,dir:'in',state:'ringing',mic:true,cam:false,screen:false,remote:new MediaStream(),pending:[],rs:{cam:m.kind==='video',screen:false,mic:true},q:'good',fxs:fxState()};
     renderCall();ring('in');
     notify(nm(S.users[m.from.id]),m.kind==='video'?'Входящий видеозвонок':'Входящий звонок','call');
     return;
@@ -850,37 +850,79 @@ async function flipCam(){
   catch(e){toast('Вторая камера недоступна')}
 }
 /* masks in calls: the camera goes through the effect canvas only while a mask or filter is on */
+/* ---------- camera effects (masks, filters, backgrounds) ----------
+   The engine (fx.js + the face tracker) is loaded only the first time someone opens effects. */
+const fxState=()=>({mask:'none',filter:'none',bg:'none',beauty:false,tab:'m'});
+const fxOn=st=>!!st&&(st.mask!=='none'||st.filter!=='none'||st.bg!=='none'||st.beauty);
+function loadScript(src){return new Promise((ok,bad)=>{const s=document.createElement('script');s.src=src;s.onload=ok;s.onerror=()=>bad(new Error('Не удалось загрузить маски. Проверь интернет.'));document.head.appendChild(s)})}
+let fxLib=null;
 function loadFxLib(){
   if(window.MFX)return Promise.resolve(window.MFX);
-  return new Promise((ok,bad)=>{const s=document.createElement('script');s.src='/fx.js?v='+(MY_V||Date.now());s.onload=()=>window.MFX?ok(window.MFX):bad(new Error('fx'));s.onerror=()=>bad(new Error('Не удалось загрузить маски. Проверь интернет.'));document.head.appendChild(s)});
+  return fxLib||(fxLib=(async()=>{
+    if(!window.FACEGEO)await loadScript('/vendor/mp/facegeo.js');
+    await loadScript('/fx.js?v='+(MY_V||Date.now()));
+    if(!window.MFX)throw new Error('Не удалось загрузить маски');
+    window.MFX.onStatus(()=>document.querySelectorAll('.fx-note').forEach(e=>e.outerHTML=fxNoteHTML()));
+    return window.MFX;
+  })().catch(e=>{fxLib=null;throw e}));
+}
+/* the effects strip, shared by calls, the story camera and the editor; a: the click attribute of that screen */
+let fxNoteFor=null;
+function fxNoteHTML(){
+  const M=window.MFX,st=fxNoteFor&&fxNoteFor.st,fx=fxNoteFor&&fxNoteFor.fx&&fxNoteFor.fx();if(!M||!st)return '<div class="fx-note"></div>';
+  const cur=M.MASKS.find(m=>m.id===st.mask),need=st.mask!=='none'||st.beauty||st.bg!=='none';
+  let t='';
+  if(need&&M.status()==='loading')t='<i class="spin"></i>Загружаем маски… это нужно только один раз';
+  else if(need&&M.status()==='error')t='Маски не загрузились. Проверь интернет и попробуй ещё раз';
+  else if(fx&&!fx.ok)t='Этот телефон не поддерживает эффекты';
+  else if((st.mask!=='none'||st.beauty)&&fx&&!fx.face&&M.status()==='ready')t='Покажи лицо в камеру 🙂';
+  else if(cur&&cur.hint&&st.tab==='m')t=esc(cur.hint)+' 😉';
+  return `<div class="fx-note ${t?'on':''}">${t}</div>`;
+}
+setInterval(()=>{const n=document.querySelector('.fx-note');if(n&&fxNoteFor)n.outerHTML=fxNoteHTML()},700);
+function fxStripHTML(M,st,a){
+  const it=(on,k,v,icon,n)=>`<button class="fx-it ${on?'on':''}" ${a}="fx" data-${k}="${v}">${icon}<small>${esc(n)}</small></button>`;
+  let row;
+  if(st.tab==='f')row=it(st.beauty,'beauty','1','<span class="fx-em">✨</span>','Бьюти')+M.FILTERS.map(f=>it(st.filter===f.id,'f',f.id,`<span class="fx-sw fl-${f.id}"></span>`,f.n)).join('');
+  else if(st.tab==='b')row=M.BGS.map(b=>it(st.bg===b.id,'b',b.id,`<span class="fx-em">${b.e}</span>`,b.n)).join('')+it(st.bg==='photo','b','photo',`<span class="fx-em">${ic('image')}</span>`,'Своё фото');
+  else row=M.MASKS.map(m=>it(st.mask===m.id,'m',m.id,`<span class="fx-em">${m.e}</span>`,m.n)).join('');
+  return `${fxNoteHTML()}<div class="seg fx-tabs">${[['m','Маски'],['f','Фильтры'],['b','Фон']].map(([k,n])=>`<button class="${(st.tab||'m')===k?'on':''}" ${a}="tab" data-v="${k}">${n}</button>`).join('')}</div><div class="fx-row" data-tab="${st.tab}">${row}</div>`;
+}
+/* redraw a strip but keep its scroll position */
+function fxRedraw(el,html){const r=el.querySelector('.fx-row'),x=r&&r.dataset.tab,l=r?r.scrollLeft:0;el.innerHTML=html;const n=el.querySelector('.fx-row');if(n&&n.dataset.tab===x)n.scrollLeft=l}
+/* a tap in the strip; returns a promise of the gallery photo when "Своё фото" was picked */
+function fxTap(st,b){
+  const d=b.dataset;
+  if(d.m)st.mask=d.m;if(d.f)st.filter=d.f;if(d.beauty)st.beauty=!st.beauty;
+  if(d.b==='photo')return new Promise(ok=>pickImage(async f=>{try{const img=await loadImg(f);st.bg='photo';ok(img)}catch(e){toast(e.message);ok(null)}}));
+  if(d.b)st.bg=d.b;
+  return null;
 }
 async function rebuildFx(){
   if(!CALL)return;
   if(CALL.fx){CALL.fx.stop();CALL.fx=null}
   const t=camTrack();
-  if(!t||(CALL.mask==='none'&&CALL.filter==='none'))return;
+  if(!t||!fxOn(CALL.fxs))return;
   const M=await loadFxLib();if(!CALL)return;
   const fx=new M.FX(t,{mirror:false});
-  if(!fx.out){fx.stop();toast('Этот браузер не умеет маски в звонке');CALL.mask=CALL.filter='none';return}
-  fx.set(CALL.mask,CALL.filter);CALL.fx=fx;
+  if(!fx.out){fx.stop();toast('Этот браузер не умеет маски в звонке');CALL.fxs=fxState();return}
+  const st=CALL.fxs;fx.set(st.mask,st.filter,st.bg==='photo'?'none':st.bg,st.beauty);if(st.bg==='photo'&&CALL.bgImg)fx.setBgImage(CALL.bgImg);CALL.fx=fx;
 }
-async function setCallFx(mask,filter){
+async function setCallFx(b){
   if(!CALL)return;
-  if(mask!==undefined)CALL.mask=mask;if(filter!==undefined)CALL.filter=filter;
+  const st=CALL.fxs,photo=fxTap(st,b);if(photo){const img=await photo;if(!img||!CALL)return;CALL.bgImg=img}
   if(!CALL.cam){await toggleCam();if(!CALL||!CALL.cam)return}
-  if(CALL.fx&&CALL.fx.track===camTrack()&&(CALL.mask!=='none'||CALL.filter!=='none')){CALL.fx.set(CALL.mask,CALL.filter)}
+  if(CALL.fx&&CALL.fx.track===camTrack()&&fxOn(st)){CALL.fx.set(st.mask,st.filter,st.bg==='photo'?null:st.bg,st.beauty);if(st.bg==='photo'&&b.dataset.b==='photo')CALL.fx.setBgImage(CALL.bgImg)}
   else{try{await rebuildFx()}catch(e){toast(e.message)}}
   pushVideo();
 }
 async function callFxSheet(){
   let M;try{M=await loadFxLib()}catch(e){toast(e.message);return}
   if(!CALL)return;
+  fxNoteFor={st:CALL.fxs,fx:()=>CALL&&CALL.fx};
   const L=$('#layer');
-  const draw=()=>{if(!CALL){closeLayer();return}
-    L.innerHTML=`<div class="scrim clear" data-act="closemenu"></div><div class="fx-panel glass">
-    <div class="seg fx-tabs"><button class="${S.fxTab!=='f'?'on':''}" data-act="fxtab" data-v="m">Маски</button>${M.canFilter?`<button class="${S.fxTab==='f'?'on':''}" data-act="fxtab" data-v="f">Фильтры</button>`:''}</div>
-    <div class="fx-row">${S.fxTab==='f'?M.FILTERS.map(f=>`<button class="fx-it ${CALL.filter===f.id?'on':''}" data-act="cfx" data-f="${f.id}"><span class="fx-sw fl-${f.id}"></span><small>${esc(f.n)}</small></button>`).join('')
-      :M.MASKS.map(m=>`<button class="fx-it ${CALL.mask===m.id?'on':''}" data-act="cfx" data-m="${m.id}"><span class="fx-em">${m.e}</span><small>${esc(m.n)}</small></button>`).join('')}</div></div>`};
+  L.innerHTML=`<div class="scrim clear" data-act="closemenu"></div><div class="fx-panel glass" id="cfxp"></div>`;
+  const draw=()=>{const el=$('#cfxp');if(!CALL||!el){return}fxRedraw(el,fxStripHTML(M,CALL.fxs,'data-act="cfx" data-x'))};
   S.fxDraw=draw;draw();
 }
 const canShare=()=>!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!touch;
@@ -918,12 +960,12 @@ function renderCall(){
   const label={calling:CALL.id?'Вызов…':'Подключаемся…',ringing:CALL.kind==='video'?'Входящий видеозвонок':'Входящий звонок',connecting:'Соединение…',active:''}[st];
   el.classList.toggle('incoming',st==='ringing');
   const btn=(act,icon,cls,lb,title)=>`<button class="cbtn ${cls||''}" data-act="${act}" aria-label="${title||lb}" title="${title||lb}">${ic(icon)}${lb?`<span class="lb">${lb}</span>`:''}</button>`;
-  const fxOn=CALL.mask!=='none'||CALL.filter!=='none';
+  const fxIsOn=fxOn(CALL.fxs);
   const controls=st==='ringing'
     ?btn('c-reject','end','end','Отклонить')+btn('c-accept',CALL.kind==='video'?'video':'phone','acc','Принять')
     :btn('c-mic',CALL.mic?'mic':'micOff',CALL.mic?'':'off','',CALL.mic?'Выключить микрофон':'Включить микрофон')+
      btn('c-cam',CALL.cam?'video':'videoOff',CALL.cam?'':'off','',CALL.cam?'Выключить камеру':'Включить камеру')+
-     btn('c-fx','mask',fxOn?'on':'','','Маски и фильтры')+
+     btn('c-fx','mask',fxIsOn?'on':'','','Маски и фильтры')+
      (touch&&CALL.cam?btn('c-flip','flip','','','Сменить камеру'):'')+
      (canShare()?btn('c-screen','screen',CALL.screen?'on':'','',CALL.screen?'Остановить демонстрацию':'Демонстрация экрана'):'')+
      btn('c-min','min','','','Свернуть')+
@@ -1217,14 +1259,14 @@ let SC=null;
 async function storyCamera(){
   closeLayer();if(SC)return;
   const el=document.createElement('div');el.className='scam';el.id='scam';document.body.appendChild(el);
-  SC={el,facing:'user',mask:'none',filter:'none',tab:'m',fx:null,stream:null};
+  SC={el,facing:'user',st:fxState(),fx:null,stream:null};
   el.innerHTML=`<div class="scam-view" id="scview"><div class="scam-msg">Включаем камеру…</div></div>
     <div class="scam-top"><button class="sv-x" data-sc="close" aria-label="Закрыть">${ic('x')}</button><b>Новая история</b><span style="flex:1"></span></div>
     <div class="scam-bottom"><div id="scfx"></div>
       <div class="scam-ctrl"><button class="sc-side" data-sc="gallery" aria-label="Из галереи">${ic('image')}</button><button class="shutter" data-sc="shot" aria-label="Сфотографировать"></button><button class="sc-side" data-sc="flip" aria-label="Сменить камеру">${ic('flip')}</button></div></div>`;
   el.addEventListener('click',scClick);
   let M;try{M=await loadFxLib()}catch(e){toast(e.message)}
-  if(!SC)return;SC.M=M;scFxRow();
+  if(!SC)return;SC.M=M;fxNoteFor={st:SC.st,fx:()=>SC&&SC.fx};scFxRow();
   await scStart();
 }
 async function scStart(){
@@ -1238,24 +1280,20 @@ async function scStart(){
   if(!SC){SC&&0;return}
   const t=SC.stream.getVideoTracks()[0];
   if(SC.M){
-    SC.fx=new SC.M.FX(t,{mirror:SC.facing==='user',max:isLite()?960:1280,fps:isLite()?20:28});SC.fx.set(SC.mask,SC.filter);
+    SC.fx=new SC.M.FX(t,{mirror:SC.facing==='user',max:isLite()?960:1280,fps:isLite()?24:30});scApply();
     view.innerHTML='';SC.fx.cv.className='scam-canvas';view.appendChild(SC.fx.cv);
   }else{
     view.innerHTML='<video class="scam-canvas" autoplay playsinline muted></video>';const v=view.firstChild;v.srcObject=SC.stream;v.play().catch(()=>{});
   }
 }
-function scFxRow(){
-  const el=$('#scfx'),M=SC&&SC.M;if(!el||!M)return;
-  el.innerHTML=`<div class="seg fx-tabs"><button class="${SC.tab==='m'?'on':''}" data-sc="tab" data-v="m">Маски</button>${M.canFilter?`<button class="${SC.tab==='f'?'on':''}" data-sc="tab" data-v="f">Фильтры</button>`:''}</div>
-    <div class="fx-row">${SC.tab==='f'?M.FILTERS.map(f=>`<button class="fx-it ${SC.filter===f.id?'on':''}" data-sc="fx" data-f="${f.id}"><span class="fx-sw fl-${f.id}"></span><small>${esc(f.n)}</small></button>`).join('')
-      :M.MASKS.map(m=>`<button class="fx-it ${SC.mask===m.id?'on':''}" data-sc="fx" data-m="${m.id}"><span class="fx-em">${m.e}</span><small>${esc(m.n)}</small></button>`).join('')}</div>`;
-}
+function scFxRow(){const el=$('#scfx'),M=SC&&SC.M;if(el&&M)fxRedraw(el,fxStripHTML(M,SC.st,'data-sc'))}
+function scApply(){const st=SC.st;if(!SC.fx)return;SC.fx.set(st.mask,st.filter,st.bg==='photo'?null:st.bg,st.beauty);if(st.bg==='photo'&&SC.bgImg)SC.fx.setBgImage(SC.bgImg)}
 function scClose(){if(!SC)return;if(SC.fx)SC.fx.stop();if(SC.stream)SC.stream.getTracks().forEach(t=>t.stop());SC.el.remove();SC=null}
 async function scClick(e){
   const b=e.target.closest('[data-sc]');if(!b||!SC)return;const a=b.dataset.sc;
   if(a==='close')scClose();
-  else if(a==='tab'){SC.tab=b.dataset.v;scFxRow()}
-  else if(a==='fx'){if(b.dataset.m)SC.mask=b.dataset.m;if(b.dataset.f)SC.filter=b.dataset.f;if(SC.fx)SC.fx.set(SC.mask,SC.filter);scFxRow()}
+  else if(a==='tab'){SC.st.tab=b.dataset.v;scFxRow()}
+  else if(a==='fx'){const ph=fxTap(SC.st,b);if(ph){const img=await ph;if(!img||!SC)return;SC.bgImg=img}scApply();scFxRow()}
   else if(a==='flip'){SC.facing=SC.facing==='user'?'environment':'user';scStart()}
   else if(a==='shot'){
     let cv;
@@ -1269,9 +1307,9 @@ async function scClick(e){
 /* editor: the photo in a 9:16 frame, optional masks for gallery photos, a caption you can drag */
 let SE=null;
 function storyEditor(photo,fromGallery){
-  if(SC&&SC.fx)SC.fx.alive&&clearTimeout(SC.fx.timer); /* pause the camera picture while editing */
+  if(SC&&SC.fx)SC.fx.pause(true); /* the camera picture rests while editing */
   const el=document.createElement('div');el.className='sed';el.id='sed';document.body.appendChild(el);
-  SE={el,photo,base:photo,fromGallery,text:'',color:0,tx:.5,ty:.42,mask:'none',filter:'none',tab:'m'};
+  SE={el,photo,base:photo,fromGallery,text:'',color:0,tx:.5,ty:.42,st:fxState()};if(fromGallery)fxNoteFor={st:SE.st,fx:()=>null};
   el.innerHTML=`<canvas id="sedc" class="sed-canvas"></canvas>
     <div class="scam-top"><button class="sv-x" data-se="back" aria-label="Назад">${ic('back')}</button><span style="flex:1"></span><button class="sv-x" data-se="text" aria-label="Текст">${ic('text')}</button></div>
     <div class="scam-bottom">${fromGallery&&SC&&SC.M?'<div id="sefx"></div>':''}
@@ -1287,12 +1325,7 @@ function storyEditor(photo,fromGallery){
   seFxRow();seDraw();
 }
 const TXTC=[['#ffffff','rgba(0,0,0,.45)'],['#111111','rgba(255,255,255,.85)'],['#ffd84a','rgba(0,0,0,.45)'],['#ff4f8b','rgba(255,255,255,.9)'],['#5bd1ff','rgba(0,0,0,.5)'],['#2bd47d','rgba(0,0,0,.5)']];
-function seFxRow(){
-  const el=$('#sefx'),M=SC&&SC.M;if(!el||!M)return;
-  el.innerHTML=`<div class="seg fx-tabs"><button class="${SE.tab==='m'?'on':''}" data-se="tab" data-v="m">Маски</button>${M.canFilter?`<button class="${SE.tab==='f'?'on':''}" data-se="tab" data-v="f">Фильтры</button>`:''}</div>
-    <div class="fx-row">${SE.tab==='f'?M.FILTERS.map(f=>`<button class="fx-it ${SE.filter===f.id?'on':''}" data-se="fx" data-f="${f.id}"><span class="fx-sw fl-${f.id}"></span><small>${esc(f.n)}</small></button>`).join('')
-      :M.MASKS.map(m=>`<button class="fx-it ${SE.mask===m.id?'on':''}" data-se="fx" data-m="${m.id}"><span class="fx-em">${m.e}</span><small>${esc(m.n)}</small></button>`).join('')}</div>`;
-}
+function seFxRow(){const el=$('#sefx'),M=SC&&SC.M;if(el&&M)fxRedraw(el,fxStripHTML(M,SE.st,'data-se'))}
 /* the final picture: 9:16, the photo in the middle on a blurred copy of itself, plus the caption */
 function seCompose(cv,W,H){
   const x=cv.getContext('2d'),p=SE.photo;cv.width=W;cv.height=H;
@@ -1315,13 +1348,14 @@ function seCompose(cv,W,H){
 function seDraw(){if(SE)seCompose($('#sedc'),540,960)}
 async function seClick(e){
   const b=e.target.closest('[data-se]');if(!b||!SE)return;const a=b.dataset.se;
-  if(a==='back'){SE.el.remove();SE=null;if(SC&&SC.fx&&SC.fx.alive)SC.fx.loop();if(!SC)return}
+  if(a==='back'){SE.el.remove();SE=null;if(SC){fxNoteFor={st:SC.st,fx:()=>SC&&SC.fx};if(SC.fx)SC.fx.pause(false)}return}
   else if(a==='text'){const t=$('#sedt');t.hidden=!t.hidden;if(!t.hidden)$('#sedi').focus()}
   else if(a==='col'){SE.color=+b.dataset.v;seDraw()}
-  else if(a==='tab'){SE.tab=b.dataset.v;seFxRow()}
+  else if(a==='tab'){SE.st.tab=b.dataset.v;seFxRow()}
   else if(a==='fx'){
-    if(b.dataset.m)SE.mask=b.dataset.m;if(b.dataset.f)SE.filter=b.dataset.f;seFxRow();
-    try{SE.photo=await SC.M.onPhoto(SE.base,SE.mask,SE.filter);seDraw()}catch(err){}
+    const ph=fxTap(SE.st,b);if(ph){const img=await ph;if(!img||!SE)return;SE.bgImg=img}seFxRow();
+    const st=SE.st,n=SE.n=(SE.n||0)+1;
+    try{const out=await SC.M.onPhoto(SE.base,st.mask,st.filter,st.bg==='photo'?'none':st.bg,st.beauty,st.bg==='photo'?SE.bgImg:null);if(SE&&SE.n===n){SE.photo=out;seDraw()}}catch(err){console.warn(err)}
   }
   else if(a==='post'){
     b.disabled=true;
@@ -1515,7 +1549,7 @@ function topLayer(){
 }
 function goBack(){
   switch(topLayer()){
-    case 'editor':SE.el.remove();SE=null;if(SC&&SC.fx&&SC.fx.alive)SC.fx.loop();return true;
+    case 'editor':SE.el.remove();SE=null;if(SC){fxNoteFor={st:SC.st,fx:()=>SC&&SC.fx};if(SC.fx)SC.fx.pause(false)}return true;
     case 'camera':scClose();return true;
     case 'story':svClose();return true;
     case 'layer':if(SV&&SV.paused)svPause(false);closeLayer();return true;
@@ -1711,8 +1745,7 @@ document.addEventListener('click',async e=>{
     case 'contact':contactSheet(id);break;
     case 'callid':{closeLayer();try{const r=await api('/api/chats/dm',{userId:id});r.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));S.chats[r.chat.id]=Object.assign(S.chats[r.chat.id]||{},r.chat);startCall(r.chat.id,el.dataset.k)}catch(err){toast(err.message)}break}
     case 'c-fx':callFxSheet();break;
-    case 'fxtab':S.fxTab=el.dataset.v;S.fxDraw&&S.fxDraw();break;
-    case 'cfx':await setCallFx(el.dataset.m,el.dataset.f);S.fxDraw&&S.fxDraw();break;
+    case 'cfx':if(el.dataset.x==='tab'){CALL.fxs.tab=el.dataset.v;S.fxDraw&&S.fxDraw();break}await setCallFx(el);S.fxDraw&&S.fxDraw();break;
     case 'lite':store.set('lite',el.dataset.v);toast('Применяем…');setTimeout(()=>location.reload(),400);break;
     case 'story-add':storyCamera();break;
     case 'story-open':openStories(id);break;

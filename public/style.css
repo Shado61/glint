@@ -558,3 +558,10 @@ html,body{overscroll-behavior:none;overscroll-behavior-x:none}
 .list,.msgs,.sheet{overscroll-behavior-x:none}
 #side .list{touch-action:pan-y}
 @media (max-width:760px){.app.open.peek .main{background:#142030}:root.light .app.open.peek .main{background:#e6edf5}}
+/* effects strip: status line and spinner */
+.fx-note{min-height:0;text-align:center;font-size:13px;font-weight:600;color:#fff;margin:0 auto 6px;max-width:90%;display:none}
+.fx-note.on{display:block;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.45);width:max-content}
+.spin{display:inline-block;width:12px;height:12px;margin-right:6px;vertical-align:-1px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.lite .spin{animation:spin .8s linear infinite!important}
+.fx-em svg{width:24px;height:24px}

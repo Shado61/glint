@@ -4,7 +4,7 @@
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
 const GZ=new Map();
 /* version of the app files; the browser compares it with its own copy and reloads when they differ */
-const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','fx.js','style.css','index.html'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
+const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','fx.js','fxw.js','style.css','index.html','sw.js'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
 const {WebSocketServer}=require('ws');
 
 /* ---------- config (.env for local runs, Environment in Render) ---------- */
@@ -699,10 +699,10 @@ function handle(ws,u,m){
 }
 
 /* ---------- HTTP ---------- */
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
-  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-ancestors 'none'"};
+  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
 function send(res,code,o){res.writeHead(code,Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'},SEC));res.end(JSON.stringify(o))}
 function body(req){return new Promise((ok,bad)=>{const ch=[];let n=0;req.on('data',c=>{n+=c.length;if(n>2e6){bad(E(413,'Слишком много данных'));req.destroy();return}ch.push(c)});req.on('end',()=>{try{ok(ch.length?JSON.parse(Buffer.concat(ch).toString('utf8')):{})}catch(e){bad(E(400,'Неверный запрос'))}});req.on('error',bad)})}
 const sameOrigin=req=>{const o=req.headers.origin;if(!o)return true;try{return new URL(o).host===req.headers.host}catch(e){return false}};
@@ -735,7 +735,13 @@ const server=http.createServer(async(req,res)=>{
       const isIndex=f.endsWith('index.html');
       const body=()=>{const b=fs.readFileSync(f);return isIndex?Buffer.from(b.toString('utf8').replace(/\?v=[\w-]+/g,'?v='+APP_VERSION)):b};
       if(isIndex&&!/\bgzip\b/.test(req.headers['accept-encoding']||'')){res.writeHead(200,h);return res.end(body())}
-      if(/\.(js|css|html|svg|webmanifest|json)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+      /* the big mask engine files are compressed once in the background; until then they go out as they are */
+      if(/\.(wasm|task|tflite)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+        const key=f+':'+(st&&st.mtimeMs),gz=GZ.get(key);
+        if(gz&&gz!=='busy'){h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(200,h);return res.end(gz)}
+        if(!gz){GZ.set(key,'busy');zlib.gzip(fs.readFileSync(f),{level:6},(e,b)=>{if(e)GZ.delete(key);else GZ.set(key,b)})}
+      }
+      if(/\.(js|mjs|css|html|svg|webmanifest|json)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
         const key=f+':'+(st&&st.mtimeMs);let gz=GZ.get(key);
         if(!gz){gz=zlib.gzipSync(body(),{level:9});GZ.set(key,gz)}
         h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(200,h);return res.end(gz);

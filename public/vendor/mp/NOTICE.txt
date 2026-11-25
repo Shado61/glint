@@ -1,0 +1,4 @@
+vision_bundle.mjs, vision_wasm_module_internal.js, vision_wasm_module_internal.wasm — MediaPipe Tasks Vision (@mediapipe/tasks-vision 1.2.3), Apache License 2.0, Google LLC.
+face_landmarker.task — MediaPipe Face Landmarker model, Apache License 2.0, Google LLC.
+selfie_segmenter.tflite — MediaPipe selfie segmentation model (from @mediapipe/selfie_segmentation, Apache License 2.0, Google LLC), with TFLite metadata added so the Tasks engine can read it.
+facegeo.js — face mesh triangles and texture coordinates from face-mesh-face-geometry by Jaume Sanchez, MIT License (see facegeo.LICENSE).
