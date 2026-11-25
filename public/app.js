@@ -77,7 +77,7 @@ async function api(path,body){
   if(!r.ok)throw new Error((j&&j.error)||'Нет связи с сервером');
   return j;
 }
-let tt;function toast(t){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),2800)}
+let tt;function toast(t,ms){const e=$('#toast');e.textContent=t;e.classList.add('on');clearTimeout(tt);tt=setTimeout(()=>e.classList.remove('on'),ms||Math.max(2800,t.length*55))}
 /* first letters of the first two words; emoji and symbols are skipped so they never break into half-characters */
 const initials=n=>String(n||'?').trim().split(/\s+/).map(w=>Array.from(w).find(ch=>/[\p{L}\p{N}]/u.test(ch))).filter(Boolean).slice(0,2).join('').toUpperCase()||'?';
 function avatar(u,size='',dot=true){
@@ -502,7 +502,8 @@ function msgHTML(c,m,prev,next){
       (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
   }
   const re=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
-  return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub" data-act="msg" data-id="${m.id}">${inner}${re}</div></div>`;
+  const bb=bubbleOf(m.from);
+  return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub${bb.cls}" data-act="msg" data-id="${m.id}">${bb.fr}${inner}${re}</div></div>`;
 }
 /* reactions: an emoji, or "img:" + a sticker picture */
 const reKey=e=>e.startsWith('img:')?`<img class="re-img" src="${esc(e.slice(4))}" alt="стикер" loading="lazy">`:esc(e);
@@ -526,6 +527,26 @@ function reactSheet(id,tab){
   const body=S.reTab==='Стикеры'?S.packs.map(p=>`<div class="section-t">${esc(p.name)}</div><div class="re-stk">${p.stickers.map(x=>`<button data-act="react" data-id="${id}" data-e="s:${p.id}:${x.id}"><img src="${esc(x.img)}" alt="" loading="lazy"></button>`).join('')||'<div class="empty" style="padding:10px">Пусто</div>'}</div>`).join('')
     :`<div class="re-grid">${emoList(EMO[S.reTab]).map(e=>`<button data-act="react" data-id="${id}" data-e="${esc(e)}">${e}</button>`).join('')}</div>`;
   sheet(`<h2>Реакция</h2><div class="re-tabs">${tabs.map(t=>`<button class="${S.reTab===t?'on':''}" data-act="retab" data-id="${id}" data-v="${esc(t)}">${t==='Стикеры'?'🎨 Стикеры':t}</button>`).join('')}</div><div class="re-body">${body}</div>`);
+}
+/* ---------- message styles (colour + frame), like chat bubbles in TikTok ---------- */
+const BSTYLES=[['','Обычный'],['ocean','Океан'],['sunset','Закат'],['grape','Виноград'],['mint','Мята'],['candy','Конфета'],['lava','Лава'],['neon','Неон'],['galaxy','Галактика'],['gold','Золото'],['night','Ночь'],['cloud','Облако'],['comic','Комикс']];
+const BFRAMES=[['','Без рамки'],['hearts','Сердечки'],['stars','Звёзды'],['flowers','Цветы'],['crown','Корона'],['cat','Котик'],['fire','Огонь'],['snow','Снежинки'],['music','Музыка'],['butterfly','Бабочки'],['lace','Кружево'],['rainbow','Радуга']];
+function bubbleOf(uid){
+  const b=(uid===S.me.id?S.me.bubble:(S.users[uid]||{}).bubble)||null;
+  if(!b||(!b.s&&!b.f))return {cls:'',fr:''};
+  return {cls:(b.s?' bs-'+b.s:'')+(b.f?' bf-'+b.f:''),fr:b.f?'<i class="bfr" aria-hidden="true"></i>':''};
+}
+function bubbleSheet(){
+  const cur=S.bdraft||Object.assign({s:'',f:''},S.me.bubble||{});S.bdraft=cur;
+  const cls=(cur.s?' bs-'+cur.s:'')+(cur.f?' bf-'+cur.f:''),fr=cur.f?'<i class="bfr"></i>':'';
+  sheet(`<h2>Стиль сообщений</h2><p class="sub">Так ваши сообщения увидят все собеседники</p>
+    <div class="bprev"><div class="m"><div class="bub"><span class="txt">Привет! Как дела? 👋</span></div></div>
+      <div class="m me"><div class="bub${cls}">${fr}<span class="txt">Смотри, какой у меня стиль ✨</span></div></div></div>
+    <div class="section-t">Цвет</div>
+    <div class="bgrid">${BSTYLES.map(([k,n])=>`<button class="bopt ${cur.s===k?'on':''}" data-act="bstyle" data-v="${k}"><span class="bub sw${k?' bs-'+k:''}">Аа</span><small>${n}</small></button>`).join('')}</div>
+    <div class="section-t">Рамка</div>
+    <div class="bgrid">${BFRAMES.map(([k,n])=>`<button class="bopt ${cur.f===k?'on':''}" data-act="bframe" data-v="${k}"><span class="bub sw${cur.s?' bs-'+cur.s:''}${k?' bf-'+k:''}">${k?'<i class="bfr"></i>':''}Аа</span><small>${n}</small></button>`).join('')}</div>
+    <div class="btns"><button class="gbtn" data-act="bcancel">Отмена</button><button class="gbtn primary" data-act="bsave">Сохранить</button></div>`);
 }
 const clock=s=>{s=Math.round(s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 function voiceHTML(m){
@@ -887,6 +908,7 @@ function settingsSheet(){
     <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k&&!S.appWall?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}<button class="wall-pick ${S.appWall?'on':''}" data-act="appwall" title="Своё фото" aria-label="Обои из галереи" ${S.appWall?`style="background-image:url('${S.appWall}')"`:''}>${S.appWall?'':ic('image')}</button></div>${S.appWall?'<div class="btns" style="margin-top:8px"><button class="gbtn" data-act="appwalldel">Убрать своё фото</button></div>':''}</div>
     <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
     <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
+    <div class="set-row"><span class="mid"><b>Стиль сообщений</b><small>Цвет и рамка ваших сообщений — как в TikTok</small></span><button class="gbtn" data-act="bubbles">Выбрать</button></div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
     <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
@@ -956,7 +978,7 @@ function onWS(m){
       t[m.user]=setTimeout(()=>{delete t[m.user];if(S.cur===m.chat)renderStatus();renderSide()},4000);
       if(S.cur===m.chat)renderStatus();renderSide();return;
     }
-    case 'user':{S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(m.user.id===S.me.id)S.me=S.users[m.user.id];renderSide();renderStatus();return}
+    case 'user':{const ob=JSON.stringify((S.users[m.user.id]||{}).bubble||null);S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(m.user.id===S.me.id)S.me=S.users[m.user.id];renderSide();renderStatus();if(ob!==JSON.stringify(m.user.bubble||null))renderMsgs();return}
     case 'chat':{m.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));
       if(!m.chat.members.includes(S.me.id)){delete S.chats[m.chat.id];if(S.cur===m.chat.id)closeChat();else renderSide();return}
       const was=S.chats[m.chat.id];S.chats[m.chat.id]=Object.assign(was||{},m.chat);if(!m.chat.streak)delete S.chats[m.chat.id].streak;
@@ -999,7 +1021,9 @@ function onWS(m){
    Quality: clear voice (Opus 64 kbit/s with loss protection), HD video that steps down on a bad network,
    automatic reconnection when the network changes, and a connection indicator. */
 let CALL=null,ICE=null;
-async function iceServers(){if(!ICE){try{ICE=(await api('/api/ice')).iceServers}catch(e){ICE=[{urls:'stun:stun.l.google.com:19302'}]}}return ICE}
+/* call servers, with fresh relay passwords every few hours */
+let ICE_AT=0,ICE_RELAY=false;
+async function iceServers(){if(!ICE||Date.now()-ICE_AT>3*3600e3){try{const r=await api('/api/ice');ICE=r.iceServers;ICE_RELAY=!!r.relay;ICE_AT=Date.now()}catch(e){ICE=ICE||[{urls:'stun:stun.l.google.com:19302'}]}}return ICE}
 const AUDIO={echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:{ideal:1},sampleRate:{ideal:48000}};
 const camC=(facing)=>isLite()?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}};
 async function getMedia(video){
@@ -1066,6 +1090,8 @@ async function makePC(){
     if(!CALL||CALL.dir!=='out'||!CALL.negotiated||CALL.pc!==pc)return;
     try{const o=await pc.createOffer({iceRestart:true});await setLocal(pc,o);wsSend({t:'rtc',callId:CALL.id,data:{sdp:pc.localDescription.toJSON()}})}catch(e){}
   };
+  /* never connected: the two networks cannot reach each other directly */
+  clearTimeout(CALL.connT);CALL.connT=setTimeout(()=>{if(CALL&&CALL.pc===pc&&!CALL.started){toast(ICE_RELAY?'Не удалось соединиться. Проверьте интернет у обоих и позвоните ещё раз':'Не удалось соединиться: сети не пускают звонок напрямую. Нужен сервер-посредник (TURN) — см. настройки сервера',6000);hangup()}},30000);
   pc.onconnectionstatechange=()=>{
     if(!CALL||CALL.pc!==pc)return;const s=pc.connectionState;
     if(s==='connected'){
@@ -2324,6 +2350,11 @@ document.addEventListener('click',async e=>{
     case 'notif':if(Notification.permission==='granted')await pushTest();else await pushEnable();settingsSheet();break;
     case 'pushon':await pushEnable();break;
     case 'pushno':store.set('pushNo',1);renderPushAsk();break;
+    case 'bubbles':S.bdraft=null;bubbleSheet();break;
+    case 'bstyle':S.bdraft.s=el.dataset.v;bubbleSheet();break;
+    case 'bframe':S.bdraft.f=el.dataset.v;bubbleSheet();break;
+    case 'bcancel':S.bdraft=null;closeLayer();break;
+    case 'bsave':try{const r=await api('/api/me/bubble',S.bdraft);S.me=Object.assign(S.me,r.me);S.users[S.me.id]=S.me;S.bdraft=null;closeLayer();renderMsgs();toast('Стиль сохранён ✨')}catch(err){toast(err.message)}break;
     case 'mute':{const c=S.chats[S.cur];if(!c)break;const r=await api('/api/chats/mute',{chat:c.id,on:!c.muted});S.chats[c.id]=r.chat;toast(r.chat.muted?'Уведомления чата выключены 🔕':'Уведомления чата включены 🔔');closeLayer();renderSide();break}
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;

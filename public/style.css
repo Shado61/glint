@@ -792,3 +792,64 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .gban .gbtn{height:34px;padding:0 14px}
 .gdot{width:10px;height:10px;border-radius:50%;background:#2bd47d;box-shadow:0 0 0 4px rgba(43,212,125,.25);animation:pulse 1.6s infinite}
 .lite .gtile .glab,.lite .gring{-webkit-backdrop-filter:none;backdrop-filter:none}
+
+/* ---------- clickable areas ----------
+   - pressed buttons no longer shrink on computers (a shrinking button slips out from under the mouse);
+   - small round buttons catch clicks a few pixels around them;
+   - the empty space above the message box lets clicks through to the messages */
+@media (hover:hover) and (pointer:fine){
+  .gbtn:active,.sendb:active,.cbtn:active,.rbtn:active,.stk-it:active,.re-grid button:active{transform:none;filter:brightness(.82)}
+  .menu .emo button:hover{transform:none}
+}
+.gbtn,.sendb,.rbtn,.cbtn,.pet-btn,.pushask .x{position:relative}
+.gbtn.ic::after,.sendb::after,.rbtn::after,.cbtn::after,.pet-btn::after,.pushask .x::after,.reacts button::after{content:"";position:absolute;inset:-5px;border-radius:inherit}
+.reacts button{position:relative}
+.composer{pointer-events:none}.composer>*,.composer .comp-row>*{pointer-events:auto}
+.composer .comp-row{pointer-events:none}
+
+/* ---------- message styles: colours ---------- */
+.bub.bs-ocean,.m.me .bub.bs-ocean{background:linear-gradient(135deg,#1fa2c8,#2b5fd9);color:#fff;border-color:rgba(255,255,255,.3)}
+.bub.bs-sunset,.m.me .bub.bs-sunset{background:linear-gradient(135deg,#ff9a4c,#e8457c);color:#fff;border-color:rgba(255,255,255,.3)}
+.bub.bs-grape,.m.me .bub.bs-grape{background:linear-gradient(135deg,#9b6bff,#5b3fd1);color:#fff;border-color:rgba(255,255,255,.3)}
+.bub.bs-mint,.m.me .bub.bs-mint{background:linear-gradient(135deg,#34c99a,#178a7c);color:#fff;border-color:rgba(255,255,255,.3)}
+.bub.bs-candy,.m.me .bub.bs-candy{background:radial-gradient(circle,rgba(255,255,255,.35) 1.5px,transparent 2px) 0 0/12px 12px,linear-gradient(135deg,#ff8cc6,#ff5fa2);color:#fff;border-color:rgba(255,255,255,.45)}
+.bub.bs-lava,.m.me .bub.bs-lava{background:linear-gradient(135deg,#ff512f,#dd2476);color:#fff;border-color:rgba(255,255,255,.3)}
+.bub.bs-neon,.m.me .bub.bs-neon{background:#0f1424;color:#dffcff;border:1.5px solid #3ef0ff;box-shadow:0 0 12px rgba(62,240,255,.55),inset 0 0 10px rgba(62,240,255,.18)}
+.bub.bs-galaxy,.m.me .bub.bs-galaxy{background:radial-gradient(circle at 20% 30%,#fff 0.8px,transparent 1.5px) 0 0/22px 22px,radial-gradient(circle at 70% 60%,rgba(255,255,255,.7) 0.6px,transparent 1.3px) 0 0/17px 17px,linear-gradient(135deg,#3b2380,#121338);color:#efe9ff;border-color:rgba(190,170,255,.35)}
+.bub.bs-gold,.m.me .bub.bs-gold{background:linear-gradient(135deg,#3d3214,#1c170b);color:#fff2c8;border:1.5px solid #e7c46a;box-shadow:0 0 10px rgba(231,196,106,.35),inset 0 1px 0 rgba(255,236,170,.4)}
+.bub.bs-night,.m.me .bub.bs-night{background:linear-gradient(135deg,#2a2e3d,#151720);color:#e6e9f5;border-color:rgba(150,160,200,.3)}
+.bub.bs-cloud,.m.me .bub.bs-cloud{background:rgba(255,255,255,.88);color:#1d2330;border-color:#fff}
+.bub.bs-comic,.m.me .bub.bs-comic{background:#fff;color:#111;border:2px solid #111;box-shadow:3px 3px 0 #111;border-radius:16px}
+.bub[class*=" bs-"] .meta,.bub[class*=" bs-"] .meta *{color:inherit;opacity:.8}
+.bub.bs-cloud a,.bub.bs-comic a{color:#2456c4}
+/* frames: little decorations on the corners */
+.bub[class*=" bf-"]{overflow:visible;margin-top:9px;margin-bottom:5px}
+.bfr{position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:2}
+.bfr::before,.bfr::after{position:absolute;font-size:17px;line-height:1;font-style:normal;filter:drop-shadow(0 1px 2px rgba(0,0,0,.3))}
+.bfr::before{top:-10px;left:-7px}.bfr::after{bottom:-7px;right:-6px}
+.bf-hearts .bfr::before{content:"❤️";transform:rotate(-15deg)}.bf-hearts .bfr::after{content:"💕"}
+.bf-hearts{box-shadow:0 0 0 1.5px rgba(255,120,170,.8),0 4px 14px -6px rgba(255,90,150,.5)!important}
+.bf-stars .bfr::before{content:"✨"}.bf-stars .bfr::after{content:"⭐";font-size:15px}
+.bf-flowers .bfr::before{content:"🌸";transform:rotate(-10deg)}.bf-flowers .bfr::after{content:"🌼"}
+.bf-crown .bfr::before{content:"👑";top:-14px;left:-6px;font-size:19px;transform:rotate(-22deg)}
+.bf-cat .bfr::before{content:"🐱";top:-13px;left:auto;right:10px;font-size:18px}.bf-cat .bfr::after{content:"🐾";font-size:14px}
+.bf-fire .bfr::before{content:"🔥";top:auto;bottom:-8px;left:-6px}.bf-fire .bfr::after{content:"🔥"}
+.bf-fire{box-shadow:0 0 0 1.5px rgba(255,140,60,.85),0 0 14px rgba(255,110,40,.45)!important}
+.bf-snow .bfr::before{content:"❄️"}.bf-snow .bfr::after{content:"☃️"}
+.bf-music .bfr::before{content:"🎵"}.bf-music .bfr::after{content:"🎶"}
+.bf-butterfly .bfr::before{content:"🦋";transform:rotate(-15deg)}.bf-butterfly .bfr::after{content:"🦋";font-size:13px;transform:scaleX(-1)}
+.bf-lace .bfr{border:2px dashed rgba(255,255,255,.65);inset:3px;border-radius:inherit}
+.bf-rainbow{box-shadow:0 0 0 2px #ff6bd6,0 0 0 4px #ffd36b,0 0 0 6px #6bc8ff!important;margin:12px 6px 8px!important}
+.lite .bfr::before,.lite .bfr::after{filter:none}
+/* the picker */
+.bprev{padding:14px 10px 10px;border-radius:18px;background:rgba(0,0,0,.18);display:flex;flex-direction:column;gap:6px;margin:8px 0 6px}
+:root.light .bprev{background:rgba(0,0,0,.05)}
+.bprev .m{display:flex}.bprev .m.me{justify-content:flex-end}
+.bgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:8px}
+.bopt{display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 4px 8px;border-radius:16px;background:rgba(255,255,255,.05);border:1.5px solid transparent}
+:root.light .bopt{background:rgba(0,0,0,.04)}
+.bopt.on{border-color:var(--acc);background:rgba(125,156,196,.18)}
+.bopt small{font-size:11.5px;color:var(--fg2)}
+.bopt .bub.sw{display:inline-block;padding:6px 14px;font-weight:700;font-size:14px;margin:0}
+.bopt .bub.sw:not([class*=" bs-"]){background:var(--mine);color:#fff;border:1px solid rgba(255,255,255,.2)}
+.bopt .bub.sw[class*=" bf-"]{margin:0}

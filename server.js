@@ -76,7 +76,10 @@ const E=(code,msg)=>Object.assign(new Error(msg),{code});
 const COLORS=['#5b8cff','#a35bff','#ff5b9c','#ff8f3d','#26c6a6','#3dbbff','#f2c94c','#ff6b6b'];
 function hashPass(p,salt=crypto.randomBytes(16).toString('hex')){return {salt,hash:crypto.scryptSync(p,salt,64).toString('hex')}}
 function checkPass(p,rec){const h=crypto.scryptSync(p,rec.salt,64);return crypto.timingSafeEqual(h,Buffer.from(rec.hash,'hex'))}
-const pubUser=u=>u&&({id:u.id,username:u.username,name:u.name,color:u.color,avatar:u.avatar||'',bio:u.bio||'',online:ONLINE.has(u.id),lastSeen:u.lastSeen||0});
+const pubUser=u=>u&&({id:u.id,username:u.username,name:u.name,color:u.color,avatar:u.avatar||'',bio:u.bio||'',online:ONLINE.has(u.id),lastSeen:u.lastSeen||0,bubble:u.bubble||null});
+/* message styles: a colour and a frame for your messages, seen by everyone */
+const BUBBLE_STYLES=['','ocean','sunset','grape','mint','candy','lava','neon','galaxy','gold','night','cloud','comic'];
+const BUBBLE_FRAMES=['','hearts','stars','flowers','crown','cat','fire','snow','music','butterfly','lace','rainbow'];
 function chatFor(c,uid){
   const ms=DB.msgs[c.id]||[],last=ms[ms.length-1]||null;
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
@@ -272,6 +275,11 @@ API['POST /api/logout']=(req,res,b)=>{
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
+API['POST /api/me/bubble']=(req,res,b,u)=>{
+  need(u);const st=String(b.s||''),fr=String(b.f||'');
+  if(!BUBBLE_STYLES.includes(st)||!BUBBLE_FRAMES.includes(fr))throw E(400,'Нет такого стиля');
+  u.bubble=st||fr?{s:st,f:fr}:null;mark('u:'+u.id);broadcastUser(u);return {me:pubUser(u)};
+};
 API['GET /api/push/key']=()=>({key:PUSH_KEY});
 API['POST /api/push/sub']=(req,res,b,u)=>{need(u);
   const s=b&&b.sub;if(!s||typeof s.endpoint!=='string'||!/^https:\/\//.test(s.endpoint)||s.endpoint.length>800||!s.keys||typeof s.keys.p256dh!=='string'||typeof s.keys.auth!=='string')throw E(400,'Плохая подписка');
@@ -531,11 +539,38 @@ function dropStory(s){delete DB.stories[s.id];mark('t:'+s.id);
   sendTo(s.user,{t:'story-gone',id:s.id});partners(s.user).forEach(i=>sendTo(i,{t:'story-gone',id:s.id}))}
 setInterval(()=>{const t=now();for(const s of Object.values(DB.stories))if(s.exp<t)dropStory(s)},60e3).unref();
 
-/* STUN finds the public address; TURN relays the call when two networks cannot connect directly */
-API['GET /api/ice']=(req,res,b,u)=>{
-  need(u);const s=[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302']}];
-  if(process.env.TURN_URL)s.push({urls:process.env.TURN_URL.split(','),username:process.env.TURN_USERNAME||'',credential:process.env.TURN_CREDENTIAL||''});
-  return {iceServers:s};
+/* STUN finds the public address; TURN relays the call when two networks cannot connect directly
+   (mobile internet, many home routers). Without TURN, calls between some people never connect.
+   Relay passwords are fetched by the server from one of these (keys go into Render → Environment):
+   - Cloudflare:  CF_TURN_KEY_ID + CF_TURN_TOKEN          (1000 GB a month free)
+   - Open Relay:  METERED_APP + METERED_API_KEY           (20 GB a month free)
+   - your own:    TURN_URL + TURN_USERNAME + TURN_CREDENTIAL */
+let ICE_CACHE={at:0,list:null,src:''};
+async function relayServers(){
+  if(ICE_CACHE.list&&Date.now()-ICE_CACHE.at<6*3600e3)return ICE_CACHE.list;
+  const out=[];let src='';
+  try{
+    if(process.env.CF_TURN_KEY_ID&&process.env.CF_TURN_TOKEN){
+      const r=await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${process.env.CF_TURN_KEY_ID}/credentials/generate-ice-servers`,{method:'POST',headers:{Authorization:'Bearer '+process.env.CF_TURN_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({ttl:86400}),signal:AbortSignal.timeout(6000)});
+      const j=await r.json();const l=j.iceServers?[].concat(j.iceServers):[];if(l.length){out.push(...l);src='Cloudflare'}
+    }
+  }catch(e){console.error('[turn] cloudflare',e.message)}
+  try{
+    if(!out.length&&process.env.METERED_API_KEY){
+      const app=String(process.env.METERED_APP||'').replace(/\.metered\.live.*$/,'').replace(/^https?:\/\//,'');
+      const r=await fetch(`https://${app}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(process.env.METERED_API_KEY)}`,{signal:AbortSignal.timeout(6000)});
+      const l=await r.json();if(Array.isArray(l)&&l.length){out.push(...l);src='Open Relay'}
+    }
+  }catch(e){console.error('[turn] metered',e.message)}
+  if(process.env.TURN_URL){out.push({urls:process.env.TURN_URL.split(','),username:process.env.TURN_USERNAME||'',credential:process.env.TURN_CREDENTIAL||''});src=src||'свой TURN'}
+  if(out.length)ICE_CACHE={at:Date.now(),list:out,src};
+  else ICE_CACHE={at:Date.now()-5.5*3600e3,list:[],src:''}; /* try again in half an hour */
+  return out;
+}
+API['GET /api/ice']=async(req,res,b,u)=>{
+  need(u);
+  const s=[{urls:['stun:stun.l.google.com:19302','stun:stun.cloudflare.com:3478']}].concat(await relayServers());
+  return {iceServers:s,relay:s.length>1};
 };
 function need(u){if(!u)throw E(401,'Войди в аккаунт')}
 const ip=req=>String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
@@ -1050,5 +1085,5 @@ setInterval(()=>{wss.clients.forEach(ws=>{if(!ws.isAlive)return ws.terminate();w
 load().then(where=>{migrate();pushInit();return where}).then(where=>server.listen(PORT,()=>{
   console.log(`\n  Manasenger работает: ${BASE}  (порт ${PORT})`);
   console.log(`  Данные: ${where} · пользователей ${Object.keys(DB.users).length}`);
-  console.log(`  Звонки: ${process.env.TURN_URL?'STUN + TURN':'только STUN (TURN не задан)'}\n`);
+  relayServers().then(l=>console.log(`  Звонки: ${l.length?'STUN + TURN ('+ICE_CACHE.src+')':'только STUN — TURN не задан, у части людей звонки не соединятся'}\n`));
 })).catch(e=>{console.error('Не удалось запустить:',e);process.exit(1)});
