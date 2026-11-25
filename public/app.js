@@ -155,7 +155,7 @@ function seen(u){
 const durText=s=>s<60?`${s} с`:`${Math.floor(s/60)} мин ${s%60?s%60+' с':''}`.trim();
 function lastText(m){
   if(!m)return 'Нет сообщений';if(m.del)return 'Сообщение удалено';if(m.sys)return m.sys;
-  if(m.call)return (m.call.kind==='video'?'📹 ':'📞 ')+(m.call.missed?'Пропущенный звонок':'Звонок, '+durText(m.call.dur));
+  if(m.call)return (m.call.kind==='video'?'📹 ':'📞 ')+(m.call.group?'Групповой звонок'+(m.call.dur?', '+durText(m.call.dur):''):m.call.missed?'Пропущенный звонок':'Звонок, '+durText(m.call.dur));
   const who=m.from===S.me.id?'Вы: ':'';if(m.sticker)return who+'Стикер';
   if(m.media)return who+({voice:'🎤 Голосовое',round:'⭕ Видеосообщение',video:'🎬 Видео'}[m.media.k]||'')+(m.media.dur?' '+clock(m.media.dur):'')+(m.text?' '+m.text:'');if(m.story&&!m.text)return who+'Ответ на историю';return who+(m.img&&!m.text?'📷 Фото':(m.img?'📷 ':'')+m.text);
 }
@@ -490,7 +490,7 @@ function msgHTML(c,m,prev,next){
   else if(m.call){
     const miss=m.call.missed,out=m.from===S.me.id;
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}"><div class="bub callm ${miss?'miss':''}"><span class="ci">${ic(m.call.kind==='video'?'video':'phone')}</span>
-      <span><b>${out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
+      <span><b>${m.call.group?'Групповой':out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${m.call.group?(m.call.dur?durText(m.call.dur):'Никто не ответил'):miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
   }else{
     inner=(grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:'')+fwd+
       (m.story?`<div class="story-ref"><img src="${esc(m.story.img)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
@@ -1474,8 +1474,8 @@ async function gcStart(chatId,kind){
   if(!wsSend({t:'gcall',chat:chatId,kind,cam:g.cam,mic:true})){toast('Нет связи');gcLeave(true);return}
   gcRender();
 }
-function gcOutVideo(){if(!GC)return null;if(GC.screen&&GC.screenTrack)return GC.screenTrack;return GC.cam?GC.local.getVideoTracks()[0]||null:null}
-function gcPush(){if(!GC)return;const v=gcOutVideo(),a=GC.local.getAudioTracks()[0]||null;GC.peers.forEach(p=>{if(p.vs)p.vs.replaceTrack(v).catch(()=>{});if(p.as)p.as.replaceTrack(a).catch(()=>{})});wsSend({t:'gstate',mic:GC.mic,cam:!!(GC.cam||GC.screen),screen:GC.screen});gcRender()}
+function gcOutVideo(){if(!GC||!GC.local)return null;if(GC.screen&&GC.screenTrack)return GC.screenTrack;return GC.cam?GC.local.getVideoTracks()[0]||null:null}
+function gcPush(){if(!GC||!GC.local)return;const v=gcOutVideo(),a=GC.local.getAudioTracks()[0]||null;GC.peers.forEach(p=>{if(p.vs)p.vs.replaceTrack(v).catch(()=>{});if(p.as)p.as.replaceTrack(a).catch(()=>{})});wsSend({t:'gstate',mic:GC.mic,cam:!!(GC.cam||GC.screen),screen:GC.screen});gcRender()}
 async function gcPeer(uid,offer){
   const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle'});
   const p={pc,uid,pending:[],stream:new MediaStream()};GC.peers.set(uid,p);
