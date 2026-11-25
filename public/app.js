@@ -445,7 +445,7 @@ function settingsSheet(){
     <div class="set-row"><span class="mid"><b>Тема</b></span><div class="seg" style="width:220px">${[['auto','Авто'],['light','Светлая'],['dark','Тёмная']].map(([k,n])=>`<button class="${th===k?'on':''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
     <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k&&!S.appWall?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}<button class="wall-pick ${S.appWall?'on':''}" data-act="appwall" title="Своё фото" aria-label="Обои из галереи" ${S.appWall?`style="background-image:url('${S.appWall}')"`:''}>${S.appWall?'':ic('image')}</button></div>${S.appWall?'<div class="btns" style="margin-top:8px"><button class="gbtn" data-act="appwalldel">Убрать своё фото</button></div>':''}</div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np==='default'?'<button class="gbtn" data-act="notif">Включить</button>':''}</div>
-    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК</small></span><button class="gbtn" data-act="install">Как?</button></div>
+    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
       <label class="field" style="margin-top:10px"><span>Текущий пароль</span><input class="input" id="op" type="password" autocomplete="current-password"></label>
       <label class="field"><span>Новый пароль</span><input class="input" id="nwp" type="password" minlength="6" autocomplete="new-password"></label></details>
@@ -1167,5 +1167,27 @@ addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur
 setInterval(()=>{if(S.cur)renderStatus()},60e3);
 
 /* service worker: lets the site be installed as an app */
-if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+if('serviceWorker' in navigator)addEventListener('load',()=>navigator.serviceWorker.register('/sw.js',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{}));
+/* the files this page was built from carry a fingerprint; if the server has newer ones,
+   drop every saved copy and reload once, so an update always shows up */
+/* this script's own version comes from its address (?v=…), which the server sets */
+const MY_V=(()=>{try{return new URL(document.currentScript.src).searchParams.get('v')||''}catch(e){return ''}})();
+let SERVER_V='';
+async function checkVersion(){
+  try{
+    const {v}=await (await fetch('/api/version',{cache:'no-store'})).json();SERVER_V=v;
+    if(v&&v!=='dev'&&MY_V&&v!==MY_V){
+      let last=0;try{last=+sessionStorage.getItem('mn.upd')||0}catch(e){}
+      if(Date.now()-last>60e3)updateNow(); /* at most once a minute, so it can never loop */
+    }
+  }catch(e){}
+}
+async function updateNow(){
+  try{sessionStorage.setItem('mn.upd',String(Date.now()))}catch(e){}
+  try{const ks=await caches.keys();await Promise.all(ks.map(k=>caches.delete(k)))}catch(e){}
+  try{const rs=await navigator.serviceWorker.getRegistrations();await Promise.all(rs.map(r=>r.update()))}catch(e){}
+  if(CALL||VC){toast('Вышло обновление Manasenger — оно применится после звонка');return}
+  location.reload();
+}
+checkVersion();setInterval(checkVersion,5*60e3);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkVersion()});
 boot();

@@ -3,6 +3,8 @@
 'use strict';
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
 const GZ=new Map();
+/* version of the app files; the browser compares it with its own copy and reloads when they differ */
+const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','style.css','index.html'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
 const {WebSocketServer}=require('ws');
 
 /* ---------- config (.env for local runs, Environment in Render) ---------- */
@@ -131,6 +133,7 @@ API['POST /api/logout']=(req,res)=>{
   const t=cookies(req).glint;if(t){delete DB.sessions[sha(t)];mark('s:all')}
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
+API['GET /api/version']=()=>({v:APP_VERSION});
 API['GET /api/me']=(req,res,b,u)=>{
   if(!u)return {me:null};
   const chats=Object.values(DB.chats).filter(c=>member(c,u.id)).map(c=>chatFor(c,u.id));
@@ -500,13 +503,16 @@ const server=http.createServer(async(req,res)=>{
     if(!f.startsWith(PUB))return send(res,403,{error:'нет'});
     fs.stat(f,(e,st)=>{
       if(e||!st.isFile()){f=path.join(PUB,'index.html');try{st=fs.statSync(f)}catch(x){st=null}}
-      const ext=path.extname(f),etag='"'+Math.round(st?st.mtimeMs:0).toString(36)+'-'+(st?st.size:0)+'"';
+      const ext=path.extname(f),etag='"'+APP_VERSION+'-'+Math.round(st?st.mtimeMs:0).toString(36)+'-'+(st?st.size:0)+'"';
       if(st&&req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag,'Cache-Control':'no-cache'});return res.end()}
       const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
       /* text files are sent compressed (about 4x smaller), compressed once and kept in memory */
+      const isIndex=f.endsWith('index.html');
+      const body=()=>{const b=fs.readFileSync(f);return isIndex?Buffer.from(b.toString('utf8').replace(/\?v=[\w-]+/g,'?v='+APP_VERSION)):b};
+      if(isIndex&&!/\bgzip\b/.test(req.headers['accept-encoding']||'')){res.writeHead(200,h);return res.end(body())}
       if(/\.(js|css|html|svg|webmanifest|json)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
         const key=f+':'+(st&&st.mtimeMs);let gz=GZ.get(key);
-        if(!gz){gz=zlib.gzipSync(fs.readFileSync(f),{level:9});GZ.set(key,gz)}
+        if(!gz){gz=zlib.gzipSync(body(),{level:9});GZ.set(key,gz)}
         h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(200,h);return res.end(gz);
       }
       res.writeHead(200,h);fs.createReadStream(f).pipe(res);
