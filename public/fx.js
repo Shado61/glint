@@ -24,7 +24,8 @@ const R={
   browR:[70,63,105,66,107,55,65,52,53,46],browL:[300,293,334,296,336,285,295,282,283,276]
 };
 /* expression scores the tracker reports, in this order */
-const BS=['jawOpen','mouthPucker','browInnerUp','eyeBlinkLeft','eyeBlinkRight','mouthSmileLeft','mouthSmileRight','cheekPuff','browOuterUpLeft','browOuterUpRight'];
+/* all 52 expression scores of the tracker, in its own order (the worker sends them like this) */
+const BS=['_neutral','browDownLeft','browDownRight','browInnerUp','browOuterUpLeft','browOuterUpRight','cheekPuff','cheekSquintLeft','cheekSquintRight','eyeBlinkLeft','eyeBlinkRight','eyeLookDownLeft','eyeLookDownRight','eyeLookInLeft','eyeLookInRight','eyeLookOutLeft','eyeLookOutRight','eyeLookUpLeft','eyeLookUpRight','eyeSquintLeft','eyeSquintRight','eyeWideLeft','eyeWideRight','jawForward','jawLeft','jawOpen','jawRight','mouthClose','mouthDimpleLeft','mouthDimpleRight','mouthFrownLeft','mouthFrownRight','mouthFunnel','mouthLeft','mouthLowerDownLeft','mouthLowerDownRight','mouthPressLeft','mouthPressRight','mouthPucker','mouthRight','mouthRollLower','mouthRollUpper','mouthShrugLower','mouthShrugUpper','mouthSmileLeft','mouthSmileRight','mouthStretchLeft','mouthStretchRight','mouthUpperUpLeft','mouthUpperUpRight','noseSneerLeft','noseSneerRight'];
 const B=Object.fromEntries(BS.map((n,i)=>[n,i]));
 
 /* =============================================================== tracker (shared, loaded once) */
@@ -201,6 +202,10 @@ const E=ch=>()=>tex['e'+ch]||(tex['e'+ch]=emojiTex(ch));
 
 const MASKS=[
   {id:'none',e:'🚫',n:'Без маски'},
+  /* ---- whole animated 3D heads (Jeeliz Weboji, Apache 2.0): they smile, blink, open the mouth and raise brows with you ---- */
+  {id:'h_raccoon',e:'🦝',n:'Енот 3D',hint:'Улыбнись, подмигни, открой рот',m3:[{mdl:'w_raccoon',flipV:true,morph:true,s:.16,t:[0,-8.5,-6]}],noOcc:true},
+  {id:'h_dino',e:'🦕',n:'Динозаврик 3D',hint:'Открой рот',m3:[{mdl:'w_dino',flipV:true,morph:true,s:.135,t:[0,-9,-7]}],noOcc:true},
+  {id:'h_turtle',e:'🐢',n:'Черепаха 3D',hint:'Подмигни',m3:[{mdl:'w_turtle',flipV:true,morph:true,s:.15,t:[0,-4,-6]}],noOcc:true},
   /* ---- real 3D masks from open-source face filters ---- */
   {id:'dog3d',e:'🐶',n:'Пёсик',hint:'Открой рот',
     m3:[{mdl:'dog_ears',flipV:true,s:.3,t:[0,-6.5,-2.5]},{mdl:'dog_nose',flipV:true,s:.22,t:[0,-3.2,6.1]}],
@@ -454,7 +459,7 @@ function Renderer(canvas){
       };
       if(occ){gl.colorMask(false,false,false,false);for(const part of occ.mdl.gl(gl).parts)draw(occ.mdl,part,occ.mv,1,true);gl.colorMask(true,true,true,true)}
       gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
-      for(const it of list){const g=it.mdl.gl(gl);if(!g)continue;for(const part of g.parts)draw(it.mdl,part,it.mv,it.alpha==null?1:it.alpha)}
+      for(const it of list){const g=it.mdl.gl(gl);if(!g)continue;for(const part of g.parts){if(it.w&&part.src.morphs)morphTo(gl,part,it.w);draw(it.mdl,part,it.mv,it.alpha==null?1:it.alpha)}}
       [p.a.p,p.a.n,p.a.uv].forEach(a=>{if(a>=0)gl.disableVertexAttribArray(a)});gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);
     },
     destroy(){try{const e=gl.getExtension('WEBGL_lose_context');e&&e.loseContext()}catch(e){}}
@@ -475,7 +480,9 @@ class Model{
     this.bbox=h.bbox;
     this.parts=h.parts.map(q=>{const P={v:q.v,n:q.i,i32:q.i32,color:q.color,lit:q.lit!==false,
       pos:new Float32Array(buf,o+q.pos,q.v*3),nrm:new Float32Array(buf,o+q.nrm,q.v*3),uv:new Float32Array(buf,o+q.uv,q.v*2),idx:q.i32?new Uint32Array(buf,o+q.idx,q.i):new Uint16Array(buf,o+q.idx,q.i)};
-      if(q.tex){P.img=new Image();P.img.src='/vendor/masks/'+q.tex}return P});
+      if(q.tex){P.img=new Image();P.img.src='/vendor/masks/'+q.tex}
+      if(q.morphs){P.morphs=q.morphs.map(m=>new Float32Array(buf,o+m,q.v*3));P.dyn=new Float32Array(q.v*3);P.lastW=''}
+      return P});
     this.ready=true;
   }
   static of(name,flipV){return MODELS[name]||(MODELS[name]=new Model(name,flipV))}
@@ -483,10 +490,21 @@ class Model{
   gl(gl){
     if(!this.ready)return null;let g=this.per.get(gl);if(g)return g;
     const buf=(t,d)=>{const b=gl.createBuffer();gl.bindBuffer(t,b);gl.bufferData(t,d,gl.STATIC_DRAW);return b};
-    g={parts:this.parts.map(q=>({vb:buf(gl.ARRAY_BUFFER,q.pos),nb:buf(gl.ARRAY_BUFFER,q.nrm),ub:buf(gl.ARRAY_BUFFER,q.uv),ib:buf(gl.ELEMENT_ARRAY_BUFFER,q.idx),n:q.n,i32:q.i32,color:q.color,lit:q.lit,img:q.img}))};
+    g={parts:this.parts.map(q=>({src:q,vb:buf(gl.ARRAY_BUFFER,q.pos),nb:buf(gl.ARRAY_BUFFER,q.nrm),ub:buf(gl.ARRAY_BUFFER,q.uv),ib:buf(gl.ELEMENT_ARRAY_BUFFER,q.idx),n:q.n,i32:q.i32,color:q.color,lit:q.lit,img:q.img}))};
     this.per.set(gl,g);return g;
   }
 }
+/* animated heads: the expression shapes are mixed by how much you smile, open your mouth, blink… */
+function morphTo(gl,part,w){
+  const q=part.src,key=w.map(x=>(x*50|0)).join(',');if(key===q.lastW)return;q.lastW=key;
+  const d=q.dyn;d.set(q.pos);
+  for(let k=0;k<q.morphs.length;k++){const a=w[k];if(a<.02)continue;const m=q.morphs[k];for(let i=0;i<d.length;i++)d[i]+=a*m[i]}
+  gl.bindBuffer(gl.ARRAY_BUFFER,part.vb);gl.bufferData(gl.ARRAY_BUFFER,d,gl.DYNAMIC_DRAW);
+}
+/* MediaPipe expression scores → the 11 shapes of the Jeeliz Weboji heads
+   (smile R/L, brow down L/R, brow up L/R, mouth open, mouth round, eye close R/L, teeth) */
+const cl=x=>x<0?0:x>1?1:x;
+function webojiW(b){if(!b)return null;return [cl(b[B.mouthSmileRight]*1.3),cl(b[B.mouthSmileLeft]*1.3),cl(b[B.browDownLeft]*1.4),cl(b[B.browDownRight]*1.4),cl(Math.max(b[B.browOuterUpLeft],b[B.browInnerUp]*.8)*1.5),cl(Math.max(b[B.browOuterUpRight],b[B.browInnerUp]*.8)*1.5),cl(b[B.jawOpen]*1.5),cl(Math.max(b[B.mouthPucker],b[B.mouthFunnel])*1.3),cl(b[B.eyeBlinkRight]*1.15),cl(b[B.eyeBlinkLeft]*1.15),cl((b[B.mouthUpperUpLeft]+b[B.mouthUpperUpRight])*.7)]}
 /* the head as a shape that hides things behind it: the face surface plus a rounded back of the head */
 function headOccluder(){
   if(MODELS._head)return MODELS._head;
@@ -664,7 +682,7 @@ class FX{
       if(m.m3&&f.mat){const list=[],now=performance.now(),age=(now-(this.maskT||now))/1000;
         for(const d of m.m3){if(d.show&&!(f.bs&&d.show(f.bs)))continue;const md=Model.of(d.mdl,d.flipV);if(!md.ready)continue;
           let t=d.t;if(d.drop&&age<1){const k=1-Math.pow(1-age,3);t=[t[0],t[1]+(1-k)*22,t[2]]} /* falls into place, like the "deal with it" glasses */
-          list.push({mdl:md,mv:mul(f.mat,local(t,d.r,d.s)),alpha:d.alpha})}
+          list.push({mdl:md,mv:mul(f.mat,local(t,d.r,d.s)),alpha:d.alpha,w:d.morph?webojiW(f.bs):null})}
         r.models(list,m.noOcc?null:{mdl:headOccluder(),mv:f.mat},mir,W/H)}
       const spr=[];
       if(m.props)for(const p of m.props){if(p.show&&!(f.bs&&p.show(f.bs)))continue;const v=p.lm!=null?this.flat(p,P,fw,W,H,mir,f.bs):f.mat?this.prop3d(p,f.mat,W,H,mir):null;if(v)spr.push({src:p.t(),v,z:v.z||0})}

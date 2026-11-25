@@ -12,7 +12,7 @@
   <application android:label="Manasenger" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="true" android:supportsRtl="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
     <meta-data android:name="asset_statements" android:resource="@string/asset_statements"/>
     <activity android:name=".MainActivity" android:exported="true" android:label="Manasenger" android:launchMode="singleTask">
-      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/"/>
+      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/?apk=3"/>
       <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR" android:resource="@color/bg"/>
@@ -29,6 +29,13 @@
     <activity android:name=".CallActivity" android:exported="false" android:launchMode="singleTop" android:showWhenLocked="true" android:turnScreenOn="true"
       android:excludeFromRecents="true" android:taskAffinity="com.manasenger.app.call" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"/>
     <activity android:name="com.google.androidbrowserhelper.trusted.WebViewFallbackActivity" android:configChanges="orientation|screenSize"/>
+    <!-- view-once messages: a protected window, screenshots come out black -->
+    <activity android:name=".OnceActivity" android:exported="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="manasenger-once"/>
+      </intent-filter>
+    </activity>
     <!-- updates: the downloaded new version -->
     <receiver android:name=".Updater" android:exported="true">
       <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE"/></intent-filter>

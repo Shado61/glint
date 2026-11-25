@@ -84,6 +84,7 @@ function chatFor(c,uid){
   const ms=DB.msgs[c.id]||[],last=ms[ms.length-1]||null;
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
   const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||'',titles:c.titles||{},muted:(c.muted||[]).includes(uid)};
+  if(c.avatar)o.avatar=c.avatar;
   if(c.server)o.server=c.server;
   const st=streakOut(c);if(st)o.streak=st;
   /* chats that already had a streak before the pet existed get one right away */
@@ -129,7 +130,8 @@ function cookies(req){const o={};(req.headers.cookie||'').split(';').forEach(p=>
 function userOf(req){
   const t=cookies(req).glint;if(!t)return null;
   const s=DB.sessions[sha(t)];if(!s||s.exp<now())return null;
-  return DB.users[s.uid]||null;
+  const u=DB.users[s.uid];if(!u||u.banned)return null;
+  return u;
 }
 /* you sign in once: the sign-in lasts a year and renews itself every day you use Manasenger */
 const SESSION_DAYS=365;
@@ -226,7 +228,7 @@ async function upload(req,res,u,url){
 }
 /* sends a file in pieces: phones ask for parts of a video (Range), that is how they seek and start fast */
 async function serveMedia(req,res,id,once){
-  const m=DB.media[id];if(!m||!userOf(req))return send(res,404,{error:'нет'});
+  const m=DB.media[id];if(!m||(!once&&!userOf(req)))return send(res,404,{error:'нет'});
   /* a view-once file is reachable only through its private link */
   if(!once&&m.once)return send(res,404,{error:'нет'});
   const total=m.size;let start=0,end=total-1,code=200;
@@ -252,6 +254,19 @@ function cleanMedia(v,u){
   return o;
 }
 
+/* ---------- blocking people, and the admin ---------- */
+const ADMINS=(process.env.ADMIN_USERS||'m1lix').toLowerCase().split(',').map(x=>x.trim()).filter(Boolean);
+const isAdmin=u=>!!u&&ADMINS.includes(u.username);
+/* in a private chat: nobody writes or calls when either of the two has blocked the other */
+function dmBlocked(c,uid){
+  if(!c||c.type!=='dm')return false;const o=c.members.find(x=>x!==uid),me=DB.users[uid],other=DB.users[o];
+  return !!((me&&(me.blocked||[]).includes(o))||(other&&(other.blocked||[]).includes(uid)));
+}
+function kick(uid,reason){
+  for(const k of Object.keys(DB.sessions))if(DB.sessions[k].uid===uid)delete DB.sessions[k];mark('s:all');
+  const s=SOCKS.get(uid);if(s)s.forEach(w=>{try{w.send(JSON.stringify({t:'banned',reason}));w.close()}catch(e){}});
+}
+
 /* ---------- REST API ---------- */
 const API={};
 API['POST /api/register']=(req,res,b)=>{
@@ -269,6 +284,7 @@ API['POST /api/login']=(req,res,b)=>{
   if(!limit('login:'+ip(req),10,600e3)||!limit('login:'+username,10,600e3))throw E(429,'Слишком много попыток. Подожди 10 минут.');
   const u=Object.values(DB.users).find(x=>x.username===username);
   if(!u||!checkPass(String(b.password||''),u.pass))throw E(401,'Неверный логин или пароль');
+  if(u.banned)throw E(403,'Этот аккаунт заблокирован администратором');
   const token=newSession(res,u.id);return {me:pubUser(u),token};
 };
 API['POST /api/session/keep']=(req,res,b,u)=>{need(u);return {token:cookies(req).glint||''}};
@@ -283,6 +299,43 @@ API['POST /api/logout']=(req,res,b)=>{
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
+/* a short TikTok link (vm.tiktok.com/…) → the video number, so the video can play inside Manasenger */
+const TT=new Map();
+API['GET /api/tiktok']=async(req,res,b,u,q)=>{
+  need(u);const url=String(q.get('u')||'');
+  let m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(url);if(m)return {id:m[1]};
+  if(!/^https:\/\/(vm|vt|www|m)\.tiktok\.com\/[\w@./-]+$/.test(url))throw E(400,'Это не ссылка на TikTok');
+  if(TT.has(url))return {id:TT.get(url)};
+  if(!limit('tt:'+u.id,30,60e3))throw E(429,'Слишком часто');
+  let next=url;
+  for(let i=0;i<4;i++){
+    const r=await fetch(next,{redirect:'manual',headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130 Safari/537.36'},signal:AbortSignal.timeout(6000)}).catch(()=>null);
+    if(!r)break;const loc=r.headers.get('location');m=/\/(?:video|v)\/(\d{8,25})/.exec(loc||next);if(m){TT.set(url,m[1]);if(TT.size>500)TT.delete(TT.keys().next().value);return {id:m[1]}}
+    if(!loc)break;next=new URL(loc,next).href;
+  }
+  throw E(404,'Не получилось открыть это видео — откройте его в TikTok');
+};
+API['POST /api/block']=(req,res,b,u)=>{
+  need(u);const id=String(b.userId||'');if(!DB.users[id]||id===u.id)throw E(404,'Нет такого человека');
+  u.blocked=(u.blocked||[]).filter(x=>x!==id);if(b.on)u.blocked.push(id);mark('u:'+u.id);
+  /* if a call between them is going on, it ends */
+  for(const c of CALLS.values())if((c.a===u.id&&c.b===id)||(c.b===u.id&&c.a===id))endCall(c,'rejected',u.id);
+  return {blocked:u.blocked};
+};
+API['GET /api/admin/users']=(req,res,b,u)=>{
+  need(u);if(!isAdmin(u))throw E(403,'Только для администратора');
+  const msgs={};for(const [cid,l] of Object.entries(DB.msgs))for(const m of l)if(m.from)msgs[m.from]=(msgs[m.from]||0)+1;
+  const list=Object.values(DB.users).map(x=>({id:x.id,username:x.username,name:x.name,avatar:x.avatar||'',color:x.color,created:x.created||0,lastSeen:x.lastSeen||0,
+    online:ONLINE.has(x.id),banned:!!x.banned,admin:isAdmin(x),msgs:msgs[x.id]||0,
+    chats:Object.values(DB.chats).filter(c=>c.members.includes(x.id)&&c.type!=='self').length})).sort((a,b)=>(b.online-a.online)||(b.lastSeen-a.lastSeen));
+  return {users:list,total:list.length,online:list.filter(x=>x.online).length,banned:list.filter(x=>x.banned).length};
+};
+API['POST /api/admin/ban']=(req,res,b,u)=>{
+  need(u);if(!isAdmin(u))throw E(403,'Только для администратора');
+  const x=DB.users[String(b.userId||'')];if(!x)throw E(404,'Нет такого пользователя');if(isAdmin(x))throw E(400,'Администратора заблокировать нельзя');
+  x.banned=!!b.on;mark('u:'+x.id);if(x.banned)kick(x.id,'Ваш аккаунт заблокирован администратором');
+  return {ok:true,banned:x.banned};
+};
 const ONCE=new Map(); /* token -> {uid,img|media,exp} : a short-lived private link for one viewing */
 API['POST /api/once/open']=(req,res,b,u)=>{
   need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');
@@ -290,12 +343,12 @@ API['POST /api/once/open']=(req,res,b,u)=>{
   if(m.from===u.id)throw E(403,'Своё одноразовое сообщение посмотреть нельзя');
   if(m.once.gone||(m.once.seen||[]).includes(u.id))throw E(410,'Уже просмотрено');
   m.once.seen=(m.once.seen||[]).concat(u.id);mark('m:'+c.id);
-  const t=rid(24);ONCE.set(t,{uid:u.id,img:m.img||null,media:m.media?m.media.url.slice(7):null,exp:now()+15*60e3});
+  const t=rid(24);ONCE.set(t,{uid:u.id,img:m.img||null,media:m.media?m.media.url.slice(7):null,exp:now()+15*60e3,native:!!b.native});
   for(const [k,v] of ONCE)if(v.exp<now())ONCE.delete(k);
   /* everyone has seen it: the file is deleted a little later */
   if(c.members.every(x=>x===m.from||m.once.seen.includes(x)))setTimeout(()=>onceGone(c,m),16*60e3);
   toChat(c,{t:'upd',chat:c.id,msg:msgOut(m)});
-  return {url:'/once/'+t,k:m.once.k,dur:m.once.dur||0,w:m.media&&m.media.w,h:m.media&&m.media.h};
+  return {url:'/once/'+t+(b.native?'?n=1':''),k:m.once.k,dur:m.once.dur||0,w:m.media&&m.media.w,h:m.media&&m.media.h};
 };
 function onceGone(c,m){
   if(!m.once||m.once.gone)return;m.once.gone=true;
@@ -305,7 +358,8 @@ function onceGone(c,m){
 }
 function serveOnce(req,res,t){
   const o=ONCE.get(t),u=userOf(req);
-  if(!o||o.exp<now()||!u||u.id!==o.uid)return send(res,404,{error:'Ссылка устарела'});
+  /* the phone app's protected screen has no sign-in of its own: its private link is enough there */
+  if(!o||o.exp<now()||(u?u.id!==o.uid:!o.native))return send(res,404,{error:'Ссылка устарела'});
   if(o.img){const im=imgBuf(o.img.replace(/^\/img\//,''));if(!im)return send(res,404,{error:'нет'});
     res.writeHead(200,Object.assign({'Content-Type':im.t,'Content-Length':im.b.length,'Cache-Control':'no-store, private','Content-Disposition':'inline'},SEC));return res.end(im.b)}
   if(o.media)return serveMedia(req,res,o.media,true);
@@ -337,7 +391,7 @@ API['GET /api/me']=(req,res,b,u)=>{
   const servers=Object.values(DB.servers).filter(g=>g.members.includes(u.id));
   servers.forEach(g=>g.members.forEach(m=>ids.add(m)));
   Object.keys(u.contacts||{}).forEach(i=>ids.add(i));
-  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),packs:userPacks(u),contacts:u.contacts||{},stars:u.stars||[],tz:TZ,
+  return {me:Object.assign(pubUser(u),{admin:isAdmin(u)||undefined,blocked:u.blocked||[]}),chats,servers:servers.map(g=>serverOut(g,u.id)),packs:userPacks(u),contacts:u.contacts||{},stars:u.stars||[],tz:TZ,
     users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 API['POST /api/profile']=(req,res,b,u)=>{
@@ -401,6 +455,10 @@ API['POST /api/chats/title']=(req,res,b,u)=>{
   need(u);const c=groupOf(b.chat,u,true);const id=String(b.userId||'');if(!c.members.includes(id))throw E(404,'Нет такого участника');
   const t=cleanName(b.title).slice(0,24);c.titles=c.titles||{};if(t)c.titles[id]=t;else delete c.titles[id];
   mark('c:'+c.id);pushChat(c);return {chat:chatFor(c,u.id)};
+};
+API['POST /api/chats/avatar']=(req,res,b,u)=>{
+  need(u);const c=groupOf(b.chat,u,true);const im=b.img?cleanImg(b.img):'';if(b.img&&!im)throw E(400,'Не получилось загрузить картинку');
+  c.avatar=im?putImg(im):'';mark('c:'+c.id);addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} ${c.avatar?'сменил(а) фото':'убрал(а) фото'} группы`});pushChat(c);return {chat:chatFor(c,u.id)};
 };
 API['POST /api/chats/rename']=(req,res,b,u)=>{
   need(u);const c=groupOf(b.chat,u,true);const n=cleanName(b.name);if(!n)throw E(400,'Пустое название');
@@ -523,7 +581,7 @@ function partners(uid){ /* people in private chats and groups with this user, an
   const u=DB.users[uid];if(u&&u.contacts)Object.keys(u.contacts).forEach(i=>s.add(i));
   s.delete(uid);return s;
 }
-const canSeeStory=(s,uid)=>s.user===uid||partners(s.user).has(uid);
+const canSeeStory=(s,uid)=>s.user===uid||(partners(s.user).has(uid)&&!((DB.users[s.user]||{}).blocked||[]).includes(uid));
 const storyOut=(s,uid)=>({id:s.id,user:s.user,img:s.img,ts:s.ts,exp:s.exp,seen:!!(s.views||{})[uid],views:s.user===uid?Object.keys(s.views||{}).length:undefined});
 API['GET /api/stories']=(req,res,b,u)=>{
   need(u);const t=now(),list=[],ids=new Set();
@@ -566,6 +624,7 @@ API['POST /api/stories/reply']=(req,res,b,u)=>{ /* answer a story: the message g
   const text=String(b.text||'').slice(0,MAX_TEXT).trim();if(!text)throw E(400,'Пустое сообщение');
   const o=DB.users[s.user];let c=Object.values(DB.chats).find(x=>x.type==='dm'&&member(x,u.id)&&member(x,o.id));
   if(!c){c={id:'c'+rid(6),type:'dm',members:[u.id,o.id],created:now(),read:{}};DB.chats[c.id]=c;DB.msgs[c.id]=[];mark('c:'+c.id);mark('m:'+c.id);pushChat(c)}
+  if(dmBlocked(c,u.id))throw E(403,'Этот человек ограничил вам сообщения');
   const msg={id:'m'+rid(8),from:u.id,ts:now(),text,story:{id:s.id,img:s.img}};
   if(!s.replied){s.replied=true;mark('t:'+s.id)}
   sendMsgTo(c,u,msg);return {chat:c.id};
@@ -615,7 +674,7 @@ const ip=req=>String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'
 /* ---------- servers: text channels (stored as chats) and voice channels ---------- */
 const VOICE=new Map(); /* voice channel id -> Map(userId -> {mute,deaf,ws}) */
 function serverOut(g,uid){
-  return {id:g.id,name:g.name,color:g.color,owner:g.owner,members:g.members,invite:g.owner===uid?g.invite:'',
+  return {id:g.id,name:g.name,color:g.color,avatar:g.avatar||'',owner:g.owner,members:g.members,invite:g.owner===uid?g.invite:'',
     channels:g.channels.map(ch=>ch.type==='voice'?{id:ch.id,type:'voice',name:ch.name,users:voiceUsers(ch.id)}:{id:ch.id,type:'text',name:ch.name})};
 }
 const voiceUsers=cid=>[...(VOICE.get(cid)||new Map()).entries()].map(([id,v])=>({id,mute:!!v.mute,deaf:!!v.deaf,screen:!!v.screen}));
@@ -682,6 +741,7 @@ API['POST /api/servers/update']=(req,res,b,u)=>{
   need(u);const g=serverOf(b.server,u,true);
   if(b.name!==undefined){const n=cleanName(b.name);if(!n)throw E(400,'Пустое название');g.name=n}
   if(b.newInvite)g.invite=rid(6);
+  if(b.avatar!==undefined){const im=b.avatar?cleanImg(b.avatar):'';if(b.avatar&&!im)throw E(400,'Не получилось загрузить картинку');g.avatar=im?putImg(im):''}
   mark('g:'+g.id);pushServer(g);return {server:serverOut(g,u.id)};
 };
 API['POST /api/servers/delete']=(req,res,b,u)=>{
@@ -932,6 +992,7 @@ function handle(ws,u,m){
       }
       const media=cleanMedia(m.media,u);
       if(!text&&!img&&!stk&&!media)return;
+      if(dmBlocked(c,u.id))throw E(403,(u.blocked||[]).includes(c.members.find(x=>x!==u.id))?'Вы заблокировали этого человека. Разблокируйте, чтобы написать':'Этот человек ограничил вам сообщения');
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:stk?'':text};
       if(stk){msg.sticker=stk.img;msg.pack=pk.id}else if(img)msg.img=putImg(img);
       if(media&&!stk){msg.media=media;if(media.k!=='video')msg.text=''}
@@ -946,6 +1007,7 @@ function handle(ws,u,m){
       if(!member(c,u.id))throw E(404,'Чат не найден');
       if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
       const to=DB.chats[String(m.to||'')];if(!member(to,u.id))throw E(404,'Чат не найден');
+      if(dmBlocked(to,u.id))throw E(403,'Нельзя отправить: один из вас заблокировал другого');
       const src=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));if(!src||src.del||src.sys||src.call)throw E(404,'Сообщение не найдено');
       if(src.once)throw E(403,'Одноразовое сообщение нельзя переслать');
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:src.text||''};
@@ -1024,6 +1086,7 @@ function handle(ws,u,m){
     case 'call':{
       if(!member(c,u.id)||c.type!=='dm')throw E(400,'Звонить можно в личном чате');
       if(!limit('call:'+u.id,6,60e3))throw E(429,'Слишком много звонков подряд');
+      if(dmBlocked(c,u.id))throw E(403,'Позвонить нельзя: один из вас заблокировал другого');
       const other=c.members.find(x=>x!==u.id);
       if(inCall(u.id))throw E(409,'Ты уже в звонке');
       if(voiceChannelOf(u.id))throw E(409,'Сначала выйди из голосового канала');
@@ -1057,10 +1120,10 @@ function handle(ws,u,m){
 }
 
 /* ---------- HTTP ---------- */
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.mdl':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.mdl':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.jpg':'image/jpeg','.jpeg':'image/jpeg'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
-  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
+  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src https://www.tiktok.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
 /* answers bigger than a couple of kilobytes (the chat list, message history) go out compressed: several times less to download */
 function send(res,code,o){
   const h=Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Accept-Encoding'},SEC);let b=Buffer.from(JSON.stringify(o));

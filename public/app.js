@@ -87,8 +87,8 @@ function avatar(u,size='',dot=true){
 function chatAvatar(c,size){
   if(c.type==='dm')return avatar(peerOf(c),size);
   if(c.type==='self')return `<span class="ava ${size} self">${ic('book')}</span>`;
-  if(c.type==='channel'){const g=S.servers[c.server]||{};return `<span class="ava ${size}" style="--c:${esc(g.color||'#5f8cc0')}">#</span>`}
-  return `<span class="ava ${size}" style="--c:${esc(c.color||'#9b6bff')}">${esc(initials(c.name))}</span>`;
+  if(c.type==='channel'){const g=S.servers[c.server]||{};return `<span class="ava ${size}" style="--c:${esc(g.color||'#5f8cc0')}">${g.avatar?`<img src="${esc(g.avatar)}" alt="" loading="lazy">`:'#'}</span>`}
+  return `<span class="ava ${size}" style="--c:${esc(c.color||'#9b6bff')}">${c.avatar?`<img src="${esc(c.avatar)}" alt="" loading="lazy">`:esc(initials(c.name))}</span>`;
 }
 const peerOf=c=>S.users[c.members.find(m=>m!==S.me.id)]||{name:'Удалённый аккаунт',color:'#777',username:''};
 /* the name you saved a person under in contacts, otherwise their own name */
@@ -258,7 +258,13 @@ async function pushSubscribe(){
 async function pushEnable(){
   if(!('Notification' in window)){toast(/iP(hone|ad)/.test(navigator.userAgent)?'На iPhone: сначала «На экран „Домой“», потом откройте Manasenger оттуда':'Этот браузер не умеет уведомления');return}
   let p=Notification.permission;
-  if(p==='default')try{p=await Notification.requestPermission()}catch(e){}
+  if(p==='default'){
+    /* the browser shows its own small window: point at it, people miss it */
+    const hint=setTimeout(()=>toast(touch?'Нажмите «Разрешить» в окне, которое появилось на экране':'👆 Нажмите «Разрешить» в окошке браузера вверху слева, у адресной строки',8000),400);
+    try{p=await Notification.requestPermission()}catch(e){}clearTimeout(hint);
+    if(p==='default'){notifHelp('default');return}
+  }
+  if(p==='denied'){notifHelp('denied');renderPushAsk();return}
   if(p==='granted'){
     if(!PUSH_OK){toast(IS_DESKTOP?'Уведомления включены 🔔':'Уведомления будут, пока Manasenger открыт');renderPushAsk();return}
     if(await pushSubscribe())toast('Уведомления включены 🔔');else toast('Не получилось подключить уведомления. Нажми «Проверить» в настройках');
@@ -275,6 +281,17 @@ function renderPushAsk(){
   el=document.createElement('div');el.id='pushask';el.className='pushask glass';
   el.innerHTML=`<span>🔔</span><span class="mid"><b>Включить уведомления?</b><small>Сообщения и звонки — даже когда Manasenger закрыт</small></span><button class="gbtn primary" data-act="pushon">Включить</button><button class="x" data-act="pushno" aria-label="Не сейчас">${ic('x')}</button>`;
   document.body.appendChild(el);
+}
+/* the browser didn't show the question or it was blocked: how to turn notifications on by hand */
+function notifHelp(kind){
+  const desk=!touch,apk=/Android/.test(navigator.userAgent);
+  sheet(`<h2>🔔 Как включить уведомления</h2>
+    <p class="sub">${kind==='denied'?'Уведомления для Manasenger запрещены в настройках браузера. Их можно разрешить так:':'Браузер не показал вопрос (так бывает, если он «приглушил» запросы). Разрешите вручную:'}</p>
+    ${desk?`<ol class="help-ol"><li>Слева от адреса сайта нажмите значок <b>🔒</b> (или <b>⚙</b>)</li><li>Найдите <b>Уведомления</b> и выберите <b>Разрешить</b></li><li>Обновите страницу (F5)</li></ol>
+      <p class="sub">Или установите программу Manasenger для Windows — в ней уведомления работают сразу: Настройки → Приложение.</p>`
+    :apk?`<ol class="help-ol"><li>Откройте <b>Настройки телефона → Приложения → Manasenger</b> (или Chrome, если открываете в браузере)</li><li><b>Уведомления → Разрешить</b></li><li>Вернитесь в Manasenger и нажмите «Включить» ещё раз</li></ol>`
+    :`<ol class="help-ol"><li>Добавьте Manasenger на экран «Домой» (Safari → Поделиться → На экран «Домой»)</li><li>Откройте его с иконки и нажмите «Включить»</li></ol>`}
+    <div class="btns"><button class="gbtn primary" data-act="notifretry">Проверить ещё раз</button></div>`);
 }
 async function pushTest(){
   if(!('Notification' in window)||Notification.permission!=='granted'){await pushEnable();return}
@@ -299,7 +316,7 @@ function pushSetup(){
 /* the server sends notifications only while Manasenger is not on screen */
 const sendVis=()=>wsSend({t:'vis',v:!document.hidden&&document.hasFocus()});
 ['visibilitychange','focus','blur'].forEach(ev=>(ev==='visibilitychange'?document:window).addEventListener(ev,sendVis));
-function setMe(r){S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
+function setMe(r){S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
 function renderShell(){
   $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
   renderRail();renderSide();renderMain();
@@ -314,17 +331,18 @@ function renderSideNow(){
   if(S.view!=='home'&&S.servers[S.view]){el.innerHTML=serverSideHTML(S.servers[S.view])+voicePanelHTML();return}
   S.view='home';
   const keep=document.activeElement&&document.activeElement.id==='q';
-  const head={calls:'Звонки',contacts:'Контакты'}[S.tab]||'Чаты';
+  const head={calls:'Звонки',contacts:'Контакты',tiktok:'TikTok'}[S.tab]||'Чаты';
   const btns=S.tab==='contacts'?`<button class="gbtn ic" data-act="addcontact" title="Добавить контакт" aria-label="Добавить контакт">${ic('addUser')}</button>`
     :`<button class="gbtn ic" data-act="newgroup" title="Новая группа" aria-label="Новая группа">${ic('users')}</button>
       <button class="gbtn ic" data-act="newchat" title="Новый чат" aria-label="Новый чат">${ic('edit')}</button>`;
   el.innerHTML=`<div class="side-h"><h1>${head}</h1>${btns}</div>
-    ${S.tab!=='calls'?`<label class="search">${ic('search')}<input id="q" placeholder="${S.tab==='contacts'?'Поиск по контактам':'Поиск или @логин'}" value="${esc(S.q)}" autocomplete="off" spellcheck="false"></label>`:''}
-    <div class="list" id="list">${S.tab==='chats'?storiesRowHTML()+chatListHTML():S.tab==='contacts'?contactsHTML():callsHTML()}</div>
+    ${S.tab!=='calls'&&S.tab!=='tiktok'?`<label class="search">${ic('search')}<input id="q" placeholder="${S.tab==='contacts'?'Поиск по контактам':'Поиск или @логин'}" value="${esc(S.q)}" autocomplete="off" spellcheck="false"></label>`:''}
+    <div class="list" id="list">${S.tab==='chats'?storiesRowHTML()+chatListHTML():S.tab==='contacts'?contactsHTML():S.tab==='tiktok'?tiktokHTML():callsHTML()}</div>
     <nav class="tabbar glass pill">
       <button class="${S.tab==='chats'?'on':''}" data-act="tab" data-t="chats">${ic('chats')}<span>Чаты</span></button>
       <button class="${S.tab==='contacts'?'on':''}" data-act="tab" data-t="contacts">${ic('contact')}<span>Контакты</span></button>
       <button class="${S.tab==='calls'?'on':''}" data-act="tab" data-t="calls">${ic('calls')}<span>Звонки</span></button>
+      <button class="${S.tab==='tiktok'?'on':''}" data-act="tab" data-t="tiktok"><span class="tt-ic">♪</span><span>TikTok</span></button>
       <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Настройки</span></button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 }
@@ -421,6 +439,7 @@ function renderMain(){
     <input type="file" id="file" accept="image/*,video/*" hidden>`;
   const t=$('#txt');t.value=S.draft[c.id]||'';autosize(t);compState();
   renderStatus();renderCtx();gcBanner();renderMsgs(true);applyChatWall(c.id);S.stk=false;
+  if(c.type==='dm'){const o=peerOf(c);if((S.me.blocked||[]).includes(o.id)){const cp=document.querySelector('.composer');if(cp)cp.innerHTML=`<div class="blk-bar glass pill"><span>🚫 Вы заблокировали этого человека</span><button class="gbtn" data-act="block" data-id="${o.id}">Разблокировать</button></div>`}}
   if(!mobile())t.focus();
 }
 function renderStatus(){
@@ -502,7 +521,7 @@ function msgHTML(c,m,prev,next){
       (m.media&&m.media.k==='voice'?voiceHTML(m):'')+
       (m.media&&m.media.k==='video'?`<button class="vidm ${m.pending?'up':''}" data-act="playvid" data-id="${m.id}" style="${m.media.w&&m.media.h?`aspect-ratio:${m.media.w}/${m.media.h}`:''}">${m.media.poster||m.media.posterLocal?`<img src="${esc(m.media.posterLocal||m.media.poster)}" alt="" loading="lazy">`:'<video src="'+esc(m.media.local||m.media.url)+'#t=0.5" preload="metadata" muted playsinline></video>'}
         <span class="vid-play">${m.pending?`<i class="spin"></i>`:'▶'}</span><span class="vid-t">${m.pending?(m.media.progress||0)+'%':clock(m.media.dur)}</span></button>`:'')+
-      (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
+      (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+(m.text?ttCard(m.text):'')+meta;
   }
   const re=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
   const bb=bubbleOf(m.from);
@@ -561,15 +580,23 @@ function onceHTML(m,me){
   return `<button class="once open" data-act="onceopen" data-id="${m.id}"><span class="oic">🔥</span><span class="mid"><b>${e} ${label}${o.dur?' · '+clock(o.dur):''}</b><small>Нажмите, чтобы посмотреть · 1 раз</small></span></button>`;
 }
 let OV=null;
+/* the Android app (version 3 and up) opens Manasenger with ?apk=3: it has a protected screen for view-once messages */
+(()=>{const q=new URLSearchParams(location.search);if(q.get('apk')){store.set('apk',+q.get('apk')||1);history.replaceState(null,'',location.pathname+location.hash)}})();
+const IN_APK=()=>store.get('apk',0)>=3&&/Android/.test(navigator.userAgent);
 async function onceOpen(id){
   if(OV)return;const c=S.cur;
+  if(IN_APK()){
+    let r;try{r=await api('/api/once/open',{chat:c,id,native:true})}catch(e){toast(e.message);return}
+    location.href=`intent://open?u=${encodeURIComponent(r.url)}&k=${r.k}#Intent;scheme=manasenger-once;package=com.manasenger.app;end`;return;
+  }
   let r;try{r=await api('/api/once/open',{chat:c,id})}catch(e){toast(e.message);return}
+  try{window.mnDesktop&&window.mnDesktop.protect&&window.mnDesktop.protect(true)}catch(e){}
   OV={id};const el=document.createElement('div');el.id='oncev';el.className='oncev';
   const no='oncontextmenu="return false" draggable="false"';
   const body=r.k==='photo'?`<img src="${r.url}" alt="" ${no}>`
     :r.k==='voice'?`<div class="ov-voice"><div class="ov-ic">🎤</div><div class="ov-bar"><i id="ovp"></i></div><audio src="${r.url}" autoplay></audio></div>`
     :`<video class="${r.k==='round'?'ov-round':''}" src="${r.url}" autoplay playsinline ${r.k==='video'?'controls':''} controlslist="nodownload noplaybackrate" disablepictureinpicture disableremoteplayback ${no}></video>`;
-  el.innerHTML=`<div class="ov-top"><span>🔥 Одноразовое ${ONCE_K[r.k][1].toLowerCase()} — исчезнет после просмотра</span><button class="gbtn ic" data-act="onceclose" aria-label="Закрыть">${ic('x')}</button></div><div class="ov-body">${body}</div>`;
+  el.innerHTML=`<div class="ov-top"><span>🔥 Одноразовое ${ONCE_K[r.k][1].toLowerCase()} — исчезнет после просмотра${window.mnDesktop&&window.mnDesktop.protect?' · скриншот не сохранится':''}</span><button class="gbtn ic" data-act="onceclose" aria-label="Закрыть">${ic('x')}</button></div><div class="ov-body">${body}</div>`;
   el.addEventListener('contextmenu',e=>e.preventDefault());
   document.body.appendChild(el);VP.a.pause();
   const media=el.querySelector('video,audio');
@@ -577,7 +604,7 @@ async function onceOpen(id){
     if(r.k==='voice')media.ontimeupdate=()=>{const p=$('#ovp');if(p&&media.duration)p.style.width=(media.currentTime/media.duration*100)+'%'};
     if(r.k==='round')el.querySelector('.ov-body').addEventListener('click',()=>media.paused?media.play():media.pause())}
 }
-function onceClose(){const el=$('#oncev');if(el){el.querySelectorAll('video,audio').forEach(v=>{v.pause();v.removeAttribute('src');v.load()});el.remove()}OV=null}
+function onceClose(){try{window.mnDesktop&&window.mnDesktop.protect&&window.mnDesktop.protect(false)}catch(e){}const el=$('#oncev');if(el){el.querySelectorAll('video,audio').forEach(v=>{v.pause();v.removeAttribute('src');v.load()});el.remove()}OV=null}
 const clock=s=>{s=Math.round(s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 function voiceHTML(m){
   const md=m.media,w=md.wave&&md.wave.length?md.wave:Array.from({length:32},(_,i)=>8+((i*7)%11)),playing=VP.id===m.id;
@@ -611,6 +638,30 @@ function roundTap(el){
 }
 function linkify(t){
   return esc(t).replace(/\bhttps?:\/\/[^\s<]+#pack\/(p[\w-]{4,20})/g,(u,id)=>`<a href="#pack/${id}" data-act="pklinkmsg" data-id="${id}">🎨 Набор стикеров</a>`).replace(/(^|[^"])\bhttps?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g,(all,pre)=>pre+all.slice(pre.length).replace(/^.*$/,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`));
+}
+/* ---------- TikTok ---------- */
+const TT_RE=/https?:\/\/(?:www\.|m\.|vm\.|vt\.)?tiktok\.com\/[^\s<]+/i;
+function ttCard(text){const m=TT_RE.exec(text);if(!m)return '';return `<button class="ttcard" data-act="ttplay" data-u="${esc(m[0])}"><span class="tt-logo">♪</span><span class="mid"><b>Видео TikTok</b><small>Нажмите, чтобы смотреть здесь</small></span><span class="tt-play">▶</span></button>`}
+async function ttId(u){const m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(u);if(m)return m[1];return (await api('/api/tiktok?u='+encodeURIComponent(u))).id}
+const ttFrame=id=>`<iframe class="ttframe" src="https://www.tiktok.com/player/v1/${id}?autoplay=1&music_info=1&description=1&rel=0&native_context_menu=0" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+async function ttPlay(u){
+  let id;try{id=await ttId(u)}catch(e){toast(e.message);return}
+  let el=$('#ttview');if(!el){el=document.createElement('div');el.id='ttview';el.className='ttview';document.body.appendChild(el)}
+  el.innerHTML=`<div class="tt-box">${ttFrame(id)}<div class="tt-bar"><button class="gbtn" data-act="ttext" data-u="${esc(u)}">Открыть в TikTok</button><button class="gbtn ic" data-act="ttclose" aria-label="Закрыть">${ic('x')}</button></div></div>`;
+  VP.a.pause();
+}
+function ttClose(){const el=$('#ttview');if(el)el.remove()}
+/* the whole TikTok: in the computer app a separate window, on phones over Manasenger (or in the TikTok app) */
+function ttOpen(u){u=u||'https://www.tiktok.com/foryou';if(window.mnDesktop&&window.mnDesktop.tiktok){window.mnDesktop.tiktok(u);return}window.open(u,'_blank','noopener')}
+function tiktokHTML(){
+  const seen=[];Object.values(S.msgs).forEach(l=>(l||[]).forEach(m=>{const x=m.text&&TT_RE.exec(m.text);if(x&&!seen.some(s=>s.u===x[0]))seen.push({u:x[0],from:m.from,ts:m.ts})}));
+  seen.sort((a,b)=>b.ts-a.ts);
+  return `<div class="tt-home">
+    <button class="tt-open" data-act="ttopen"><span class="tt-logo big">♪</span><span><b>Открыть TikTok</b><small>Лента «Для вас», поиск, профили</small></span></button>
+    <div class="section-t">Смотреть видео по ссылке</div>
+    <div class="tt-paste"><input class="input" id="ttu" placeholder="Вставьте ссылку на видео TikTok" autocomplete="off"><button class="gbtn primary" data-act="ttgo">▶</button></div>
+    ${seen.length?`<div class="section-t">Из ваших чатов</div>${seen.slice(0,30).map(x=>`<button class="row" data-act="ttplay" data-u="${esc(x.u)}"><span class="tt-logo">♪</span><span class="mid"><span class="nm">${esc(nm(S.users[x.from]))}</span><span class="sub"><span class="lm">${esc(x.u.replace(/^https?:\/\//,''))}</span></span></span></button>`).join('')}`:'<p class="sub" style="padding:8px 4px">Ссылки на TikTok из ваших чатов появятся здесь. Ими можно делиться прямо в переписке — видео будет играть внутри Manasenger.</p>'}
+  </div>`;
 }
 function linkifyOld(t){
   return esc(t).replace(/\bhttps?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
@@ -941,15 +992,32 @@ function infoSheet(){
       ${c.streak&&c.streak.n>=3?`<p class="fire-note">${fire(c,true)}<br>${c.streak.today?`Вы общаетесь ${c.streak.n} дн. подряд`:'Напишите друг другу сегодня, иначе огонёк погаснет'}</p>`:`<p class="fire-note dim">Общайтесь 3 дня подряд — и появится огонёк 🔥</p>`}
       ${c.pet?`<button class="gbtn" style="margin-top:10px" data-act="pet">🥚 ${esc(c.pet.name||'Серийчик')} — открыть питомца</button>`:`<p class="fire-note dim">Напишите друг другу сегодня — появится ваш питомец Серийчик 🥚</p>`}</div>
       <div class="btns" style="justify-content:center"><button class="gbtn" data-act="call" data-k="audio">${ic('phone')}Звонок</button><button class="gbtn" data-act="call" data-k="video">${ic('video')}Видео</button>
-      <button class="gbtn" data-act="editcontact" data-id="${u.id}">${ic(saved?'edit':'addUser')}${saved?'Имя':'В контакты'}</button></div>`);return}
+      <button class="gbtn" data-act="editcontact" data-id="${u.id}">${ic(saved?'edit':'addUser')}${saved?'Имя':'В контакты'}</button></div>
+      <div class="btns" style="justify-content:center"><button class="gbtn ${(S.me.blocked||[]).includes(u.id)?'':'danger'}" data-act="block" data-id="${u.id}">${ic('x')}${(S.me.blocked||[]).includes(u.id)?'Разблокировать':'Заблокировать'}</button></div>`);return}
   const admin=c.admin===S.me.id,T=c.titles||{};
-  sheet(`<div class="prof">${chatAvatar(c,'xl')}${admin?`<label class="field" style="width:100%;margin:8px 0 0"><input class="input" id="grname" maxlength="40" value="${esc(c.name)}" style="text-align:center;font-weight:700"></label>`:`<h3>${esc(c.name)}</h3>`}<small>${c.members.length} участник(ов)</small></div>
+  sheet(`<div class="prof">${chatAvatar(c,'xl')}${admin?`<div class="btns" style="justify-content:center;margin:6px 0 0"><button class="gbtn" data-act="grava">${ic('image')}Сменить фото группы</button>${c.avatar?'<button class="gbtn" data-act="gravadel">Убрать</button>':''}</div>`:''}${admin?`<label class="field" style="width:100%;margin:8px 0 0"><input class="input" id="grname" maxlength="40" value="${esc(c.name)}" style="text-align:center;font-weight:700"></label>`:`<h3>${esc(c.name)}</h3>`}<small>${c.members.length} участник(ов)</small></div>
     <button class="row add-row" data-act="gadd"><span class="ava s add">${ic('addUser')}</span><span class="mid"><span class="nm">Добавить участников</span></span></button>
     ${c.petOn?`<button class="row add-row" data-act="pet"><span class="ava s add pet-ava">${petSvgOf(c)}</span><span class="mid"><span class="nm">${esc(c.pet.name||'Серийчик')}</span><span class="sub"><span class="lm">питомец группы · ${(c.streak&&c.streak.n)||0} дн. подряд</span></span></span></button>`
       :`<button class="row add-row" data-act="petadd"><span class="ava s add">🥚</span><span class="mid"><span class="nm">Добавить Серийчика в группу</span><span class="sub"><span class="lm">питомец растёт, если вы пишете сюда каждый день</span></span></span></button>`}
     <div class="section-t">Участники${admin?' · нажми, чтобы подписать':''}</div>
     ${c.members.map(i=>S.users[i]).filter(Boolean).sort((a,b)=>(b.id===c.admin)-(a.id===c.admin)).map(u=>`<${admin&&u.id!==S.me.id?'button':'div'} class="row" ${admin&&u.id!==S.me.id?`data-act="gmember" data-id="${u.id}"`:''}>${avatar(u,'s')}<span class="mid"><span class="top"><span class="nm">${esc(nm(u))}${T[u.id]?` <span class="mtitle">${esc(T[u.id])}</span>`:''}${u.id===c.admin?' <small style="color:var(--fg3)">создатель</small>':''}</span></span><span class="sub"><span class="lm">${esc(seen(u))}</span></span></span></${admin&&u.id!==S.me.id?'button':'div'}>`).join('')}
     <div class="btns"><button class="gbtn danger" data-act="leave">Выйти из группы</button>${admin?'<button class="gbtn primary" data-act="grsave">Сохранить</button>':''}</div>`);
+}
+function blockedSheet(){
+  const l=(S.me.blocked||[]).map(i=>S.users[i]||{id:i,name:'Пользователь',username:''});
+  sheet(`<h2>Заблокированные</h2><p class="sub">Эти люди не могут вам писать и звонить</p>${l.map(u=>`<div class="row">${avatar(u,'s',false)}<span class="mid"><span class="nm">${esc(nm(u))}</span><span class="sub"><span class="lm">@${esc(u.username||'')}</span></span></span><button class="gbtn" data-act="block" data-id="${u.id}">Разблокировать</button></div>`).join('')||'<div class="empty">Никого</div>'}`);
+}
+/* admin: everyone using Manasenger, and blocking accounts */
+async function adminSheet(keep){
+  let r;try{r=await api('/api/admin/users')}catch(e){toast(e.message);return}
+  S.adm=r;const q=keep&&$('#admq')?$('#admq').value:'';
+  const ago=t=>{if(!t)return '—';const m=Math.round((Date.now()-t)/60e3);return m<1?'только что':m<60?m+' мин назад':m<1440?Math.round(m/60)+' ч назад':Math.round(m/1440)+' дн. назад'};
+  const row=u=>`<div class="row adm-row" data-q="${esc((u.name+' '+u.username).toLowerCase())}">${avatar(Object.assign({},u,{online:u.online}),'s')}<span class="mid"><span class="top"><span class="nm">${esc(u.name)}${u.admin?' 👑':''}${u.banned?' <b class="adm-ban">ЗАБЛОКИРОВАН</b>':''}</span></span><span class="sub"><span class="lm">@${esc(u.username)} · ${u.online?'<b style="color:var(--good)">в сети</b>':'был(а) '+ago(u.lastSeen)} · ${u.msgs} сообщ. · ${u.chats} чатов · с ${u.created?new Date(u.created).toLocaleDateString('ru'):'—'}</span></span></span>${u.admin?'':`<button class="gbtn ${u.banned?'':'danger'}" data-act="adm-ban" data-id="${u.id}" data-on="${u.banned?0:1}">${u.banned?'Разблокировать':'Заблокировать'}</button>`}</div>`;
+  sheet(`<h2>👑 Админ-панель</h2>
+    <div class="adm-stats"><div><b>${r.total}</b><small>пользователей</small></div><div><b style="color:var(--good)">${r.online}</b><small>в сети</small></div><div><b style="color:var(--bad)">${r.banned}</b><small>заблокировано</small></div></div>
+    <input class="input" id="admq" placeholder="Поиск по имени или логину" value="${esc(q)}">
+    <div class="adm-list">${r.users.map(row).join('')}</div>`);
+  const i=$('#admq');if(i&&q)i.dispatchEvent(new Event('input'));
 }
 function settingsSheet(){
   const me=S.me,th=store.get('theme','auto'),w=store.get('wall','slate');
@@ -962,6 +1030,8 @@ function settingsSheet(){
     <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k&&!S.appWall?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}<button class="wall-pick ${S.appWall?'on':''}" data-act="appwall" title="Своё фото" aria-label="Обои из галереи" ${S.appWall?`style="background-image:url('${S.appWall}')"`:''}>${S.appWall?'':ic('image')}</button></div>${S.appWall?'<div class="btns" style="margin-top:8px"><button class="gbtn" data-act="appwalldel">Убрать своё фото</button></div>':''}</div>
     <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
     <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
+    ${me.admin?`<div class="set-row"><span class="mid"><b>👑 Админ-панель</b><small>Все пользователи Manasenger, блокировка аккаунтов</small></span><button class="gbtn primary" data-act="admin">Открыть</button></div>`:''}
+    <div class="set-row"><span class="mid"><b>Заблокированные</b><small>${(me.blocked||[]).length?(me.blocked.length+' чел. — не могут вам писать и звонить'):'Никого'}</small></span>${(me.blocked||[]).length?'<button class="gbtn" data-act="blocklist">Список</button>':''}</div>
     <div class="set-row"><span class="mid"><b>Стиль сообщений</b><small>Цвет и рамка ваших сообщений — как в TikTok</small></span><button class="gbtn" data-act="bubbles">Выбрать</button></div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
@@ -1038,6 +1108,7 @@ function onWS(m){
       const was=S.chats[m.chat.id];S.chats[m.chat.id]=Object.assign(was||{},m.chat);if(!m.chat.streak)delete S.chats[m.chat.id].streak;
       if(m.chat.streak&&m.chat.streak.n>=3&&was&&(!was.streak||was.streak.n<m.chat.streak.n)&&m.chat.streak.today&&S.cur===m.chat.id)navigator.vibrate&&navigator.vibrate([20,40,20]);
       renderSide();if(S.cur===m.chat.id){renderStatus();if(m.chat.pet&&!document.querySelector('.pet-btn'))renderMain();else refreshPetBtn()}return}
+    case 'banned':{S.banned=true;try{WS.onclose=null;WS.close()}catch(e){}$('#app').innerHTML=`<div class="auth"><div class="card glass empty"><b>⛔ Аккаунт заблокирован</b>${esc(m.reason||'Администратор заблокировал этот аккаунт')}</div></div>`;return}
     case 'error':{
       if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);renderMsgs()}}
       toast(m.error);if(CALL&&CALL.state==='calling'&&!CALL.id)hangup(true);return;
@@ -1081,7 +1152,7 @@ let CALL=null,ICE=null;
 let ICE_AT=0,ICE_RELAY=false;
 async function iceServers(){if(!ICE||Date.now()-ICE_AT>3*3600e3){try{const r=await api('/api/ice');ICE=r.iceServers;ICE_RELAY=!!r.relay;ICE_AT=Date.now()}catch(e){ICE=ICE||[{urls:'stun:stun.l.google.com:19302'}]}}return ICE}
 const AUDIO={echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:{ideal:1},sampleRate:{ideal:48000}};
-const camC=(facing)=>isLite()?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}};
+const camC=(facing)=>(isLite()||(touch&&GC&&GC.peers.size>2))?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}};
 async function getMedia(video){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Браузер не даёт доступ к микрофону. Открой сайт по https.');
   let st;
@@ -1168,6 +1239,37 @@ function restartIce(){
   if(CALL.dir==='out'){try{CALL.pc.restartIce()}catch(e){}}else wsSend({t:'rtc',callId:CALL.id,data:{restart:1}});
 }
 /* video bitrate: HD when the network is good, lower when it is not */
+/* ---------- speaker: where the call sound goes (speakers, headphones…) and "loud" mode ----------
+   Loud mode sends the other side's voice through a volume boost with a limiter, so it is louder but never crackles. */
+const SPK={loud:store.get('loud',false),sink:store.get('sink',''),ctx:null,nodes:new Map()};
+function callStreams(){const l=[];if(CALL&&CALL.remote)l.push(['c',CALL.remote,$('#ra')]);if(GC)GC.peers.forEach((p,id)=>{if(p.audio&&p.audio.srcObject)l.push(['g'+id,p.audio.srcObject,p.audio])});return l}
+function applySpeaker(){
+  store.set('sink',SPK.sink);
+  const list=callStreams();
+  if(SPK.loud&&list.length&&(window.AudioContext||window.webkitAudioContext)){
+    if(!SPK.ctx){const A=window.AudioContext||window.webkitAudioContext;SPK.ctx=new A({latencyHint:'interactive'});
+      SPK.gain=SPK.ctx.createGain();SPK.gain.gain.value=2.6;SPK.comp=SPK.ctx.createDynamicsCompressor();SPK.comp.threshold.value=-10;SPK.comp.ratio.value=12;SPK.gain.connect(SPK.comp);SPK.comp.connect(SPK.ctx.destination)}
+    SPK.ctx.resume().catch(()=>{});
+    if(SPK.sink&&SPK.ctx.setSinkId)SPK.ctx.setSinkId(SPK.sink).catch(()=>{});
+    for(const [k,st,el] of list){
+      if(!st.getAudioTracks().length)continue;
+      if(!SPK.nodes.has(k)||SPK.nodes.get(k).st!==st){try{const n=SPK.ctx.createMediaStreamSource(st);n.connect(SPK.gain);SPK.nodes.set(k,{n,st})}catch(e){}}
+      if(el){el.muted=true;el.play().catch(()=>{})} /* the element must keep playing (muted) or Chrome gives silence */
+    }
+  }else{
+    SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
+    for(const [k,st,el] of list)if(el){el.muted=false;if(SPK.sink&&el.setSinkId)el.setSinkId(SPK.sink).catch(()=>{});el.play().catch(()=>{})}
+  }
+}
+async function speakerSheet(){
+  let outs=[];try{outs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audiooutput'&&d.deviceId!=='communications')}catch(e){}
+  const canPick=outs.length>1&&('setSinkId' in HTMLMediaElement.prototype);
+  if(!canPick){SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();toast(SPK.loud?'🔊 Громкая связь включена':'Обычная громкость');if(CALL)renderCall();if(GC)gcRender();return}
+  const cur=SPK.sink||'default';
+  sheet(`<h2>🔊 Звук звонка</h2><div class="section-t">Куда выводить</div>
+    ${outs.map(d=>`<button class="row" data-act="spk-out" data-id="${esc(d.deviceId)}"><span class="mid"><span class="nm">${esc(d.label||(d.deviceId==='default'?'По умолчанию':'Устройство'))}</span></span>${(cur===d.deviceId)?ic('check'):''}</button>`).join('')}
+    <div class="set-row" style="margin-top:8px"><span class="mid"><b>Громкая связь</b><small>Голос собеседника громче</small></span><button class="gbtn ${SPK.loud?'primary':''}" data-act="spk-loud">${SPK.loud?'Вкл':'Выкл'}</button></div>`);
+}
 function tuneSenders(){
   if(!CALL||!CALL.vv)return;
   const sd=CALL.vv.sender,p=sd.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
@@ -1175,9 +1277,10 @@ function tuneSenders(){
   const e=p.encodings[0];
   if(CALL.screen){e.maxBitrate=bad?800e3:2500e3;e.maxFramerate=bad?10:20;e.scaleResolutionDownBy=1}
   else{e.maxBitrate=bad?300e3:mid?700e3:lite?900e3:1800e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2:1}
-  p.degradationPreference=CALL.screen?'maintain-resolution':'balanced';
+  /* on a weak network keep the picture smooth (lower sharpness) instead of freezing */
+  p.degradationPreference=CALL.screen?'maintain-resolution':bad?'maintain-framerate':'balanced';
   sd.setParameters(p).catch(()=>{});
-  if(CALL.va){const ap=CALL.va.sender.getParameters();if(ap.encodings&&ap.encodings[0]){ap.encodings[0].maxBitrate=bad?24e3:64e3;ap.encodings[0].priority='high';CALL.va.sender.setParameters(ap).catch(()=>{})}}
+  if(CALL.va){const ap=CALL.va.sender.getParameters();if(ap.encodings&&ap.encodings[0]){ap.encodings[0].maxBitrate=bad?24e3:64e3;ap.encodings[0].priority='high';ap.encodings[0].networkPriority='high';CALL.va.sender.setParameters(ap).catch(()=>{})}}
 }
 /* every 2 seconds: round-trip time and lost packets → connection bars and video quality */
 function startStats(){
@@ -1258,7 +1361,7 @@ function hangup(silent){
   if(CALL.id)wsSend({t:CALL.state==='ringing'?'call-reject':'call-end',callId:CALL.id});
   cleanupCall();
 }
-function cleanupCall(){
+function cleanupCall(){SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
   stopRing();
   if(!CALL)return;
   clearInterval(CALL.timer);clearInterval(CALL.statT);clearTimeout(CALL.discT);clearTimeout(CALL.failT);clearTimeout(CALL.idleT);
@@ -1282,22 +1385,43 @@ async function toggleCam(){
 }
 /* front or back camera. Many phones cannot keep two cameras open, so the old one is released first (before());
    if the phone does not understand "back camera", it is found in the list of cameras by name or order. */
-async function openCam(facing,size,before){
-  const md=navigator.mediaDevices,base=size||camC();delete base.facingMode;
+/* ---------- opening the front or back camera ----------
+   Some phones hand back the same camera when asked for the other one, so every result is checked:
+   it must really face the asked way (or be a different camera than before); otherwise the next camera is tried.
+   Which camera is front and which is back is remembered once found. */
+const CAMS={user:'',environment:''};
+const BACK_RE=/back|rear|environment|задн|тыл|основн/i,FRONT_RE=/front|user|фронт|передн|selfie|face/i;
+function camFacing(t){try{const s=t.getSettings();if(s.facingMode)return s.facingMode==='user'?'user':'environment';}catch(e){}
+  const l=(t&&t.label)||'';return FRONT_RE.test(l)?'user':BACK_RE.test(l)?'environment':''}
+async function openCam(facing,size,before,prevId){
+  const md=navigator.mediaDevices,base=Object.assign({},size||camC());delete base.facingMode;delete base.deviceId;
   if(before)before();
-  const tries=[()=>md.getUserMedia({video:Object.assign({},base,{facingMode:{exact:facing}})}),
-    async()=>{const ds=(await md.enumerateDevices()).filter(d=>d.kind==='videoinput');if(ds.length<2)throw new Error('one camera');
-      const back=/back|rear|environment|задн|тыл/i,pick=facing==='environment'?(ds.find(d=>back.test(d.label))||ds[ds.length-1]):(ds.find(d=>/front|user|фронт|передн/i.test(d.label))||ds[0]);
-      return md.getUserMedia({video:Object.assign({},base,{deviceId:{exact:pick.deviceId}})})},
-    ()=>md.getUserMedia({video:Object.assign({},base,{facingMode:facing})})];
-  let err;for(const t of tries){try{return await t()}catch(e){err=e}}
+  await new Promise(r=>setTimeout(r,60)); /* some phones need a moment after the old camera is released */
+  const good=s=>{const t=s.getVideoTracks()[0];if(!t)return false;const f=camFacing(t),id=t.getSettings().deviceId;
+    if(f&&f!==facing)return false;if(!f&&prevId&&id===prevId)return false;return true};
+  const tryGet=async c=>{const s=await md.getUserMedia({video:Object.assign({},base,c)});if(good(s)){const t=s.getVideoTracks()[0];CAMS[facing]=t.getSettings().deviceId||CAMS[facing];return s}s.getTracks().forEach(t=>t.stop());throw new Error('wrong camera')};
+  const tries=[];
+  if(CAMS[facing])tries.push(()=>tryGet({deviceId:{exact:CAMS[facing]}}));
+  tries.push(()=>tryGet({facingMode:{exact:facing}}));
+  tries.push(async()=>{
+    const ds=(await md.enumerateDevices()).filter(d=>d.kind==='videoinput');if(!ds.length)throw new Error('no camera');
+    const want=facing==='user'?FRONT_RE:BACK_RE,not=facing==='user'?BACK_RE:FRONT_RE;
+    const order=[...ds.filter(d=>want.test(d.label)),...ds.filter(d=>!want.test(d.label)&&!not.test(d.label)&&d.deviceId!==prevId),...ds.filter(d=>d.deviceId!==prevId)];
+    let err;for(const d of [...new Set(order)]){try{return await tryGet({deviceId:{exact:d.deviceId}})}catch(e){err=e}}
+    throw err||new Error('no camera');
+  });
+  tries.push(()=>md.getUserMedia({video:Object.assign({},base,{facingMode:facing})}));
+  let err;for(const t of tries){try{return await t()}catch(e){err=e;if(e.name==='NotAllowedError')break}}
   throw err;
 }
+const curCamId=stream=>{const t=stream&&stream.getVideoTracks()[0];try{return t?t.getSettings().deviceId:''}catch(e){return ''}};
 async function flipCam(){
   if(!CALL||!CALL.cam)return;const to=CALL.facing==='environment'?'user':'environment';
   try{
-    const s=await openCam(to,camC(),()=>{CALL.local.getVideoTracks().forEach(o=>{o.stop();CALL.local.removeTrack(o)})});
-    const t=s.getVideoTracks()[0];if('contentHint' in t)t.contentHint='motion';CALL.facing=to;CALL.local.addTrack(t);await rebuildFx();pushVideo();renderCall();
+    const prev=curCamId(CALL.local);
+    const s=await openCam(to,camC(),()=>{if(CALL.fx){CALL.fx.stop();CALL.fx=null}CALL.local.getVideoTracks().forEach(o=>{o.stop();CALL.local.removeTrack(o)})},prev);
+    const t=s.getVideoTracks()[0];if('contentHint' in t)t.contentHint='motion';CALL.facing=camFacing(t)||to;
+    CALL.local=new MediaStream([...CALL.local.getAudioTracks(),t]);await rebuildFx();pushVideo();renderCall();
   }catch(e){toast('Не удалось переключить камеру');try{const s=await openCam(CALL.facing||'user');CALL.local.addTrack(s.getVideoTracks()[0]);await rebuildFx();pushVideo()}catch(e2){CALL.cam=false;sendState();pushVideo()}}
 }
 /* masks in calls: the camera goes through the effect canvas only while a mask or filter is on */
@@ -1420,7 +1544,7 @@ function stopScreen(){
 }
 function attachRemote(){
   const v=$('#rv'),a=$('#ra');
-  if(a&&a.srcObject!==CALL.remote){a.srcObject=CALL.remote;a.play().catch(()=>{})}
+  if(a&&a.srcObject!==CALL.remote){a.srcObject=CALL.remote;a.play().catch(()=>{});setTimeout(applySpeaker,200)}
   if(v&&v.srcObject!==CALL.remote){v.srcObject=CALL.remote;v.play().catch(()=>{})}
 }
 function renderCall(){
@@ -1440,6 +1564,7 @@ function renderCall(){
     ?btn('c-reject','end','end','Отклонить')+btn('c-accept',CALL.kind==='video'?'video':'phone','acc','Принять')
     :btn('c-mic',CALL.mic?'mic':'micOff',CALL.mic?'':'off','',CALL.mic?'Выключить микрофон':'Включить микрофон')+
      btn('c-cam',CALL.cam?'video':'videoOff',CALL.cam?'':'off','',CALL.cam?'Выключить камеру':'Включить камеру')+
+     btn('c-spk',SPK.loud?'vol':'vol',SPK.loud?'on':'','',SPK.loud?'Громкая связь включена':'Динамик и громкая связь')+
      btn('c-fx','mask',fxIsOn?'on':'','','Маски и фильтры')+
      (touch&&CALL.cam?btn('c-flip','flip','','','Сменить камеру'):'')+
      (canShare()?btn('c-screen','screen',CALL.screen?'on':'','',CALL.screen?'Остановить демонстрацию':'Демонстрация экрана'):'')+
@@ -1491,7 +1616,7 @@ function renderRail(){
   el.innerHTML=`<button class="rbtn home ${S.view==='home'?'on':''}" data-act="view" data-v="home" title="Личные сообщения" aria-label="Личные сообщения">${ic('home')}${homeUnread?`<span class="badge">${homeUnread>99?'99+':homeUnread}</span>`:''}</button>
     <span class="sep"></span>
     ${list.map(g=>{const u=serverUnread(g),inV=VC&&VC.sid===g.id;
-      return `<button class="rbtn ${S.view===g.id?'on':''} ${u?'unread':''}" style="--c:${esc(g.color)}" data-act="view" data-v="${g.id}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${esc(initials(g.name))}${inV?`<span class="vdot">${ic('vol')}</span>`:''}</button>`}).join('')}
+      return `<button class="rbtn ${S.view===g.id?'on':''} ${u?'unread':''}" style="--c:${esc(g.color)}" data-act="view" data-v="${g.id}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.avatar?`<img class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}${inV?`<span class="vdot">${ic('vol')}</span>`:''}</button>`}).join('')}
     <button class="rbtn add" data-act="addserver" title="Создать или войти на сервер" aria-label="Добавить сервер">${ic('plus')}</button>`;
 }
 function serverSideHTML(g){
@@ -1543,7 +1668,7 @@ function inviteSheet(g){
 }
 function serverSheet(g){
   const own=g.owner===S.me.id;
-  sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(g.color)}">${esc(initials(g.name))}</div></div>
+  sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(g.color)}">${g.avatar?`<img class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}</div>${own?`<div class="btns" style="justify-content:center;margin-top:8px"><button class="gbtn" data-act="srvava" data-id="${g.id}">${ic('image')}Сменить фото сервера</button>${g.avatar?`<button class="gbtn" data-act="srvavadel" data-id="${g.id}">Убрать</button>`:''}</div>`:''}</div>
     ${own?`<label class="field"><span>Название</span><input class="input" id="srvname" maxlength="40" value="${esc(g.name)}"></label>`:`<h2 style="text-align:center">${esc(g.name)}</h2>`}
     ${own?`<div class="section-t" style="padding-left:4px">Каналы</div>${g.channels.map(ch=>`<div class="set-row"><span class="mid">${ch.type==='voice'?'🔊 ':'# '}${esc(ch.name)}</span><button class="gbtn ic" data-act="delch" data-id="${ch.id}" title="Удалить канал" aria-label="Удалить канал">${ic('trash')}</button></div>`).join('')}`:''}
     <div class="section-t" style="padding-left:4px">Участники · ${g.members.length}</div>
@@ -1581,8 +1706,18 @@ async function gcStart(chatId,kind){
   if(!wsSend({t:'gcall',chat:chatId,kind,cam:g.cam,mic:true})){toast('Нет связи');gcLeave(true);return}
   gcRender();
 }
+/* group calls: the upload is shared between everyone, so with more people each picture is lighter (no freezing) */
+function gcTune(){
+  if(!GC)return;const n=Math.max(1,GC.peers.size),lite=isLite()||touch;
+  const total=GC.screen?(lite?1500e3:3000e3):(lite?1200e3:2500e3),per=Math.max(150e3,Math.min(GC.screen?2500e3:1200e3,total/n));
+  GC.peers.forEach(p=>{
+    if(p.vs){const q=p.vs.getParameters();if(!q.encodings||!q.encodings.length)q.encodings=[{}];const e=q.encodings[0];
+      e.maxBitrate=per;e.maxFramerate=GC.screen?15:(n>3?20:24);e.scaleResolutionDownBy=GC.screen?1:(n>4?2:n>2?1.5:1);q.degradationPreference=GC.screen?'maintain-resolution':'maintain-framerate';p.vs.setParameters(q).catch(()=>{})}
+    if(p.as){const q=p.as.getParameters();if(q.encodings&&q.encodings[0]){q.encodings[0].priority='high';q.encodings[0].networkPriority='high';p.as.setParameters(q).catch(()=>{})}}
+  });
+}
 function gcOutVideo(){if(!GC||!GC.local)return null;if(GC.screen&&GC.screenTrack)return GC.screenTrack;return GC.cam?GC.local.getVideoTracks()[0]||null:null}
-function gcPush(){if(!GC||!GC.local)return;const v=gcOutVideo(),a=GC.local.getAudioTracks()[0]||null;GC.peers.forEach(p=>{if(p.vs)p.vs.replaceTrack(v).catch(()=>{});if(p.as)p.as.replaceTrack(a).catch(()=>{})});wsSend({t:'gstate',mic:GC.mic,cam:!!(GC.cam||GC.screen),screen:GC.screen});gcRender()}
+function gcPush(){if(!GC||!GC.local)return;setTimeout(gcTune,300);const v=gcOutVideo(),a=GC.local.getAudioTracks()[0]||null;GC.peers.forEach(p=>{if(p.vs)p.vs.replaceTrack(v).catch(()=>{});if(p.as)p.as.replaceTrack(a).catch(()=>{})});wsSend({t:'gstate',mic:GC.mic,cam:!!(GC.cam||GC.screen),screen:GC.screen});gcRender()}
 async function gcPeer(uid,offer){
   const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle'});
   const p={pc,uid,pending:[],stream:new MediaStream()};GC.peers.set(uid,p);
@@ -1592,9 +1727,9 @@ async function gcPeer(uid,offer){
   }
   pc.onicecandidate=e=>{if(e.candidate)wsSend({t:'grtc',to:uid,data:{cand:e.candidate.toJSON()}})};
   pc.ontrack=e=>{p.stream.getTracks().filter(t=>t.kind===e.track.kind).forEach(t=>p.stream.removeTrack(t));p.stream.addTrack(e.track);
-    if(e.track.kind==='audio'){if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}p.audio.srcObject=new MediaStream([e.track]);p.audio.play().catch(()=>{})}
+    if(e.track.kind==='audio'){if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}p.audio.srcObject=new MediaStream([e.track]);p.audio.play().catch(()=>{});setTimeout(applySpeaker,200)}
     e.track.onunmute=()=>gcRender();gcRender()};
-  pc.onconnectionstatechange=()=>{if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}gcRender()};
+  pc.onconnectionstatechange=()=>{if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}if(pc.connectionState==='connected')gcTune();gcRender()};
   if(offer){const o=await pc.createOffer();await setLocal(pc,o);wsSend({t:'grtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
   return p;
 }
@@ -1631,7 +1766,7 @@ async function onGroupMsg(m){
 }
 function gcClosePeer(p){try{p.pc.close()}catch(e){}if(p.audio){p.audio.srcObject=null;p.audio.remove()}}
 function gcLeave(silent){
-  if(!GC)return;const g=GC;GC=null;
+  if(!GC)return;const g=GC;GC=null;SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
   wsSend({t:'gleave'});g.peers.forEach(gcClosePeer);
   g.local&&g.local.getTracks().forEach(t=>t.stop());g.screenStream&&g.screenStream.getTracks().forEach(t=>t.stop());
   clearInterval(g.clock);if(!silent)beep([784,523],.09,.02,.05);
@@ -1646,7 +1781,7 @@ async function gcCam(){
 }
 async function gcFlip(){
   if(!GC||!GC.cam)return;const to=GC.facing==='environment'?'user':'environment';
-  try{const s=await openCam(to,camC(to),()=>GC.local.getVideoTracks().forEach(t=>{t.stop();GC.local.removeTrack(t)}));GC.local.addTrack(s.getVideoTracks()[0]);GC.facing=to;gcPush()}
+  try{const prev=curCamId(GC.local);const s=await openCam(to,camC(to),()=>GC.local.getVideoTracks().forEach(t=>{t.stop();GC.local.removeTrack(t)}),prev);const t=s.getVideoTracks()[0];GC.local=new MediaStream([...GC.local.getAudioTracks(),t]);GC.facing=camFacing(t)||to;gcPush()}
   catch(e){toast('Не удалось переключить камеру');try{const s=await openCam(GC.facing);GC.local.addTrack(s.getVideoTracks()[0])}catch(e2){GC.cam=false}gcPush()}
 }
 async function gcScreen(){
@@ -1677,7 +1812,7 @@ function gcRender(){
     const src=me?(GC.screen&&GC.screenStream?GC.screenStream:GC.local):(p&&p.stream);
     if(src&&v.srcObject!==src){v.srcObject=src;v.play().catch(()=>{})}
     const vid=me?!!gcOutVideo():!!(st.cam&&p&&p.stream.getVideoTracks().some(x=>x.readyState==='live'&&!x.muted));
-    t.classList.toggle('vid',vid);t.classList.toggle('me',me&&!GC.screen);t.classList.toggle('scr',!!st.screen);
+    t.classList.toggle('vid',vid);t.classList.toggle('me',me&&!GC.screen&&GC.facing!=='environment');t.classList.toggle('scr',!!st.screen);
     const av=t.querySelector('.gav');if(av.dataset.u!==uid){av.dataset.u=uid;av.innerHTML=avatar(u,'xl',false)}
     t.querySelector('.glab').innerHTML=`${st.mic===false?ic('micOff'):''}${esc(me?'Вы':nm(u))}${!me&&p&&p.pc.connectionState!=='connected'?' · <i>подключение…</i>':''}`;
     if(grid.children[i]!==t)grid.insertBefore(t,grid.children[i]||null);
@@ -1689,6 +1824,7 @@ function gcRender(){
     <button class="cbtn ${GC.cam?'':'off'}" data-act="gc-cam" aria-label="Камера">${ic(GC.cam?'video':'videoOff')}</button>
     ${GC.cam&&touch?`<button class="cbtn" data-act="gc-flip" aria-label="Другая камера">${ic('flip')}</button>`:''}
     ${canScreen?`<button class="cbtn ${GC.screen?'on':''}" data-act="gc-screen" aria-label="Экран">${ic('screen')}</button>`:''}
+    <button class="cbtn ${SPK.loud?'on':''}" data-act="c-spk" aria-label="Динамик">${ic('vol')}</button>
     <button class="cbtn end" data-act="gc-end" aria-label="Выйти из звонка">${ic('end')}</button>`;
   el.querySelector('.gc-pill').innerHTML=`${ic('phone')}<span>${esc(gcName(GC.chat))} · ${ids.length}</span>`;
 }
@@ -1945,7 +2081,8 @@ async function scStart(){
   const view=$('#scview');
   try{
     const lite=isLite();
-    SC.stream=await openCam(SC.facing,{width:{ideal:lite?960:1280},height:{ideal:lite?540:720}});
+    SC.stream=await openCam(SC.facing,{width:{ideal:lite?960:1280},height:{ideal:lite?540:720}},null,SC.prevCam);
+    const f=camFacing(SC.stream.getVideoTracks()[0]);if(f)SC.facing=f;SC.prevCam=curCamId(SC.stream);
   }catch(e){SC.stream=null;view.innerHTML=`<div class="scam-msg">Камера недоступна${e.name==='NotAllowedError'?' — разреши её в настройках браузера':''}.<br><br><button class="gbtn primary" data-sc="gallery">${ic('image')}Выбрать из галереи</button></div>`;return}
   if(!SC){SC&&0;return}
   const t=SC.stream.getVideoTracks()[0];
@@ -2095,6 +2232,9 @@ async function edSave(){
   try{
     if(ED.mode==='avatar'){
       const cv=document.createElement('canvas');cv.width=cv.height=320;const x=cv.getContext('2d');x.fillStyle='#2b3a50';x.fillRect(0,0,320,320);ED.shape='square';edPaint(x,320);
+      const img=cv.toDataURL('image/jpeg',.88),tg=S.avaTarget;S.avaTarget=null;
+      if(tg&&tg.chat){const r=await api('/api/chats/avatar',{chat:tg.chat,img});S.chats[r.chat.id]=Object.assign(S.chats[r.chat.id]||{},r.chat);closeLayer();renderSide();renderMain();toast('Фото группы обновлено');return}
+      if(tg&&tg.server){const r=await api('/api/servers/update',{server:tg.server,avatar:img});S.servers[r.server.id]=r.server;closeLayer();renderSide();toast('Фото сервера обновлено');return}
       const r=await api('/api/profile',{avatar:cv.toDataURL('image/jpeg',.88)});S.me=S.users[S.me.id]=Object.assign(S.users[S.me.id],r.me);closeLayer();renderSide();toast('Аватарка обновлена');return;
     }
     /* stickers keep a transparent background: WebP where the browser can make it, otherwise PNG, kept under ~250 KB */
@@ -2119,13 +2259,23 @@ function renderStickers(){
   const el=$('#stkp');if(!el)return;queueSync();
   document.querySelectorAll('.stkbtn').forEach(b=>b.classList.toggle('on',S.stk));
   if(!S.stk){el.innerHTML='';return}
+  /* the first tab is emoji (default), then sticker packs */
+  if(S.pk==='emoji'||!S.packs.length){
+    const cat=S.emoCat||'Недавние',rec=store.get('recentEmo',[]);
+    const cats=['Недавние'].concat(Object.keys(EMO));
+    const list=cat==='Недавние'?(rec.length?rec:emoList(EMO['Смайлы']).slice(0,40)):emoList(EMO[cat]);
+    el.innerHTML=`<div class="stk-panel glass"><div class="emo-cats">${cats.map(k=>`<button class="${k===cat?'on':''}" data-act="emocat" data-v="${esc(k)}">${{'Недавние':'🕘','Смайлы':'😀','Жесты':'👋','Сердечки':'❤️','Праздник':'🎉','Еда':'🍔','Животные':'🐶','Флаги':'🏳️'}[k]||'•'}</button>`).join('')}</div>
+      <div class="emo-grid">${list.map(e=>`<button data-act="emoins" data-e="${esc(e)}">${e}</button>`).join('')}</div>
+      <div class="stk-tabs"><button class="on" data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}<button data-act="newpack" title="Новый набор" aria-label="Новый набор">${ic('plus')}</button></div></div>`;
+    return;
+  }
   const p=curPack();
   const grid=!p?`<div class="stk-empty"><b>Своих стикеров пока нет</b><span>Сделай набор из фото в галерее и делись им с друзьями</span><button class="gbtn primary" data-act="newpack">${ic('plus')}Создать набор</button></div>`
     :`<div class="stk-grid">${p.mine?`<button class="stk-add" data-act="stknew" title="Сделать стикер из фото">${ic('plus')}<small>Из фото</small></button>`:''}
       ${p.stickers.map(x=>`<button class="stk-it" data-act="stksend" data-id="${x.id}" data-pack="${p.id}" data-stk="${x.id}" title="Отправить"><img src="${esc(x.img)}" alt="Стикер" loading="lazy" decoding="async"></button>`).join('')}
       ${!p.stickers.length&&!p.mine?'<div class="stk-empty"><span>В наборе пока пусто</span></div>':''}</div>`;
   el.innerHTML=`<div class="stk-panel glass">${grid}
-    <div class="stk-tabs">${S.packs.map(x=>`<button class="${p&&x.id===p.id?'on':''}" data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}
+    <div class="stk-tabs"><button data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button class="${p&&x.id===p.id?'on':''}" data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}
       <button data-act="newpack" title="Новый набор" aria-label="Новый набор">${ic('plus')}</button>${p?`<button data-act="pkset" data-id="${p.id}" title="Настройки набора" aria-label="Настройки набора">${ic('gear')}</button>`:''}</div></div>`;
 }
 function sendSticker(pack,id){
@@ -2361,6 +2511,11 @@ document.addEventListener('click',async e=>{
     case 'vleave':voiceLeave();break;
     case 'vmute':voiceMute();break;
     case 'vdeaf':voiceDeaf();break;
+    case 'ttplay':ttPlay(el.dataset.u);break;
+    case 'ttclose':ttClose();break;
+    case 'ttopen':ttOpen();break;
+    case 'ttext':ttClose();ttOpen(el.dataset.u);break;
+    case 'ttgo':{const v=($('#ttu')||{}).value||'';if(!TT_RE.test(v)){toast('Вставьте ссылку вида tiktok.com/…');break}ttPlay(TT_RE.exec(v)[0]);break}
     case 'tab':S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;
     case 'back':closeChat();break;
@@ -2373,7 +2528,7 @@ document.addEventListener('click',async e=>{
     case 'send':sendMsg();$('#txt')&&!touch&&$('#txt').focus();break;
     case 'attach':$('#file').click();break;
     case 'older':loadOlder();break;
-    case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="onceopen"]'))break;msgMenu(id,e.clientX,e.clientY);break;
+    case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="onceopen"],[data-act="ttplay"]'))break;msgMenu(id,e.clientX,e.clientY);break;
     case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}
     case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});useRe(el.dataset.e);closeLayer();navigator.vibrate&&navigator.vibrate(8);break;
@@ -2461,6 +2616,9 @@ document.addEventListener('click',async e=>{
     case 'c-mic':toggleMic();break;
     case 'c-cam':toggleCam();break;
     case 'c-flip':flipCam();break;
+    case 'c-spk':speakerSheet();break;
+    case 'spk-out':SPK.sink=el.dataset.id;applySpeaker();speakerSheet();break;
+    case 'spk-loud':SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();closeLayer();toast(SPK.loud?'🔊 Громкая связь: звук собеседника громче':'Обычная громкость');if(CALL)renderCall();if(GC)gcRender();break;
     case 'c-screen':toggleScreen();break;
     case 'c-min':CALL.min=true;renderCall();break;
     case 'c-max':CALL.min=false;renderCall();break;
@@ -2468,6 +2626,7 @@ document.addEventListener('click',async e=>{
     case 'wall':store.set('wall',el.dataset.w);await IDB.del('wall:app');await applyAppWall();applyTheme();settingsSheet();break;
     case 'notif':if(Notification.permission==='granted')await pushTest();else await pushEnable();settingsSheet();break;
     case 'pushon':await pushEnable();break;
+    case 'notifretry':closeLayer();await pushEnable();break;
     case 'pushno':store.set('pushNo',1);renderPushAsk();break;
     case 'bubbles':S.bdraft=null;bubbleSheet();break;
     case 'bstyle':S.bdraft.s=el.dataset.v;bubbleSheet();break;
@@ -2483,11 +2642,26 @@ document.addEventListener('click',async e=>{
     case 'vwatch':voiceWatch(el.dataset.id);break;
     case 'vwclose':voiceWatch(null);break;
     case 'vwfull':{const v=document.querySelector('#vwatch video');if(v){if(document.fullscreenElement)document.exitFullscreen();else (v.requestFullscreen||v.webkitEnterFullscreen||(()=>{})).call(v)}break}
+    case 'emocat':S.emoCat=el.dataset.v;renderStickers();break;
+    case 'emoins':{const t=$('#txt');if(!t)break;const e=el.dataset.e,a=t.selectionStart??t.value.length,b=t.selectionEnd??a;t.value=t.value.slice(0,a)+e+t.value.slice(b);const p2=a+e.length;if(!touch){t.focus();t.setSelectionRange(p2,p2)}autosize(t);compState&&compState();
+      const r=store.get('recentEmo',[]).filter(x=>x!==e);r.unshift(e);store.set('recentEmo',r.slice(0,40));break}
     case 'mute':{const c=S.chats[S.cur];if(!c)break;const r=await api('/api/chats/mute',{chat:c.id,on:!c.muted});S.chats[c.id]=r.chat;toast(r.chat.muted?'Уведомления чата выключены 🔕':'Уведомления чата включены 🔔');closeLayer();renderSide();break}
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;
     case 'copyname':try{await navigator.clipboard.writeText('@'+S.me.username);toast('Логин скопирован')}catch(err){}break;
-    case 'ava':pickImage(f=>imageEditor(f,'avatar'));break;
+    case 'ava':S.avaTarget=null;pickImage(f=>imageEditor(f,'avatar'));break;
+    case 'grava':S.avaTarget={chat:S.cur};pickImage(f=>imageEditor(f,'avatar'));break;
+    case 'gravadel':try{const r=await api('/api/chats/avatar',{chat:S.cur,img:''});S.chats[r.chat.id]=Object.assign(S.chats[r.chat.id],r.chat);delete S.chats[r.chat.id].avatar;closeLayer();renderSide();renderMain()}catch(err){toast(err.message)}break;
+    case 'srvava':S.avaTarget={server:id};pickImage(f=>imageEditor(f,'avatar'));break;
+    case 'srvavadel':try{const r=await api('/api/servers/update',{server:id,avatar:''});S.servers[r.server.id]=r.server;closeLayer();renderSide()}catch(err){toast(err.message)}break;
+    case 'block':{const uid=el.dataset.id,on=!(S.me.blocked||[]).includes(uid);
+      if(on&&!el.dataset.sure){el.dataset.sure=1;el.innerHTML=ic('x')+'Точно заблокировать?';return}
+      try{const r=await api('/api/block',{userId:uid,on});S.me.blocked=r.blocked;toast(on?'Заблокировано: этот человек больше не сможет вам писать и звонить':'Разблокировано');closeLayer();renderMain();renderSide()}catch(err){toast(err.message)}break}
+    case 'blocklist':blockedSheet();break;
+    case 'admin':adminSheet();break;
+    case 'adm-q':break;
+    case 'adm-ban':{const uid=el.dataset.id,on=el.dataset.on==='1';if(on&&!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно?';return}
+      try{await api('/api/admin/ban',{userId:uid,on});toast(on?'Аккаунт заблокирован':'Аккаунт разблокирован');adminSheet(true)}catch(err){toast(err.message)}break}
     case 'saveprof':{
       const b={name:$('#pname').value,bio:$('#pbio').value};
       if($('#nwp').value){b.password=$('#op').value;b.newPassword=$('#nwp').value}
@@ -2521,7 +2695,8 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
   lpT=setTimeout(()=>{lpFired=true;navigator.vibrate&&navigator.vibrate(12);msgMenu(b.dataset.id,t.clientX,t.clientY)},420)},{passive:true});
 ['touchend','touchmove','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
-if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"]'))e.stopImmediatePropagation()},true);
+if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"],[data-act="ttplay"]'))e.stopImmediatePropagation()},true);
+document.addEventListener('input',e=>{if(e.target.id==='admq'){const q=e.target.value.toLowerCase();document.querySelectorAll('.adm-row').forEach(x=>x.style.display=x.dataset.q.includes(q)?'':'none')}});
 addEventListener('hashchange',()=>{const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
   const pm=/^#pack\/(p[\w-]{4,20})$/.exec(location.hash);if(pm&&S.me){history.replaceState(null,'',location.pathname);packPreview(pm[1])}});
 addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur)});

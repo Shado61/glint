@@ -14,3 +14,6 @@ From MindAR face-tracking examples — https://github.com/hiukim/mind-ar-js — 
       https://sketchfab.com/3d-models/earring-jade-c91e552728fb4b149d52193fd3e03ac5  (CC-BY-4.0)
 
 Models were converted to a compact binary format and textures resized; shapes are unchanged.
+
+Animated 3D heads (w_raccoon, w_dino, w_turtle .mdl/.jpg): from Jeeliz Weboji, https://github.com/jeeliz/jeelizWeboji
+  Copyright Jeeliz, Apache License 2.0. Converted to the .mdl format (geometry, textures and the 11 expression shapes).

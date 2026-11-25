@@ -55,6 +55,19 @@ function setupUpdates(){
 /* incoming call: the window comes up on top of everything, even from the tray, and blinks in the taskbar */
 ipcMain.on('mn-attention',()=>{show();if(!win)return;win.setAlwaysOnTop(true,'screen-saver');win.moveTop();win.flashFrame(true);setTimeout(()=>{if(win){win.setAlwaysOnTop(false);win.flashFrame(false)}},20000);win.once('focus',()=>{win.flashFrame(false)})});
 ipcMain.on('mn-show',show);
+/* TikTok inside the app: its own window with its own sign-in */
+let ttWin=null;
+ipcMain.on('mn-tiktok',(e,u)=>{
+  u=/^https:\/\/([\w-]+\.)?tiktok\.com\//.test(String(u||''))?String(u):'https://www.tiktok.com/foryou';
+  if(ttWin&&!ttWin.isDestroyed()){ttWin.loadURL(u);ttWin.show();ttWin.focus();return}
+  ttWin=new BrowserWindow({width:480,height:860,minWidth:360,minHeight:560,title:'TikTok — Manasenger',autoHideMenuBar:true,backgroundColor:'#000000',icon:path.join(__dirname,'icon.png'),
+    webPreferences:{partition:'persist:tiktok',contextIsolation:true}});
+  ttWin.webContents.setUserAgent(ttWin.webContents.getUserAgent().replace(/ (Electron|manasenger-desktop)\/[\d.]+/g,''));
+  ttWin.webContents.setWindowOpenHandler(({url})=>{if(/tiktok\.com/.test(url))ttWin.loadURL(url);else shell.openExternal(url);return {action:'deny'}});
+  ttWin.loadURL(u);ttWin.on('closed',()=>{ttWin=null});
+});
+/* view-once messages: the window becomes invisible to screenshots and screen recording while one is open */
+ipcMain.on('mn-protect',(e,on)=>{if(win)win.setContentProtection(!!on)});
 let chosenSource=null;
 ipcMain.handle('mn-sources',async()=>{
   const list=await desktopCapturer.getSources({types:['screen','window'],thumbnailSize:{width:400,height:225},fetchWindowIcons:true});
