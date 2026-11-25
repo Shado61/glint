@@ -26,8 +26,25 @@ app.whenReady().then(()=>{
   tray.setToolTip('Manasenger');
   tray.setContextMenu(Menu.buildFromTemplate([{label:'Открыть Manasenger',click:show},{type:'separator'},{label:'Выйти',click:()=>{quitting=true;app.quit()}}]));
   tray.on('click',show);
+  setupUpdates();
 });
 app.on('second-instance',show);
+/* updates: the new version downloads by itself and is installed when Manasenger closes;
+   if the window is hidden in the tray (nobody is using it), it restarts into the new version right away */
+let updateReady=false;
+function setupUpdates(){
+  if(!app.isPackaged||process.platform==='darwin')return; /* Mac needs a paid signature to update itself */
+  let au;try{au=require('electron-updater').autoUpdater}catch(e){return}
+  au.autoDownload=true;au.autoInstallOnAppQuit=true;
+  au.on('update-downloaded',()=>{updateReady=true;
+    if(tray)tray.setToolTip('Manasenger — обновление готово, установится при перезапуске');
+    const tryNow=()=>{if(updateReady&&win&&!win.isVisible()){quitting=true;au.quitAndInstall(true,true)}};
+    tryNow();setInterval(tryNow,60e3);
+  });
+  au.on('error',()=>{});
+  const check=()=>au.checkForUpdates().catch(()=>{});
+  setTimeout(check,15e3);setInterval(check,4*3600e3);
+}
 /* incoming call: the window comes up on top of everything, even from the tray, and blinks in the taskbar */
 ipcMain.on('mn-attention',()=>{show();if(!win)return;win.setAlwaysOnTop(true,'screen-saver');win.moveTop();win.flashFrame(true);setTimeout(()=>{if(win){win.setAlwaysOnTop(false);win.flashFrame(false)}},20000);win.once('focus',()=>{win.flashFrame(false)})});
 ipcMain.on('mn-show',show);

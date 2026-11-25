@@ -2,13 +2,24 @@
 name: Apps
 on:
   workflow_dispatch:
+  # every few days: touch the saved signing key so GitHub never deletes it (updates must keep the same key)
+  schedule:
+    - cron: '17 3 */4 * *'
   push:
     branches: [main]
     paths: ['android/**', 'desktop/**', '.github/workflows/apps.yml']
 permissions:
   contents: write
 jobs:
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/cache/restore@v4
+        with: { path: ~/keystore, key: manasenger-keystore-v1 }
+      - run: ls -la ~/keystore || true
   android:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +46,8 @@ jobs:
           export KEYSTORE=$HOME/keystore/release.jks KS_PASS=$(cat ~/keystore/pass)
           gradle -p android assembleRelease --no-daemon
           cp android/app/build/outputs/apk/release/app-release.apk Manasenger.apk
+          # the app checks this file to find out that a newer version exists
+          echo '{"code":${{ github.run_number }},"url":"https://github.com/Shado61/glint/releases/download/apps/Manasenger.apk"}' > android-version.json
       # lets the app open full screen without the browser bar: the site confirms the app's signature
       - name: Site confirms the app (assetlinks)
         run: |
@@ -53,8 +66,9 @@ jobs:
             git add public/.well-known/assetlinks.json; git commit -m "Подпись Android-приложения для полноэкранного режима"; git pull --rebase; git push
           fi
       - uses: actions/upload-artifact@v4
-        with: { name: android, path: Manasenger.apk }
+        with: { name: android, path: "Manasenger.apk\nandroid-version.json" }
   desktop:
+    if: github.event_name != 'schedule'
     strategy:
       matrix: { os: [windows-latest, macos-latest, ubuntu-latest] }
     runs-on: ${{ matrix.os }}
@@ -65,10 +79,16 @@ jobs:
       - name: Build
         working-directory: desktop
         env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
-        run: npm install && npm run dist
+        shell: bash
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version && npm install && npm run dist
       - uses: actions/upload-artifact@v4
-        with: { name: 'desktop-${{ matrix.os }}', path: 'desktop/dist/Manasenger-*' }
+        with:
+          name: 'desktop-${{ matrix.os }}'
+          path: |
+            desktop/dist/Manasenger-*
+            desktop/dist/latest*.yml
   release:
+    if: github.event_name != 'schedule'
     needs: [android, desktop]
     runs-on: ubuntu-latest
     steps:

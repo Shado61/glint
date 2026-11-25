@@ -7,6 +7,7 @@
   <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
   <queries><intent><action android:name="android.support.customtabs.action.CustomTabsService"/></intent></queries>
   <application android:label="Manasenger" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="true" android:supportsRtl="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
     <meta-data android:name="asset_statements" android:resource="@string/asset_statements"/>
@@ -28,6 +29,10 @@
     <activity android:name=".CallActivity" android:exported="false" android:launchMode="singleTop" android:showWhenLocked="true" android:turnScreenOn="true"
       android:excludeFromRecents="true" android:taskAffinity="com.manasenger.app.call" android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"/>
     <activity android:name="com.google.androidbrowserhelper.trusted.WebViewFallbackActivity" android:configChanges="orientation|screenSize"/>
+    <!-- updates: the downloaded new version -->
+    <receiver android:name=".Updater" android:exported="true">
+      <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE"/></intent-filter>
+    </receiver>
     <service android:name=".CallService" android:enabled="true" android:exported="true">
       <meta-data android:name="android.support.customtabs.trusted.SMALL_ICON" android:resource="@drawable/ic_notification"/>
       <intent-filter><action android:name="android.support.customtabs.trusted.TRUSTED_WEB_ACTIVITY_SERVICE"/><category android:name="android.intent.category.DEFAULT"/></intent-filter>

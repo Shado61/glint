@@ -27,6 +27,7 @@ public class MainActivity extends LauncherActivity {
     protected void onCreate(Bundle savedInstanceState) {
         boolean ask = needsPermission();
         super.onCreate(savedInstanceState);
+        Updater.check(this);
         if (ask && !isFinishing()) {
             SharedPreferences.Editor e = getSharedPreferences("mn", MODE_PRIVATE).edit();
             e.putBoolean("askedNotif", true).apply();
