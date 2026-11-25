@@ -8,7 +8,7 @@ if(!app.requestSingleInstanceLock())app.quit();
 app.setAppUserModelId('com.manasenger.app'); /* Windows shows notifications under the app's name */
 function show(){if(!win)return create();if(win.isMinimized())win.restore();win.show();win.focus()}
 function create(){
-  win=new BrowserWindow({width:1200,height:820,minWidth:380,minHeight:560,backgroundColor:'#16181d',autoHideMenuBar:true,title:'Manasenger',
+  win=new BrowserWindow({width:1200,height:820,minWidth:380,minHeight:560,backgroundColor:'#1a1b1e',autoHideMenuBar:true,title:'Manasenger',
     icon:path.join(__dirname,'icon.png'),webPreferences:{contextIsolation:true,backgroundThrottling:false}});
   win.loadURL(URL);
   win.webContents.setWindowOpenHandler(({url})=>{if(!url.startsWith(URL))shell.openExternal(url);return {action:'deny'}});

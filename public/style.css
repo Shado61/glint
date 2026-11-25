@@ -661,3 +661,91 @@ html,body{overscroll-behavior:none;overscroll-behavior-x:none}
 .vid-t{position:absolute;left:8px;top:8px;font-size:12px;font-weight:700;color:#fff;background:rgba(0,0,0,.5);padding:2px 8px;border-radius:999px}
 .vbox video{max-width:96vw;max-height:86vh;border-radius:14px;background:#000}
 .vclose{position:fixed;top:calc(14px + var(--safe-t));right:14px;z-index:2}
+
+/* reactions */
+.reacts .re-img{width:22px;height:22px;object-fit:contain;vertical-align:middle;margin:-3px 0}
+.menu .emo{align-items:center}
+.menu .emo .emo-more{display:grid;place-items:center;background:rgba(255,255,255,.12);font-size:0}.menu .emo .emo-more svg{width:18px;height:18px}
+.re-tabs{display:flex;gap:6px;overflow-x:auto;margin:6px -4px 10px;padding:0 4px;scrollbar-width:none}.re-tabs::-webkit-scrollbar{display:none}
+.re-tabs button{flex:none;padding:6px 12px;border-radius:999px;background:rgba(255,255,255,.08);font-size:13px;font-weight:600;color:var(--fg2)}
+.re-tabs button.on{background:var(--acc);color:#fff}
+.re-body{max-height:min(46vh,380px);overflow-y:auto;overscroll-behavior:contain}
+.re-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(42px,1fr));gap:2px}
+.re-grid button{height:44px;font-size:27px;border-radius:12px}.re-grid button:active{background:rgba(255,255,255,.15);transform:scale(1.15)}
+.re-stk{display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:6px}
+.re-stk button{aspect-ratio:1;border-radius:14px;background:rgba(255,255,255,.05);padding:4px}.re-stk img{width:100%;height:100%;object-fit:contain}
+
+/* notifications */
+.mutedi{font-size:11px;opacity:.6;margin-left:4px}.badge.mut{background:rgba(160,166,178,.55)!important}
+.pushask{display:flex;align-items:center;gap:10px;margin:6px 10px 4px;padding:10px 10px 10px 12px;border-radius:18px;font-size:13px}
+.pushask>span:first-child{font-size:22px}.pushask .mid{flex:1;min-width:0;display:flex;flex-direction:column}.pushask small{color:var(--fg3);font-size:12px}
+.pushask .gbtn{padding:7px 12px;font-size:13px}.pushask .x{width:28px;height:28px;display:grid;place-items:center;color:var(--fg3)}.pushask .x svg{width:16px;height:16px}
+
+/* ================= Liquid glass, graphite grey (v6) =================
+   Neutral grey glass you can see through a little, a bright rim of light along the edges,
+   a soft lens shine on top. Big panels stay without blur on phones (fast); the floating bars
+   (chat header, message box, tabs, menus) get real blur. */
+:root{
+  --fg:#f1f2f4;--fg2:rgba(226,228,233,.74);--fg3:rgba(205,208,215,.52);
+  --glass:rgba(46,48,54,.58);--glass2:rgba(72,75,82,.55);--glass3:rgba(96,99,107,.62);
+  --edge:rgba(255,255,255,.26);--edge2:rgba(255,255,255,.11);
+  --shadow:0 20px 50px -22px rgba(0,0,0,.75),0 2px 10px rgba(0,0,0,.22);
+  --blur:blur(22px) saturate(160%) brightness(1.04);
+  --acc:#7d9cc4;--acc2:#5b7aa3;
+  --mine:linear-gradient(140deg,rgba(118,146,184,.88),rgba(82,106,140,.88));
+  --theirs:rgba(74,77,84,.66);
+}
+:root.light{
+  --fg:#17191d;--fg2:rgba(30,33,40,.72);--fg3:rgba(30,33,40,.5);
+  --glass:rgba(246,247,249,.62);--glass2:rgba(255,255,255,.58);--glass3:rgba(255,255,255,.82);
+  --edge:rgba(255,255,255,.95);--edge2:rgba(120,125,135,.2);
+  --shadow:0 18px 44px -22px rgba(30,34,45,.38),0 2px 8px rgba(30,34,45,.08);
+  --theirs:rgba(255,255,255,.78);
+}
+body{background:#18191c}:root.light body{background:#dcdee2}
+.wall{background:linear-gradient(165deg,#34363c 0%,#1f2024 52%,#141518 100%)}
+:root.light .wall{background:linear-gradient(165deg,#e9eaed 0%,#d6d8dc 60%,#e2e4e8 100%)}
+.wall .b1{background:radial-gradient(circle,rgba(150,156,170,.5),transparent 62%)}
+.wall .b2{background:radial-gradient(circle,rgba(110,118,135,.45),transparent 62%)}
+.wall .b3{background:radial-gradient(circle,rgba(125,138,160,.42),transparent 62%)}
+.wall .b4{background:radial-gradient(circle,rgba(185,188,195,.28),transparent 62%)}
+.wall.custom::after{background:rgba(18,19,22,.38)}
+/* the glass: rim of light on top and on the sides, a darker lower edge, a lens shine */
+.glass{border:1px solid var(--edge2);
+  box-shadow:var(--shadow),inset 0 1px 0 var(--edge),inset 1px 0 0 rgba(255,255,255,.07),inset -1px 0 0 rgba(255,255,255,.05),inset 0 -1px 0 rgba(0,0,0,.18)}
+.glass::before{background:
+  radial-gradient(120% 60% at 20% -10%,rgba(255,255,255,.16),transparent 60%),
+  linear-gradient(165deg,rgba(255,255,255,.12) 0%,rgba(255,255,255,.02) 30%,transparent 55%,rgba(255,255,255,.04) 100%)}
+:root.light .glass::before{background:radial-gradient(120% 60% at 20% -10%,rgba(255,255,255,.85),transparent 60%),linear-gradient(165deg,rgba(255,255,255,.6),transparent 45%)}
+.gbtn{box-shadow:inset 0 1px 0 var(--edge),inset 0 -1px 0 rgba(0,0,0,.15),0 8px 18px -10px rgba(0,0,0,.5)}
+.gbtn.primary{background:linear-gradient(140deg,rgba(132,160,198,.95),rgba(88,114,150,.95));border-color:rgba(255,255,255,.3)}
+.bub{box-shadow:inset 0 1px 0 rgba(255,255,255,.14),0 4px 14px -8px rgba(0,0,0,.45)}
+:root.light .bub{box-shadow:inset 0 1px 0 #fff,0 4px 14px -8px rgba(30,34,45,.25)}
+.scrim{background:rgba(8,9,11,.32)}
+.toast{background:rgba(52,54,60,.72)!important}
+.badge{background:var(--acc)}
+::selection{background:rgba(140,160,190,.45)}
+/* phones: big panels see-through without blur (the wallpaper is soft anyway), floating bars with blur */
+@media (max-width:760px),(pointer:coarse){
+  :root{--glass:rgba(40,42,47,.8);--glass2:rgba(70,73,80,.62);--glass3:rgba(92,95,103,.7);--blur:none}
+  :root.light{--glass:rgba(242,243,246,.84);--glass2:rgba(255,255,255,.66);--glass3:rgba(255,255,255,.86)}
+  :root:not(.lite) .chat-h,:root:not(.lite) .comp-in,:root:not(.lite) .tabbar,:root:not(.lite) .menu,:root:not(.lite) .ctx-bar,:root:not(.lite) .day,:root:not(.lite) .sheet,:root:not(.lite) .toast{
+    background:rgba(52,54,60,.6);-webkit-backdrop-filter:blur(16px) saturate(150%);backdrop-filter:blur(16px) saturate(150%)}
+  :root.light:not(.lite) .chat-h,:root.light:not(.lite) .comp-in,:root.light:not(.lite) .tabbar,:root.light:not(.lite) .menu,:root.light:not(.lite) .ctx-bar,:root.light:not(.lite) .day,:root.light:not(.lite) .sheet{background:rgba(250,250,252,.62)}
+  :root:not(.lite) .chat-h::before,:root:not(.lite) .comp-in::before,:root:not(.lite) .tabbar::before,:root:not(.lite) .sheet::before,:root:not(.lite) .menu::before{display:block}
+}
+.lite{--glass:rgba(38,40,45,.98);--glass2:rgba(62,65,72,.98);--glass3:rgba(84,87,95,.99);--theirs:rgb(64,67,74)}
+.lite.light{--glass:#f1f2f4;--glass2:#f8f8fa;--glass3:#fff;--theirs:#fff}
+@media (max-width:760px){
+  .side,.main,.rail{background:rgba(30,31,35,.72)}
+  :root.light .side,:root.light .main,:root.light .rail{background:rgba(242,243,246,.78)}
+  .app.open.peek .main{background:#1d1e22}:root.light .app.open.peek .main{background:#eceef1}
+}
+.ava .dot{border-color:#2a2b30}.rbtn .badge,.rbtn .vdot{border-color:#26272b}
+.ring .ava,.ring .plus,.seen .ava{border-color:#25262a}
+.bub.stkb .meta{background:rgba(30,31,35,.6)}
+.ed-wrap.chk{background:repeating-conic-gradient(#36383d 0 25%,#2a2b30 0 50%) 0 0/22px 22px}
+.call .bg.grad{background:radial-gradient(80% 60% at 30% 20%,#6c7790,transparent 70%),radial-gradient(70% 60% at 80% 80%,#5a5e68,transparent 70%),#1b1c20}
+.reacts .re-img{width:30px;height:30px;margin:-6px -2px}
+:root.light .re-tabs button{background:rgba(0,0,0,.06)}:root.light .re-tabs button.on{background:var(--acc);color:#fff}
+:root.light .re-stk button{background:rgba(0,0,0,.04)}:root.light .menu .emo .emo-more{background:rgba(0,0,0,.07)}

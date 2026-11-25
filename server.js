@@ -25,9 +25,9 @@ const MAX_TEXT=4000,MAX_IMG=1.2e6,PAGE=60,KEEP_MSGS=3000;
 /* ---------- storage ----------
    Everything lives in memory and is written back in the background:
    one row per user (u:), per chat (c:) and per chat history (m:), plus sessions. */
-let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{},media:{}};
+let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{},media:{},keys:{}};
 /* one letter per table in the key-value store */
-const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories',x:'media'};
+const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories',x:'media',k:'keys'};
 let pool=null;const DIRTY=new Set();
 const DATA_FILE=path.join(__dirname,'data','db.json');
 async function load(){
@@ -76,7 +76,7 @@ const pubUser=u=>u&&({id:u.id,username:u.username,name:u.name,color:u.color,avat
 function chatFor(c,uid){
   const ms=DB.msgs[c.id]||[],last=ms[ms.length-1]||null;
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
-  const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||'',titles:c.titles||{}};
+  const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||'',titles:c.titles||{},muted:(c.muted||[]).includes(uid)};
   if(c.server)o.server=c.server;
   const st=streakOut(c);if(st)o.streak=st;
   /* chats that already had a streak before the pet existed get one right away */
@@ -252,6 +252,18 @@ API['POST /api/logout']=(req,res)=>{
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
+API['GET /api/push/key']=()=>({key:PUSH_KEY});
+API['POST /api/push/sub']=(req,res,b,u)=>{need(u);
+  const s=b&&b.sub;if(!s||typeof s.endpoint!=='string'||!/^https:\/\//.test(s.endpoint)||s.endpoint.length>800||!s.keys||typeof s.keys.p256dh!=='string'||typeof s.keys.auth!=='string')throw E(400,'Плохая подписка');
+  const sub={endpoint:s.endpoint,keys:{p256dh:s.keys.p256dh.slice(0,200),auth:s.keys.auth.slice(0,100)}};
+  /* one device belongs to one account: remove it from anyone else signed in on it before */
+  Object.values(DB.users).forEach(x=>{if(x.id!==u.id&&x.push&&x.push.some(y=>y.endpoint===sub.endpoint)){x.push=x.push.filter(y=>y.endpoint!==sub.endpoint);mark('u:'+x.id)}});
+  u.push=(u.push||[]).filter(x=>x.endpoint!==sub.endpoint);u.push.push(sub);u.push=u.push.slice(-8);mark('u:'+u.id);return {ok:true};
+};
+API['POST /api/push/unsub']=(req,res,b,u)=>{need(u);const e=String(b&&b.endpoint||'');u.push=(u.push||[]).filter(x=>x.endpoint!==e);mark('u:'+u.id);return {ok:true}};
+/* "Decline" pressed right on the call notification */
+API['POST /api/call/reject']=(req,res,b,u)=>{need(u);const call=CALLS.get(String(b&&b.callId||''));if(call&&call.b===u.id&&call.state==='ringing')endCall(call,'rejected',u.id);return {ok:true}};
+API['POST /api/chats/mute']=(req,res,b,u)=>{need(u);const c=DB.chats[String(b&&b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');c.muted=(c.muted||[]).filter(x=>x!==u.id);if(b.on)c.muted.push(u.id);mark('c:'+c.id);return {chat:chatFor(c,u.id)}};
 API['GET /api/me']=(req,res,b,u)=>{
   if(!u)return {me:null};
   selfChat(u);
@@ -661,6 +673,7 @@ function addMsg(c,m){
   if(ms.length>KEEP_MSGS)ms.splice(0,ms.length-KEEP_MSGS);
   c.lastAt=m.ts;mark('m:'+c.id);mark('c:'+c.id);
   toChat(c,{t:'msg',chat:c.id,msg:msgOut(m)});
+  pushMsg(c,m);
 }
 
 /* ---------- live connections ---------- */
@@ -668,6 +681,50 @@ const SOCKS=new Map(); /* userId -> Set(ws) */
 const ONLINE=new Set();
 function sendTo(uid,o){const s=SOCKS.get(uid);if(!s)return 0;const j=JSON.stringify(o);s.forEach(w=>{if(w.readyState===1)w.send(j)});return s.size}
 function toChat(c,o,except){c.members.forEach(m=>{if(m!==except)sendTo(m,o)})}
+/* someone is "looking" when one of their windows with Manasenger is open on screen */
+const looking=uid=>{const s=SOCKS.get(uid);return !!s&&[...s].some(w=>w.vis!==false&&w.readyState===1)};
+
+/* ---------- push notifications (messages and calls even when Manasenger is closed) ---------- */
+let webpush=null;
+function pushInit(){
+  try{webpush=require('web-push')}catch(e){console.log('[push] web-push не установлен');return}
+  let k=DB.keys.vapid;
+  if(process.env.VAPID_PUBLIC&&process.env.VAPID_PRIVATE)k={publicKey:process.env.VAPID_PUBLIC,privateKey:process.env.VAPID_PRIVATE};
+  if(!k){k=webpush.generateVAPIDKeys();DB.keys.vapid=k;mark('k:vapid')}
+  webpush.setVapidDetails('mailto:'+(process.env.PUSH_EMAIL||'push@manasenger.app'),k.publicKey,k.privateKey);
+  PUSH_KEY=k.publicKey;
+}
+let PUSH_KEY='';
+function pushTo(uid,payload,opts){
+  const u=DB.users[uid];if(!webpush||!u||!u.push||!u.push.length)return;
+  const body=JSON.stringify(payload);
+  u.push.forEach(sub=>{
+    webpush.sendNotification(sub,body,Object.assign({TTL:payload.type==='call'?45:86400,urgency:'high',topic:payload.tag&&payload.tag.replace(/[^A-Za-z0-9_-]/g,'').slice(0,32)},opts)).catch(e=>{
+      if(e.statusCode===404||e.statusCode===410){u.push=u.push.filter(x=>x.endpoint!==sub.endpoint);mark('u:'+uid)}
+    });
+  });
+}
+const pushTitle=(c,uid)=>c.type==='dm'?null:c.type==='group'?(c.name||'Группа'):((DB.servers[c.server]||{}).name||'Сервер')+' · #'+(c.name||'канал');
+function pushPreview(m){
+  if(m.text)return m.text.slice(0,160);
+  if(m.sticker)return '🎨 Стикер';if(m.img)return '📷 Фото';
+  if(m.media)return m.media.k==='voice'?'🎤 Голосовое сообщение':m.media.k==='round'?'⭕ Видеосообщение':'🎬 Видео';
+  if(m.call)return m.call.missed?'📞 Пропущенный звонок':'📞 Звонок';
+  if(m.story)return '📸 Ответ на историю';
+  return 'Новое сообщение';
+}
+function pushMsg(c,m){
+  if(!webpush||m.sys||c.type==='self')return;
+  const from=DB.users[m.from];if(!from)return;
+  for(const uid of c.members){
+    if(uid===m.from&&!m.call)continue;
+    if(m.call&&uid!==(m.call.missed?(c.members.find(x=>x!==m.from)):null))continue; /* missed call: tell the person who was called */
+    if(looking(uid))continue;
+    if((c.muted||[]).includes(uid))continue;
+    const t=pushTitle(c,uid),nick=(DB.users[uid]&&DB.users[uid].contacts&&DB.users[uid].contacts[from.id])||from.name;
+    pushTo(uid,{type:'msg',chat:c.id,tag:'c'+c.id,title:t||nick,body:(t?nick+': ':'')+pushPreview(m),icon:'/icon-192.png'});
+  }
+}
 function pushChat(c){c.members.forEach(m=>sendTo(m,{t:'chat',chat:chatFor(c,m),users:c.members.map(i=>pubUser(DB.users[i])).filter(Boolean)}))}
 function contactsOf(uid){const s=new Set();Object.values(DB.chats).forEach(c=>{if(member(c,uid))c.members.forEach(m=>s.add(m))});s.delete(uid);return s}
 function broadcastUser(u){const p=pubUser(u);contactsOf(u.id).forEach(i=>sendTo(i,{t:'user',user:p}));sendTo(u.id,{t:'user',user:p})}
@@ -679,6 +736,7 @@ function endCall(call,reason,by){
   if(!call||call.state==='ended')return;
   const was=call.state;call.state='ended';CALLS.delete(call.id);
   [call.a,call.b].forEach(x=>sendTo(x,{t:'call-end',callId:call.id,reason,by}));
+  if(was==='ringing'&&!looking(call.b))pushTo(call.b,{type:'call-end',callId:call.id,tag:'call'+call.id});
   const c=DB.chats[call.chat];
   if(c){
     const dur=was==='active'?Math.round((now()-call.started)/1000):0;
@@ -690,6 +748,10 @@ function onSocket(ws,u){
   if(!SOCKS.has(u.id))SOCKS.set(u.id,new Set());
   SOCKS.get(u.id).add(ws);
   if(!ONLINE.has(u.id)){ONLINE.add(u.id);broadcastUser(u)}
+  for(const call of CALLS.values())if(call.b===u.id&&call.state==='ringing'){
+    const a=DB.users[call.a];ws.send(JSON.stringify({t:'call-incoming',callId:call.id,chat:call.chat,from:pubUser(a),kind:call.kind}));
+    sendTo(call.a,{t:'call-reached',callId:call.id});
+  }
   ws.isAlive=true;ws.on('pong',()=>{ws.isAlive=true});
   ws.on('message',raw=>{
     if(raw.length>MAX_IMG*1.5)return;
@@ -698,13 +760,14 @@ function onSocket(ws,u){
   });
   ws.on('close',()=>{
     const s=SOCKS.get(u.id);if(s){s.delete(ws);if(!s.size){SOCKS.delete(u.id);ONLINE.delete(u.id);u.lastSeen=now();mark('u:'+u.id);broadcastUser(u)}}
-    if(!SOCKS.has(u.id))for(const c of CALLS.values())if(c.a===u.id||c.b===u.id)endCall(c,'offline',u.id);
+    if(!SOCKS.has(u.id))for(const c of CALLS.values())if(c.a===u.id||(c.b===u.id&&c.state==='active'))endCall(c,'offline',u.id);
     const vc=voiceChannelOf(u.id);if(vc&&VOICE.get(vc).get(u.id).ws===ws)voiceLeave(u.id,vc);
   });
 }
 function handle(ws,u,m){
   const c=m.chat?DB.chats[String(m.chat)]:null;
   switch(m.t){
+    case 'vis':ws.vis=!!m.v;return;
     case 'send':{
       if(!member(c,u.id))throw E(404,'Чат не найден');
       if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
@@ -752,8 +815,14 @@ function handle(ws,u,m){
     case 'react':{
       if(!member(c,u.id))return;
       const msg=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));if(!msg||msg.del)return;
-      const e=String(m.emoji||'');if(!['❤️','👍','😂','😮','😢','🔥'].includes(e))return;
-      msg.react=msg.react||{};const list=msg.react[e]=msg.react[e]||[];
+      /* any emoji, or a sticker from your packs ("img:" + its picture) */
+      let e=String(m.emoji||'');
+      if(e.startsWith('img:')){const img=e.slice(4);if(!(msg.react&&msg.react[e])&&!(u.packs||[]).some(pid=>DB.packs[pid]&&DB.packs[pid].stickers.some(x=>x.img===img)))return}
+      else if(e.startsWith('s:')){const [,pid,sid]=e.split(':'),pk=DB.packs[pid];const st=pk&&(u.packs||[]).includes(pid)&&pk.stickers.find(x=>x.id===sid);if(!st)return;e='img:'+st.img}
+      else if(!(e.length<=16&&/^(\p{Extended_Pictographic}|\p{Regional_Indicator})/u.test(e)&&!/[<>"'&\s]/.test(e)))return;
+      msg.react=msg.react||{};
+      if(!msg.react[e]&&Object.keys(msg.react).length>=24)return;
+      const list=msg.react[e]=msg.react[e]||[];
       const i=list.indexOf(u.id);if(i>=0)list.splice(i,1);else list.push(u.id);
       if(!list.length)delete msg.react[e];
       mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(msg)});return;
@@ -797,7 +866,11 @@ function handle(ws,u,m){
       CALLS.set(call.id,call);
       ws.send(JSON.stringify({t:'call-started',callId:call.id,chat:c.id,to:other,kind:call.kind}));
       if(busy){endCall(call,'busy',other);return}
-      if(!sendTo(other,{t:'call-incoming',callId:call.id,chat:c.id,from:pubUser(u),kind:call.kind})){endCall(call,'offline',other);return}
+      /* the other person may be offline or have Manasenger closed: it keeps ringing for 45 seconds and
+         their phone or computer gets a call notification; when they open Manasenger the call comes in */
+      const reached=sendTo(other,{t:'call-incoming',callId:call.id,chat:c.id,from:pubUser(u),kind:call.kind});
+      if(!looking(other))pushTo(other,{type:'call',callId:call.id,chat:c.id,tag:'call'+call.id,kind:call.kind,title:u.name,body:call.kind==='video'?'📹 Входящий видеозвонок':'📞 Входящий звонок',icon:'/icon-192.png'});
+      if(!reached)ws.send(JSON.stringify({t:'call-waiting',callId:call.id}));
       setTimeout(()=>{if(call.state==='ringing')endCall(call,'timeout')},45e3);
       return;
     }
@@ -821,7 +894,11 @@ const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=u
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
   'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
-function send(res,code,o){res.writeHead(code,Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'},SEC));res.end(JSON.stringify(o))}
+/* answers bigger than a couple of kilobytes (the chat list, message history) go out compressed: several times less to download */
+function send(res,code,o){
+  const h=Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Accept-Encoding'},SEC);let b=Buffer.from(JSON.stringify(o));
+  if(b.length>2048&&res.req&&/\bgzip\b/.test(res.req.headers['accept-encoding']||'')){b=zlib.gzipSync(b,{level:5});h['Content-Encoding']='gzip'}
+  h['Content-Length']=b.length;res.writeHead(code,h);res.end(b)}
 function body(req){return new Promise((ok,bad)=>{const ch=[];let n=0;req.on('data',c=>{n+=c.length;if(n>2e6){bad(E(413,'Слишком много данных'));req.destroy();return}ch.push(c)});req.on('end',()=>{try{ok(ch.length?JSON.parse(Buffer.concat(ch).toString('utf8')):{})}catch(e){bad(E(400,'Неверный запрос'))}});req.on('error',bad)})}
 const sameOrigin=req=>{const o=req.headers.origin;if(!o)return true;try{return new URL(o).host===req.headers.host}catch(e){return false}};
 
@@ -850,7 +927,7 @@ const server=http.createServer(async(req,res)=>{
       if(e||!st.isFile()){f=path.join(PUB,'index.html');try{st=fs.statSync(f)}catch(x){st=null}}
       const ext=path.extname(f),etag='"'+APP_VERSION+'-'+Math.round(st?st.mtimeMs:0).toString(36)+'-'+(st?st.size:0)+'"';
       if(st&&req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag,'Cache-Control':'no-cache'});return res.end()}
-      const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':f.includes(path.sep+'vendor'+path.sep)?'public, max-age=2592000':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
+      const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':url.searchParams.get('v')===APP_VERSION&&!f.endsWith('index.html')?'public, max-age=31536000, immutable':f.includes(path.sep+'vendor'+path.sep)?'public, max-age=2592000':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
       /* text files are sent compressed (about 4x smaller), compressed once and kept in memory */
       const isIndex=f.endsWith('index.html');
       const body=()=>{const b=fs.readFileSync(f);return isIndex?Buffer.from(b.toString('utf8').replace(/\?v=[\w-]+/g,'?v='+APP_VERSION)):b};
@@ -879,7 +956,7 @@ server.on('upgrade',(req,sock,head)=>{
 });
 setInterval(()=>{wss.clients.forEach(ws=>{if(!ws.isAlive)return ws.terminate();ws.isAlive=false;ws.ping()})},25e3).unref();
 
-load().then(where=>{migrate();return where}).then(where=>server.listen(PORT,()=>{
+load().then(where=>{migrate();pushInit();return where}).then(where=>server.listen(PORT,()=>{
   console.log(`\n  Manasenger работает: ${BASE}  (порт ${PORT})`);
   console.log(`  Данные: ${where} · пользователей ${Object.keys(DB.users).length}`);
   console.log(`  Звонки: ${process.env.TURN_URL?'STUN + TURN':'только STUN (TURN не задан)'}\n`);

@@ -22,6 +22,7 @@ const P={
   send:'<path d="M5 12h14M13 6l6 6-6 6"/>',
   clip:'<path d="m21.4 11.1-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/>',
   x:'<path d="M18 6 6 18M6 6l12 12"/>',
+  bell:'<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>',
   reply:'<path d="m9 17-5-5 5-5"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/>',
   copy:'<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   trash:'<path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
@@ -165,7 +166,7 @@ function applyTheme(){
   const t=store.get('theme','auto'),light=t==='light'||(t==='auto'&&matchMedia('(prefers-color-scheme: light)').matches);
   document.documentElement.classList.toggle('light',light);
   $('.wall').dataset.w=store.get('wall','slate');
-  document.querySelector('meta[name=theme-color]').content=light?'#e4eaf1':'#18202b';
+  document.querySelector('meta[name=theme-color]').content=light?'#e4e6ea':'#1a1b1e';
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);
 applyTheme();
@@ -184,7 +185,7 @@ function stopRing(){clearInterval(ringT);ringT=null}
 
 /* ---------- notifications ---------- */
 function notify(title,body,tag){
-  if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden)return;
+  if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden||S.pushOn)return; /* with push on, the notification comes from the server */
   try{const n=new Notification(title,{body,tag,icon:'/icon-192.png'});n.onclick=()=>{focus();n.close()}}catch(e){}
 }
 function updateTitle(){const n=Object.values(S.chats).reduce((a,c)=>a+(c.unread||0),0);document.title=n?`(${n}) Manasenger`:'Manasenger'}
@@ -222,8 +223,53 @@ async function boot(){
   const h=location.hash.slice(1),jm=/^join\/([\w-]{4,20})$/.exec(h);
   if(jm){history.replaceState(null,'',location.pathname);joinSheet(jm[1]);return}
   const pm=/^pack\/(p[\w-]{4,20})$/.exec(h);if(pm){history.replaceState(null,'',location.pathname);packPreview(pm[1]);return}
-  if(h&&S.chats[h]){if(S.chats[h].server)S.view=S.chats[h].server;openChat(h)}
+  const cm=/^chat=([\w-]+)$/.exec(h),km=/^call=([\w-]+)(&a=1)?$/.exec(h);
+  if(cm||km)history.replaceState(null,'',location.pathname);
+  if(km)S.callAct={id:km[1],answer:!!km[2]}; /* opened from a call notification: the call arrives over the connection */
+  const open=cm?cm[1]:h;
+  if(open&&S.chats[open]){if(S.chats[open].server)S.view=S.chats[open].server;openChat(open)}
+  pushSetup();
 }
+/* ---------- push notifications ---------- */
+const PUSH_OK='serviceWorker' in navigator&&'PushManager' in window&&'Notification' in window;
+function b64u(s){const p='='.repeat((4-s.length%4)%4),b=atob((s+p).replace(/-/g,'+').replace(/_/g,'/'));return Uint8Array.from(b,c=>c.charCodeAt(0))}
+async function pushSubscribe(){
+  if(!PUSH_OK||Notification.permission!=='granted')return false;
+  try{
+    const reg=await navigator.serviceWorker.ready,{key}=await api('/api/push/key');if(!key)return false;
+    let sub=await reg.pushManager.getSubscription();
+    if(sub&&sub.options&&sub.options.applicationServerKey){const a=new Uint8Array(sub.options.applicationServerKey),b=b64u(key);if(a.length!==b.length||a.some((x,i)=>x!==b[i])){await sub.unsubscribe();sub=null}}
+    if(!sub)sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:b64u(key)});
+    await api('/api/push/sub',{sub:sub.toJSON()});S.pushOn=true;return true;
+  }catch(e){console.warn('push',e);return false}
+}
+async function pushEnable(){
+  if(!PUSH_OK){toast(/iP(hone|ad)/.test(navigator.userAgent)?'На iPhone: сначала «На экран „Домой“», потом откройте Manasenger оттуда':'Этот браузер не умеет уведомления');return}
+  let p=Notification.permission;
+  if(p==='default')try{p=await Notification.requestPermission()}catch(e){}
+  if(p==='granted'){if(await pushSubscribe())toast('Уведомления включены 🔔')}
+  else if(p==='denied')toast('Уведомления запрещены в настройках браузера для этого сайта');
+  renderPushAsk();
+}
+function renderPushAsk(){
+  const el=$('#pushask');const need=PUSH_OK&&Notification.permission==='default'&&!store.get('pushNo',0);
+  if(el&&!need)el.remove();
+  if(!el&&need&&$('.side')){const d=document.createElement('div');d.id='pushask';d.className='pushask glass';
+    d.innerHTML=`<span>🔔</span><span class="mid"><b>Включить уведомления?</b><small>Сообщения и звонки, даже когда Manasenger закрыт</small></span><button class="gbtn primary" data-act="pushon">Включить</button><button class="x" data-act="pushno" aria-label="Не сейчас">${ic('x')}</button>`;
+    const list=$('.side .list')||$('.side');list.parentNode.insertBefore(d,list)}
+}
+function pushSetup(){
+  if(!PUSH_OK)return;
+  if(Notification.permission==='granted')pushSubscribe();else setTimeout(renderPushAsk,1500);
+  navigator.serviceWorker.addEventListener('message',e=>{
+    const m=e.data||{};
+    if(m.t==='notif-chat'&&S.chats[m.chat]){if(S.chats[m.chat].server)S.view=S.chats[m.chat].server;openChat(m.chat)}
+    if(m.t==='notif-call'){if(CALL&&CALL.id===m.callId&&CALL.state==='ringing'){if(m.answer)acceptCall()}else S.callAct={id:m.callId,answer:m.answer}}
+  });
+}
+/* the server sends notifications only while Manasenger is not on screen */
+const sendVis=()=>wsSend({t:'vis',v:!document.hidden&&document.hasFocus()});
+['visibilitychange','focus','blur'].forEach(ev=>(ev==='visibilitychange'?document:window).addEventListener(ev,sendVis));
 function setMe(r){S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
 function renderShell(){
   $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
@@ -261,7 +307,7 @@ function chatListHTML(){
     const typ=S.typing[c.id]&&Object.keys(S.typing[c.id]).length;
     return `<button class="row ${S.cur===c.id?'on':''}" data-act="open" data-id="${c.id}">${chatAvatar(c)}
       <span class="mid"><span class="top"><span class="nm">${esc(chatName(c))}</span>${fire(c)}<span class="tm">${c.last?shortWhen(c.last.ts):''}</span></span>
-      <span class="sub"><span class="lm">${typ?'<i style="color:#9fbaff">печатает…</i>':esc(lastText(c.last))}</span>${c.unread?`<span class="badge">${c.unread>99?'99+':c.unread}</span>`:''}</span></span></button>`}).join('');
+      <span class="sub"><span class="lm">${typ?'<i style="color:#9fbaff">печатает…</i>':esc(lastText(c.last))}</span>${c.muted?'<span class="mutedi" title="Без звука">🔕</span>':''}${c.unread?`<span class="badge${c.muted?' mut':''}">${c.unread>99?'99+':c.unread}</span>`:''}</span></span></button>`}).join('');
   if(q.length>=2){
     const known=new Set(list.filter(c=>c.type==='dm').map(c=>peerOf(c).id));
     const ppl=S.found.filter(u=>!known.has(u.id));
@@ -402,11 +448,11 @@ function msgHTML(c,m,prev,next){
   let inner;
   if(m.del)inner=`<span class="del">Сообщение удалено</span>${meta}`;
   else if(m.sticker){
-    const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
+    const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:''}${fwd}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
   }
   else if(m.media&&m.media.k==='round'){ /* video circle: no bubble, just the circle */
-    const md=m.media,src=md.local||md.url,re3=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
+    const md=m.media,src=md.local||md.url,re3=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb rndb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:''}${fwd}
       <div class="rnd ${m.pending?'up':''}" data-act="rnd" data-id="${m.id}"><video src="${esc(src)}#t=0.1" playsinline muted loop preload="metadata"></video><svg class="ring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
       <span class="rnd-t">${m.pending?`<i class="spin"></i>${md.progress||0}%`:clock(md.dur)}</span><span class="rnd-snd">${ic('vol')}</span></div>${meta}${re3}</div></div>`;
@@ -425,8 +471,31 @@ function msgHTML(c,m,prev,next){
         <span class="vid-play">${m.pending?`<i class="spin"></i>`:'▶'}</span><span class="vid-t">${m.pending?(m.media.progress||0)+'%':clock(m.media.dur)}</span></button>`:'')+
       (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
   }
-  const re=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
+  const re=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
   return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub" data-act="msg" data-id="${m.id}">${inner}${re}</div></div>`;
+}
+/* reactions: an emoji, or "img:" + a sticker picture */
+const reKey=e=>e.startsWith('img:')?`<img class="re-img" src="${esc(e.slice(4))}" alt="стикер" loading="lazy">`:esc(e);
+const QUICK=['❤️','👍','😂','😮','😢','🔥','👏','🥰'];
+const quickRe=()=>{const r=store.get('recentRe',[]);return [...new Set(r.concat(QUICK))].slice(0,6)};
+function useRe(e){if(e.startsWith('s:'))return;const r=store.get('recentRe',[]).filter(x=>x!==e);r.unshift(e);store.set('recentRe',r.slice(0,12))}
+const EMO={
+  'Смайлы':'😀😃😄😁😆😅🤣😂🙂😉😊😇🥰😍🤩😘😗😚😋😛😜🤪😝🤑🤗🤭🤫🤔🤐🤨😐😑😶😏😒🙄😬😮‍💨🤥😌😔😪🤤😴😷🤒🤕🤢🤮🥵🥶🥴😵🤯🤠🥳🥸😎🤓🧐😕😟🙁😮😯😲😳🥺🥹😦😧😨😰😥😢😭😱😖😣😞😓😩😫🥱😤😡😠🤬😈👿💀☠️💩🤡👹👺👻👽👾🤖😺😸😹😻😼😽🙀😿😾',
+  'Жесты':'👋🤚🖐️✋🖖👌🤌🤏✌️🤞🫰🤟🤘🤙👈👉👆🖕👇☝️🫵👍👎✊👊🤛🤜👏🙌🫶👐🤲🤝🙏✍️💅🤳💪🦾🫡🫣🫢',
+  'Сердечки':'❤️🧡💛💚💙💜🖤🤍🤎💔❣️💕💞💓💗💖💘💝💟❤️‍🔥❤️‍🩹💋💯💢💥💫💦💨🕳️💬💭💤',
+  'Праздник':'🎉🎊🎈🎁🎂🍰🧁🥂🍾🎆🎇✨🏆🥇🎯🎮🎵🎶🎤🎧📸💡💎👑🌹🌸🌺🌻🌈☀️🌙⭐🌟⚡🔥❄️☃️🍀',
+  'Еда':'🍏🍎🍐🍊🍋🍌🍉🍇🍓🫐🍒🍑🥭🍍🥥🥝🍅🥑🍆🥕🌽🌶️🥒🥦🍔🍟🍕🌭🥪🌮🌯🥗🍝🍜🍣🍤🍩🍪🍫🍬🍭🍯☕🍵🧋🥤🍺🍷',
+  'Животные':'🐶🐱🐭🐹🐰🦊🐻🐼🐨🐯🦁🐮🐷🐸🐵🙈🙉🙊🐔🐧🐦🐤🦄🐝🦋🐌🐞🐢🐍🐙🦀🐠🐬🐳🦈🐊🦒🐘🦘🐾',
+  'Флаги':'🇰🇿🇷🇺🇺🇿🇰🇬🇺🇦🇧🇾🇹🇷🇺🇸🇬🇧🇩🇪🇫🇷🇮🇹🇪🇸🇯🇵🇰🇷🇨🇳🇮🇳🇦🇪🏳️‍🌈🏁'
+};
+const emoList=str=>{try{return [...new Intl.Segmenter('ru',{granularity:'grapheme'}).segment(str)].map(x=>x.segment)}catch(e){return Array.from(str)}};
+/* the full picker: all emoji by group, and your stickers */
+function reactSheet(id,tab){
+  S.reTab=tab||S.reTab||'Смайлы';
+  const tabs=Object.keys(EMO).concat(S.packs.length?['Стикеры']:[]);
+  const body=S.reTab==='Стикеры'?S.packs.map(p=>`<div class="section-t">${esc(p.name)}</div><div class="re-stk">${p.stickers.map(x=>`<button data-act="react" data-id="${id}" data-e="s:${p.id}:${x.id}"><img src="${esc(x.img)}" alt="" loading="lazy"></button>`).join('')||'<div class="empty" style="padding:10px">Пусто</div>'}</div>`).join('')
+    :`<div class="re-grid">${emoList(EMO[S.reTab]).map(e=>`<button data-act="react" data-id="${id}" data-e="${esc(e)}">${e}</button>`).join('')}</div>`;
+  sheet(`<h2>Реакция</h2><div class="re-tabs">${tabs.map(t=>`<button class="${S.reTab===t?'on':''}" data-act="retab" data-id="${id}" data-v="${esc(t)}">${t==='Стикеры'?'🎨 Стикеры':t}</button>`).join('')}</div><div class="re-body">${body}</div>`);
 }
 const clock=s=>{s=Math.round(s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 function voiceHTML(m){
@@ -465,6 +534,19 @@ function linkify(t){
 function linkifyOld(t){
   return esc(t).replace(/\bhttps?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
 }
+/* puts new HTML into a box but keeps every element that did not change: pictures don't reload,
+   voice messages and video circles keep playing, and the phone does much less work */
+function patchHTML(box,h){
+  const t=document.createElement('div');t.innerHTML=h;
+  const olds=new Map();for(const o of box.children){const k=o._h;if(k!==undefined){if(!olds.has(k))olds.set(k,[]);olds.get(k).push(o)}}
+  let cur=box.firstChild;
+  for(const n of [...t.children]){
+    const k=n.outerHTML,pool=olds.get(k),reuse=pool&&pool.shift();
+    if(reuse){if(reuse===cur)cur=cur.nextSibling;else box.insertBefore(reuse,cur)}
+    else{n._h=k;box.insertBefore(n,cur)}
+  }
+  while(cur){const nx=cur.nextSibling;cur.remove();cur=nx}
+}
 function renderMsgs(toBottom){
   const box=$('#msgs'),c=S.chats[S.cur];if(!box||!c)return;
   const list=S.msgs[c.id];
@@ -482,7 +564,7 @@ function renderMsgs(toBottom){
   shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');h+=x;
     const sa=seenAt.get(m.id);if(sa)h+=`<button class="seen" data-act="readers" data-id="${m.id}" title="Кто прочитал">${sa.slice(0,5).map(u=>avatar(S.users[u],'xs',false)).join('')}${sa.length>5?`<small>+${sa.length-5}</small>`:''}</button>`});
   const prevH=box.scrollHeight,prevT=box.scrollTop,fromBottom=prevH-prevT-box.clientHeight;
-  box.innerHTML=h;
+  patchHTML(box,h);
   /* stay at the bottom after sending and when new messages come; otherwise keep the same place */
   const place=()=>{if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;else box.scrollTop=box.scrollHeight-box.clientHeight-fromBottom};
   place();requestAnimationFrame(place);watchRounds();
@@ -671,7 +753,7 @@ function msgMenu(id,x,y){
     me&&c&&(c.type==='group'||c.type==='channel')?['readers','eye','Кто прочитал']:null,
     m.text?['copy','copy','Копировать']:null,me&&m.text&&!m.call?['edit','edit','Изменить']:null,me&&!m.call?['del','trash','Удалить','bad']:null].filter(Boolean);
   if(m.call)return;
-  openMenu(`<div class="emo">${['❤️','👍','😂','😮','😢','🔥'].map(e=>`<button data-act="react" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}</div>`+
+  openMenu(`<div class="emo">${quickRe().map(e=>`<button data-act="react" data-id="${m.id}" data-e="${esc(e)}">${e}</button>`).join('')}<button class="emo-more" data-act="remore" data-id="${m.id}" aria-label="Все реакции">${ic('plus')}</button></div>`+
     items.map(([a,i,t,cls])=>`<button class="it ${cls||''}" data-act="mm-${a}" data-id="${m.id}">${ic(i)}${t}</button>`).join(''),x,y);
 }
 /* forward a message to any chat, Saved Messages first */
@@ -775,7 +857,7 @@ function settingsSheet(){
     <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
     <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
-    <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np==='default'?'<button class="gbtn" data-act="notif">Включить</button>':''}</div>
+    <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
     <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
       <label class="field" style="margin-top:10px"><span>Текущий пароль</span><input class="input" id="op" type="password" autocomplete="current-password"></label>
@@ -784,6 +866,11 @@ function settingsSheet(){
 }
 function installSheet(){
   sheet(`<h2>Установить Manasenger</h2><p class="sub">Manasenger работает как приложение: своя иконка, отдельное окно, уведомления.</p>
+    <div class="section-t">Скачать приложение</div>
+    <div class="set-row"><span class="mid"><b>Android</b><small>Файл APK: откройте его на телефоне и разрешите установку</small></span><a class="gbtn primary" href="https://github.com/Shado61/glint/releases/download/apps/Manasenger.apk" target="_blank" rel="noopener">Скачать</a></div>
+    <div class="set-row"><span class="mid"><b>Windows</b><small>Программа для компьютера, работает в фоне — звонки и сообщения приходят</small></span><a class="gbtn primary" href="https://github.com/Shado61/glint/releases/download/apps/Manasenger-Setup.exe" target="_blank" rel="noopener">Скачать</a></div>
+    <div class="set-row"><span class="mid"><b>Mac · Linux</b></span><a class="gbtn" href="https://github.com/Shado61/glint/releases/download/apps/Manasenger-mac.dmg" target="_blank" rel="noopener">Mac</a><a class="gbtn" href="https://github.com/Shado61/glint/releases/download/apps/Manasenger-linux.AppImage" target="_blank" rel="noopener" style="margin-left:6px">Linux</a></div>
+    <div class="section-t">Или без скачивания</div>
     <div class="set-row"><span class="mid"><b>iPhone / iPad</b><small>Safari → кнопка «Поделиться» → «На экран „Домой“»</small></span></div>
     <div class="set-row"><span class="mid"><b>Android</b><small>Chrome → меню ⋮ → «Установить приложение»</small></span></div>
     <div class="set-row"><span class="mid"><b>Компьютер</b><small>Chrome или Edge → значок установки справа в адресной строке</small></span></div>
@@ -803,7 +890,7 @@ function connect(){
         if(S.cur){const m=await api('/api/messages?chat='+S.cur);S.msgs[S.cur]=m.messages;S.more[S.cur]=m.more}
         Object.keys(S.msgs).forEach(k=>{if(k!==S.cur)delete S.msgs[k]});renderSide();renderMsgs();renderStatus();markRead();updateTitle()}catch(e){}
     }
-    wsTry=0;
+    wsTry=0;sendVis();
   };
   WS.onmessage=e=>{let m;try{m=JSON.parse(e.data)}catch(x){return}onWS(m)};
   WS.onclose=()=>{wsTry++;wsTimer=setTimeout(connect,Math.min(15000,600*2**Math.min(wsTry,5)))};
@@ -848,7 +935,7 @@ function onWS(m){
       if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);renderMsgs()}}
       toast(m.error);if(CALL&&CALL.state==='calling'&&!CALL.id)hangup(true);return;
     }
-    case 'call-started':case 'call-incoming':case 'call-accepted':case 'call-end':case 'rtc':return onCallMsg(m);
+    case 'call-started':case 'call-incoming':case 'call-accepted':case 'call-end':case 'rtc':case 'call-waiting':case 'call-reached':return onCallMsg(m);
     case 'server':{
       m.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));S.servers[m.server.id]=m.server;
       if(m.removed&&S.cur===m.removed){delete S.chats[m.removed];closeChat()}
@@ -1016,11 +1103,13 @@ async function onCallMsg(m){
     S.users[m.from.id]=Object.assign(S.users[m.from.id]||{},m.from);
     CALL={id:m.callId,chat:m.chat,peer:S.users[m.from.id],kind:m.kind,dir:'in',state:'ringing',mic:true,cam:false,screen:false,remote:new MediaStream(),pending:[],rs:{cam:m.kind==='video',screen:false,mic:true},q:'good',fxs:fxState()};
     renderCall();ring('in');
+    if(S.callAct&&S.callAct.id===m.callId){const a=S.callAct;S.callAct=null;if(a.answer){acceptCall();return}}
     notify(nm(S.users[m.from.id]),m.kind==='video'?'Входящий видеозвонок':'Входящий звонок','call');
     return;
   }
   if(!CALL)return;
   if(m.t==='call-started'){if(CALL.dir==='out'&&!CALL.id&&m.chat===CALL.chat){CALL.id=m.callId;renderCall()}return}
+  if(m.t==='call-waiting'||m.t==='call-reached'){if(m.callId===CALL.id){CALL.away=m.t==='call-waiting';renderCall()}return}
   if(m.callId!==CALL.id)return;
   if(m.t==='call-accepted'){
     stopRing();CALL.state='connecting';renderCall();
@@ -1204,7 +1293,7 @@ function renderCall(){
     el.addEventListener('pointermove',wake);el.addEventListener('pointerdown',wake)}
   el.style.display='';
   const p=CALL.peer||{},st=CALL.state,remoteVid=st==='active'&&(CALL.rs.cam||CALL.rs.screen);
-  const label={calling:CALL.id?'Вызов…':'Подключаемся…',ringing:CALL.kind==='video'?'Входящий видеозвонок':'Входящий звонок',connecting:'Соединение…',active:''}[st];
+  const label={calling:CALL.id?(CALL.away?'Не в сети · отправили звонок на телефон…':'Вызов…'):'Подключаемся…',ringing:CALL.kind==='video'?'Входящий видеозвонок':'Входящий звонок',connecting:'Соединение…',active:''}[st];
   el.classList.toggle('incoming',st==='ringing');
   const btn=(act,icon,cls,lb,title)=>`<button class="cbtn ${cls||''}" data-act="${act}" aria-label="${title||lb}" title="${title||lb}">${ic(icon)}${lb?`<span class="lb">${lb}</span>`:''}</button>`;
   const fxIsOn=fxOn(CALL.fxs);
@@ -1954,7 +2043,9 @@ document.addEventListener('click',async e=>{
     case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts'))break;msgMenu(id,e.clientX,e.clientY);break;
     case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}
-    case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});closeLayer();break;
+    case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});useRe(el.dataset.e);closeLayer();navigator.vibrate&&navigator.vibrate(8);break;
+    case 'remore':reactSheet(id);break;
+    case 'retab':reactSheet(id,el.dataset.v);break;
     case 'mm-reply':{const m=S.msgs[S.cur].find(x=>x.id===id);S.edit=null;S.reply={m};renderCtx();closeLayer();if(!touch)$('#txt').focus();break}
     case 'mm-savestk':saveStickerSheet(id);break;
     case 'stkto':{const msg=id;let pk=el.dataset.pack;try{if(!pk){const r0=await api('/api/packs',{name:'Мои стикеры'});pk=r0.pack.id}const r=await api('/api/packs/add',{pack:pk,chat:S.cur,fromMsg:msg});S.packs=r.packs;closeLayer();toast('Стикер сохранён в набор')}catch(err){toast(err.message)}break}
@@ -2022,7 +2113,7 @@ document.addEventListener('click',async e=>{
     case 'mm-del':{if(!el.dataset.sure){el.dataset.sure=1;el.lastChild.textContent='Точно удалить?';return}wsSend({t:'del',chat:S.cur,id});closeLayer();break}
     case 'ctxx':S.reply=S.edit=null;if($('#txt'))$('#txt').value=S.draft[S.cur]||'';renderCtx();break;
     case 'chatmenu':{const c=S.chats[S.cur];const r=el.getBoundingClientRect();
-      openMenu(`<button class="it" data-act="info">${ic('users')}${c.type==='dm'?'Профиль':'Участники'}</button><button class="it" data-act="chatwall">${ic('image')}Обои чата</button>${(c.type==='group'||c.type==='channel')&&!c.petOn?`<button class="it" data-act="petadd">🥚 Добавить Серийчика</button>`:''}${c.pet&&(c.type==='dm'||c.petOn)?`<button class="it" data-act="pet">🐣 ${esc(c.pet.name||'Серийчик')}</button>`:''}${c.type==='group'?`<button class="it bad" data-act="leave">${ic('x')}Выйти из группы</button>`:''}`,r.left+r.width/2-100,r.bottom);break}
+      openMenu(`<button class="it" data-act="info">${ic('users')}${c.type==='dm'?'Профиль':'Участники'}</button><button class="it" data-act="chatwall">${ic('image')}Обои чата</button>${c.type!=='self'?`<button class="it" data-act="mute">${ic('bell')}${c.muted?'Включить уведомления':'Без звука'}</button>`:''}${(c.type==='group'||c.type==='channel')&&!c.petOn?`<button class="it" data-act="petadd">🥚 Добавить Серийчика</button>`:''}${c.pet&&(c.type==='dm'||c.petOn)?`<button class="it" data-act="pet">🐣 ${esc(c.pet.name||'Серийчик')}</button>`:''}${c.type==='group'?`<button class="it bad" data-act="leave">${ic('x')}Выйти из группы</button>`:''}`,r.left+r.width/2-100,r.bottom);break}
     case 'leave':{if(!el.dataset.sure){el.dataset.sure=1;el.lastChild.textContent='Точно выйти?';return}try{await api('/api/chats/leave',{chat:S.cur});const id2=S.cur;closeLayer();delete S.chats[id2];closeChat()}catch(err){toast(err.message)}break}
     case 'call':startCall(S.cur,el.dataset.k);break;
     case 'callu':startCall(el.dataset.chat,el.dataset.k);break;
@@ -2037,7 +2128,10 @@ document.addEventListener('click',async e=>{
     case 'c-max':CALL.min=false;renderCall();break;
     case 'theme':store.set('theme',el.dataset.v);applyTheme();settingsSheet();break;
     case 'wall':store.set('wall',el.dataset.w);await IDB.del('wall:app');await applyAppWall();applyTheme();settingsSheet();break;
-    case 'notif':try{await Notification.requestPermission()}catch(err){}settingsSheet();break;
+    case 'notif':await pushEnable();settingsSheet();break;
+    case 'pushon':await pushEnable();break;
+    case 'pushno':store.set('pushNo',1);renderPushAsk();break;
+    case 'mute':{const c=S.chats[S.cur];if(!c)break;const r=await api('/api/chats/mute',{chat:c.id,on:!c.muted});S.chats[c.id]=r.chat;toast(r.chat.muted?'Уведомления чата выключены 🔕':'Уведомления чата включены 🔔');closeLayer();renderSide();break}
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;
     case 'copyname':try{await navigator.clipboard.writeText('@'+S.me.username);toast('Логин скопирован')}catch(err){}break;
