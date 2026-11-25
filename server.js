@@ -1,7 +1,8 @@
 /* Glint — messenger server: accounts, chats, real-time messages, WebRTC call signaling.
    Storage: Postgres (DATABASE_URL) or data/db.json for local runs. */
 'use strict';
-const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto');
+const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
+const GZ=new Map();
 const {WebSocketServer}=require('ws');
 
 /* ---------- config (.env for local runs, Environment in Render) ---------- */
@@ -22,7 +23,7 @@ const MAX_TEXT=4000,MAX_IMG=1.2e6,PAGE=60,KEEP_MSGS=3000;
 /* ---------- storage ----------
    Everything lives in memory and is written back in the background:
    one row per user (u:), per chat (c:) and per chat history (m:), plus sessions. */
-let DB={users:{},chats:{},msgs:{},sessions:{}};
+let DB={users:{},chats:{},msgs:{},sessions:{},servers:{}};
 let pool=null;const DIRTY=new Set();
 const DATA_FILE=path.join(__dirname,'data','db.json');
 async function load(){
@@ -33,11 +34,12 @@ async function load(){
     const r=await pool.query('SELECT k,v FROM glint_kv');
     for(const {k,v} of r.rows){
       const o=JSON.parse(v),id=k.slice(2);
-      if(k[0]==='u')DB.users[id]=o;else if(k[0]==='c')DB.chats[id]=o;else if(k[0]==='m')DB.msgs[id]=o;else if(k==='s:all')DB.sessions=o;
+      if(k[0]==='u')DB.users[id]=o;else if(k[0]==='c')DB.chats[id]=o;else if(k[0]==='m')DB.msgs[id]=o;else if(k[0]==='g')DB.servers[id]=o;else if(k==='s:all')DB.sessions=o;
     }
     return 'Postgres';
   }
   try{DB=Object.assign(DB,JSON.parse(fs.readFileSync(DATA_FILE,'utf8')))}catch(e){}
+  DB.servers=DB.servers||{};
   return 'файл data/db.json';
 }
 const mark=k=>{DIRTY.add(k)};
@@ -47,7 +49,7 @@ async function flushNow(){
   const keys=[...DIRTY];DIRTY.clear();
   if(!pool){fs.mkdirSync(path.dirname(DATA_FILE),{recursive:true});fs.writeFileSync(DATA_FILE+'.tmp',JSON.stringify(DB));fs.renameSync(DATA_FILE+'.tmp',DATA_FILE);return}
   for(const k of keys){
-    const id=k.slice(2),v=k[0]==='u'?DB.users[id]:k[0]==='c'?DB.chats[id]:k[0]==='m'?DB.msgs[id]:DB.sessions;
+    const id=k.slice(2),v=k[0]==='u'?DB.users[id]:k[0]==='c'?DB.chats[id]:k[0]==='m'?DB.msgs[id]:k[0]==='g'?DB.servers[id]:DB.sessions;
     if(v===undefined)await pool.query('DELETE FROM glint_kv WHERE k=$1',[k]);
     else await pool.query('INSERT INTO glint_kv(k,v) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET v=EXCLUDED.v',[k,JSON.stringify(v)]);
   }
@@ -68,7 +70,9 @@ const pubUser=u=>u&&({id:u.id,username:u.username,name:u.name,color:u.color,avat
 function chatFor(c,uid){
   const ms=DB.msgs[c.id]||[],last=ms[ms.length-1]||null;
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
-  return {id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||''};
+  const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||''};
+  if(c.server)o.server=c.server;
+  return o;
 }
 const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m;
 const member=(c,uid)=>c&&c.members.includes(uid);
@@ -131,7 +135,9 @@ API['GET /api/me']=(req,res,b,u)=>{
   if(!u)return {me:null};
   const chats=Object.values(DB.chats).filter(c=>member(c,u.id)).map(c=>chatFor(c,u.id));
   const ids=new Set();chats.forEach(c=>c.members.forEach(m=>ids.add(m)));
-  return {me:Object.assign(pubUser(u),{}),chats,users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+  const servers=Object.values(DB.servers).filter(g=>g.members.includes(u.id));
+  servers.forEach(g=>g.members.forEach(m=>ids.add(m)));
+  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 API['POST /api/profile']=(req,res,b,u)=>{
   need(u);
@@ -195,6 +201,119 @@ API['GET /api/ice']=(req,res,b,u)=>{
 function need(u){if(!u)throw E(401,'Войди в аккаунт')}
 const ip=req=>String(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').split(',')[0].trim();
 
+
+/* ---------- servers: text channels (stored as chats) and voice channels ---------- */
+const VOICE=new Map(); /* voice channel id -> Map(userId -> {mute,deaf,ws}) */
+function serverOut(g,uid){
+  return {id:g.id,name:g.name,color:g.color,owner:g.owner,members:g.members,invite:g.owner===uid?g.invite:'',
+    channels:g.channels.map(ch=>ch.type==='voice'?{id:ch.id,type:'voice',name:ch.name,users:voiceUsers(ch.id)}:{id:ch.id,type:'text',name:ch.name})};
+}
+const voiceUsers=cid=>[...(VOICE.get(cid)||new Map()).entries()].map(([id,v])=>({id,mute:!!v.mute,deaf:!!v.deaf}));
+function pushServer(g,extra){
+  g.members.forEach(m=>sendTo(m,Object.assign({t:'server',server:serverOut(g,m),users:g.members.map(i=>pubUser(DB.users[i])).filter(Boolean)},extra||{})));
+}
+const cleanChan=v=>String(v||'').toLowerCase().replace(/[\u0000-\u001f\u007f]/g,'').trim().replace(/\s+/g,'-').slice(0,32);
+function serverOf(id,u,owner){
+  const g=DB.servers[String(id||'')];
+  if(!g||!g.members.includes(u.id))throw E(404,'Сервер не найден');
+  if(owner&&g.owner!==u.id)throw E(403,'Это может только создатель сервера');
+  return g;
+}
+function addTextChannel(g,name){
+  const c={id:'c'+rid(6),type:'channel',server:g.id,name,members:g.members.slice(),created:now(),read:{}};
+  DB.chats[c.id]=c;DB.msgs[c.id]=[];mark('c:'+c.id);mark('m:'+c.id);
+  g.channels.push({id:c.id,type:'text',name});return c;
+}
+function syncMembers(g){
+  g.channels.forEach(ch=>{if(ch.type==='text'&&DB.chats[ch.id]){DB.chats[ch.id].members=g.members.slice();mark('c:'+ch.id)}});
+  mark('g:'+g.id);
+}
+API['POST /api/servers']=(req,res,b,u)=>{
+  need(u);if(!limit('srv:'+u.id,10,3600e3))throw E(429,'Слишком много серверов за час');
+  const name=cleanName(b.name);if(!name)throw E(400,'Назови сервер');
+  if(Object.values(DB.servers).filter(g=>g.owner===u.id).length>=20)throw E(400,'Не больше 20 своих серверов');
+  const g={id:'g'+rid(6),name,owner:u.id,members:[u.id],color:COLORS[crypto.randomInt(COLORS.length)],invite:rid(6),channels:[],created:now()};
+  DB.servers[g.id]=g;
+  const c=addTextChannel(g,'общий');
+  g.channels.push({id:'v'+rid(6),type:'voice',name:'Голосовой'});
+  mark('g:'+g.id);
+  addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} создал(а) сервер «${name}»`});
+  pushServer(g);pushChat(c);return {server:serverOut(g,u.id)};
+};
+API['GET /api/servers/preview']=(req,res,b,u,q)=>{
+  need(u);const code=String(q.get('code')||'');
+  const g=Object.values(DB.servers).find(x=>x.invite&&x.invite===code);if(!g)throw E(404,'Приглашение недействительно');
+  return {id:g.id,name:g.name,color:g.color,members:g.members.length,joined:g.members.includes(u.id)};
+};
+API['POST /api/servers/join']=(req,res,b,u)=>{
+  need(u);if(!limit('join:'+u.id,20,3600e3))throw E(429,'Слишком много попыток');
+  const code=String(b.code||'');const g=Object.values(DB.servers).find(x=>x.invite&&x.invite===code);
+  if(!g)throw E(404,'Приглашение недействительно');
+  if(!g.members.includes(u.id)){
+    if(g.members.length>=200)throw E(400,'Сервер заполнен');
+    g.members.push(u.id);syncMembers(g);
+    const first=g.channels.find(ch=>ch.type==='text');
+    if(first&&DB.chats[first.id])addMsg(DB.chats[first.id],{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} присоединился(ась) к серверу`});
+    pushServer(g);g.channels.forEach(ch=>{if(ch.type==='text'&&DB.chats[ch.id])pushChat(DB.chats[ch.id])});
+  }
+  return {server:serverOut(g,u.id)};
+};
+API['POST /api/servers/leave']=(req,res,b,u)=>{
+  need(u);const g=serverOf(b.server,u);
+  if(g.owner===u.id)throw E(400,'Создатель не может выйти. Удали сервер в его настройках.');
+  leaveVoiceOf(u.id,g);
+  const before=g.members.slice();
+  g.members=g.members.filter(i=>i!==u.id);syncMembers(g);
+  const first=g.channels.find(ch=>ch.type==='text');
+  if(first&&DB.chats[first.id])addMsg(DB.chats[first.id],{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} покинул(а) сервер`});
+  sendTo(u.id,{t:'server-gone',server:g.id});pushServer(g);return {ok:true};
+};
+API['POST /api/servers/update']=(req,res,b,u)=>{
+  need(u);const g=serverOf(b.server,u,true);
+  if(b.name!==undefined){const n=cleanName(b.name);if(!n)throw E(400,'Пустое название');g.name=n}
+  if(b.newInvite)g.invite=rid(6);
+  mark('g:'+g.id);pushServer(g);return {server:serverOut(g,u.id)};
+};
+API['POST /api/servers/delete']=(req,res,b,u)=>{
+  need(u);const g=serverOf(b.server,u,true);
+  g.channels.forEach(ch=>{
+    if(ch.type==='text'){delete DB.chats[ch.id];delete DB.msgs[ch.id];mark('c:'+ch.id);mark('m:'+ch.id)}
+    else closeVoice(ch.id);
+  });
+  const members=g.members.slice();delete DB.servers[g.id];mark('g:'+g.id);
+  members.forEach(m=>sendTo(m,{t:'server-gone',server:g.id}));return {ok:true};
+};
+API['POST /api/servers/channel']=(req,res,b,u)=>{
+  need(u);const g=serverOf(b.server,u,true);
+  if(g.channels.length>=50)throw E(400,'Не больше 50 каналов');
+  const type=b.type==='voice'?'voice':'text';
+  const name=type==='voice'?cleanName(b.name):cleanChan(b.name);if(!name)throw E(400,'Назови канал');
+  if(type==='text'){const c=addTextChannel(g,name);pushChat(c)}
+  else g.channels.push({id:'v'+rid(6),type:'voice',name});
+  mark('g:'+g.id);pushServer(g);return {server:serverOut(g,u.id)};
+};
+API['POST /api/servers/channel/delete']=(req,res,b,u)=>{
+  need(u);const g=serverOf(b.server,u,true);
+  const ch=g.channels.find(x=>x.id===String(b.channel||''));if(!ch)throw E(404,'Канал не найден');
+  if(ch.type==='text'&&g.channels.filter(x=>x.type==='text').length<=1)throw E(400,'Должен остаться хотя бы один текстовый канал');
+  g.channels=g.channels.filter(x=>x!==ch);
+  if(ch.type==='text'){delete DB.chats[ch.id];delete DB.msgs[ch.id];mark('c:'+ch.id);mark('m:'+ch.id)}else closeVoice(ch.id);
+  mark('g:'+g.id);pushServer(g,{removed:ch.id});return {ok:true};
+};
+
+/* voice: everyone in a channel connects to everyone (mesh); the server keeps the list and passes signals */
+const VOICE_MAX=8;
+function serverOfVoice(cid){return Object.values(DB.servers).find(g=>g.channels.some(ch=>ch.id===cid&&ch.type==='voice'))}
+function voiceBroadcast(cid){const g=serverOfVoice(cid);if(g)g.members.forEach(m=>sendTo(m,{t:'voice',server:g.id,channel:cid,users:voiceUsers(cid)}))}
+function voiceLeave(uid,cid,quiet){
+  const room=VOICE.get(cid);if(!room||!room.has(uid))return;
+  room.delete(uid);if(!room.size)VOICE.delete(cid);
+  room.forEach((v,other)=>sendTo(other,{t:'vpeer-left',channel:cid,user:uid}));
+  if(!quiet)voiceBroadcast(cid);
+}
+function voiceChannelOf(uid){for(const [cid,room] of VOICE)if(room.has(uid))return cid;return null}
+function leaveVoiceOf(uid,g){g.channels.forEach(ch=>{if(ch.type==='voice'&&VOICE.get(ch.id)&&VOICE.get(ch.id).has(uid)){const r=VOICE.get(ch.id).get(uid);voiceLeave(uid,ch.id);if(r.ws&&r.ws.readyState===1)r.ws.send(JSON.stringify({t:'vkicked',channel:ch.id}))}})}
+function closeVoice(cid){const room=VOICE.get(cid);if(!room)return;room.forEach(v=>{if(v.ws&&v.ws.readyState===1)v.ws.send(JSON.stringify({t:'vkicked',channel:cid}))});VOICE.delete(cid)}
 /* ---------- messages ---------- */
 function addMsg(c,m){
   const ms=DB.msgs[c.id]=DB.msgs[c.id]||[];ms.push(m);
@@ -239,6 +358,7 @@ function onSocket(ws,u){
   ws.on('close',()=>{
     const s=SOCKS.get(u.id);if(s){s.delete(ws);if(!s.size){SOCKS.delete(u.id);ONLINE.delete(u.id);u.lastSeen=now();mark('u:'+u.id);broadcastUser(u)}}
     if(!SOCKS.has(u.id))for(const c of CALLS.values())if(c.a===u.id||c.b===u.id)endCall(c,'offline',u.id);
+    const vc=voiceChannelOf(u.id);if(vc&&VOICE.get(vc).get(u.id).ws===ws)voiceLeave(u.id,vc);
   });
 }
 function handle(ws,u,m){
@@ -278,13 +398,35 @@ function handle(ws,u,m){
       if(!member(c,u.id))return;const ts=Math.min(+m.ts||0,now());
       c.read=c.read||{};if(ts>(c.read[u.id]||0)){c.read[u.id]=ts;mark('c:'+c.id);toChat(c,{t:'read',chat:c.id,user:u.id,ts})}return;
     }
+    /* ----- voice channels ----- */
+    case 'vjoin':{
+      const cid=String(m.channel||''),g=serverOfVoice(cid);
+      if(!g||!g.members.includes(u.id))throw E(404,'Канал не найден');
+      if(inCall(u.id))throw E(409,'Сначала заверши звонок');
+      const prev=voiceChannelOf(u.id);if(prev===cid){const r=VOICE.get(cid).get(u.id);if(r.ws!==ws){voiceLeave(u.id,cid,true)}else return}else if(prev)voiceLeave(u.id,prev);
+      const room=VOICE.get(cid)||new Map();
+      if(room.size>=VOICE_MAX)throw E(400,`В голосовом канале максимум ${VOICE_MAX} человек`);
+      const peers=[...room.keys()];
+      room.set(u.id,{mute:!!m.mute,deaf:!!m.deaf,ws});VOICE.set(cid,room);
+      ws.send(JSON.stringify({t:'vjoined',channel:cid,server:g.id,peers}));
+      voiceBroadcast(cid);return;
+    }
+    case 'vleave':{const cid=voiceChannelOf(u.id);if(cid&&VOICE.get(cid).get(u.id).ws===ws)voiceLeave(u.id,cid);return}
+    case 'vstate':{const cid=voiceChannelOf(u.id);if(!cid)return;const r=VOICE.get(cid).get(u.id);r.mute=!!m.mute;r.deaf=!!m.deaf;voiceBroadcast(cid);return}
+    case 'vrtc':{
+      const cid=voiceChannelOf(u.id),to=String(m.to||'');if(!cid)return;
+      const room=VOICE.get(cid),peer=room&&room.get(to);if(!peer||!peer.ws||peer.ws.readyState!==1)return;
+      const d=m.data;if(!d||typeof d!=='object'||JSON.stringify(d).length>60e3)return;
+      peer.ws.send(JSON.stringify({t:'vrtc',channel:cid,from:u.id,data:d}));return;
+    }
     /* ----- calls ----- */
     case 'call':{
       if(!member(c,u.id)||c.type!=='dm')throw E(400,'Звонить можно в личном чате');
       if(!limit('call:'+u.id,6,60e3))throw E(429,'Слишком много звонков подряд');
       const other=c.members.find(x=>x!==u.id);
       if(inCall(u.id))throw E(409,'Ты уже в звонке');
-      const busy=inCall(other);
+      if(voiceChannelOf(u.id))throw E(409,'Сначала выйди из голосового канала');
+      const busy=inCall(other)||!!voiceChannelOf(other);
       const call={id:'k'+rid(8),a:u.id,b:other,chat:c.id,kind:m.kind==='video'?'video':'audio',state:'ringing',ts:now()};
       CALLS.set(call.id,call);
       ws.send(JSON.stringify({t:'call-started',callId:call.id,chat:c.id,to:other,kind:call.kind}));
@@ -331,9 +473,14 @@ const server=http.createServer(async(req,res)=>{
     if(!f.startsWith(PUB))return send(res,403,{error:'нет'});
     fs.stat(f,(e,st)=>{
       if(e||!st.isFile())f=path.join(PUB,'index.html');
-      const ext=path.extname(f);
-      res.writeHead(200,Object.assign({'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':ext==='.html'||f.endsWith('sw.js')?'no-cache':'public, max-age=3600'},SEC));
-      fs.createReadStream(f).pipe(res);
+      const ext=path.extname(f),h=Object.assign({'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':ext==='.html'||f.endsWith('sw.js')?'no-cache':'public, max-age=3600','Vary':'Accept-Encoding'},SEC);
+      /* text files are sent compressed (about 4x smaller), compressed once and kept in memory */
+      if(/\.(js|css|html|svg|webmanifest|json)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+        const key=f+':'+(st&&st.mtimeMs);let gz=GZ.get(key);
+        if(!gz){gz=zlib.gzipSync(fs.readFileSync(f),{level:9});GZ.set(key,gz)}
+        h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(200,h);return res.end(gz);
+      }
+      res.writeHead(200,h);fs.createReadStream(f).pipe(res);
     });
   }catch(e){if(!e.code)console.error(e);send(res,e.code||500,{error:e.code?e.message:'ошибка сервера'})}
 });

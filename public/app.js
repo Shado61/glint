@@ -33,14 +33,22 @@ const P={
   check:'<path d="M20 6 9 17l-5-5"/>',
   min:'<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
   incall:'<path d="m16 3 5 5-5 5"/><path d="M21 8h-7"/>',
-  outcall:'<path d="M17 21l-5-5 5-5"/><path d="M12 16h7"/>'
+  outcall:'<path d="M17 21l-5-5 5-5"/><path d="M12 16h7"/>',
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  vol:'<path d="M11 5 6 9H2v6h4l5 4V5Z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
+  deaf:'<path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
+  deafOff:'<path d="m2 2 20 20"/><path d="M3 18v-6a9 9 0 0 1 14.6-7M21 12v6"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
+  leave:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  home:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 20l1.1-4A8.4 8.4 0 1 1 21 11.5Z"/>'
 };
 const ic=(n,cls='ico')=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
 const TICK1='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m1.5 6.5 3.2 3L11 2.5"/></svg>';
 const TICK2='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m1 6.5 3.2 3L10.5 2.5M7.5 9.2 14.5 2.5"/></svg>';
 
 /* ---------- state ---------- */
-const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{}};
+const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{},servers:{},view:'home',win:{}};
+const WIN=120; /* messages kept on screen at once; older ones appear on demand */
 
 /* ---------- helpers ---------- */
 async function api(path,body){
@@ -57,10 +65,11 @@ function avatar(u,size='',dot=true){
 }
 function chatAvatar(c,size){
   if(c.type==='dm')return avatar(peerOf(c),size);
+  if(c.type==='channel'){const g=S.servers[c.server]||{};return `<span class="ava ${size}" style="--c:${esc(g.color||'#5f8cc0')}">#</span>`}
   return `<span class="ava ${size}" style="--c:${esc(c.color||'#9b6bff')}">${esc(initials(c.name))}</span>`;
 }
 const peerOf=c=>S.users[c.members.find(m=>m!==S.me.id)]||{name:'Удалённый аккаунт',color:'#777'};
-const chatName=c=>c.type==='dm'?peerOf(c).name:c.name;
+const chatName=c=>c.type==='dm'?peerOf(c).name:c.type==='channel'?'# '+c.name:c.name;
 const tm=ts=>new Date(ts).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 function shortWhen(ts){
   const d=new Date(ts),n=new Date();
@@ -86,14 +95,14 @@ function lastText(m){
   if(m.call)return (m.call.kind==='video'?'📹 ':'📞 ')+(m.call.missed?'Пропущенный звонок':'Звонок, '+durText(m.call.dur));
   const who=m.from===S.me.id?'Вы: ':'';return who+(m.img&&!m.text?'📷 Фото':(m.img?'📷 ':'')+m.text);
 }
-const sortedChats=()=>Object.values(S.chats).sort((a,b)=>((b.last&&b.last.ts)||b.created)-((a.last&&a.last.ts)||a.created));
+const sortedChats=()=>Object.values(S.chats).filter(c=>c.type!=='channel').sort((a,b)=>((b.last&&b.last.ts)||b.created)-((a.last&&a.last.ts)||a.created));
 
 /* ---------- theme ---------- */
 function applyTheme(){
   const t=store.get('theme','auto'),light=t==='light'||(t==='auto'&&matchMedia('(prefers-color-scheme: light)').matches);
   document.documentElement.classList.toggle('light',light);
-  $('.wall').dataset.w=store.get('wall','aurora');
-  document.querySelector('meta[name=theme-color]').content=light?'#e9ecff':'#0b1020';
+  $('.wall').dataset.w=store.get('wall','slate');
+  document.querySelector('meta[name=theme-color]').content=light?'#e4eaf1':'#18202b';
 }
 matchMedia('(prefers-color-scheme: light)').addEventListener('change',applyTheme);
 applyTheme();
@@ -144,18 +153,26 @@ async function boot(){
   let r;try{r=await api('/api/me')}catch(e){$('#app').innerHTML=`<div class="auth"><div class="card glass empty"><b>Нет связи</b>Проверь интернет и обнови страницу.</div></div>`;return}
   if(!r.me){viewAuth();return}
   S.me=r.me;S.chats={};r.chats.forEach(c=>S.chats[c.id]=c);r.users.forEach(u=>S.users[u.id]=u);S.users[S.me.id]=S.me;
+  S.servers={};(r.servers||[]).forEach(g=>S.servers[g.id]=g);
   $('#app').className='app';
   renderShell();connect();updateTitle();
-  const h=location.hash.slice(1);if(h&&S.chats[h])openChat(h);
+  const h=location.hash.slice(1),jm=/^join\/([\w-]{4,20})$/.exec(h);
+  if(jm){history.replaceState(null,'',location.pathname);joinSheet(jm[1]);return}
+  if(h&&S.chats[h]){if(S.chats[h].server)S.view=S.chats[h].server;openChat(h)}
 }
 function renderShell(){
-  $('#app').innerHTML=`<aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
-  renderSide();renderMain();
+  $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
+  renderRail();renderSide();renderMain();
 }
 
 /* =================================================================== SIDEBAR */
-function renderSide(){
+let sideQ=0;
+function renderSide(){if(sideQ)return;sideQ=requestAnimationFrame(()=>{sideQ=0;renderSideNow();renderRail()})}
+function renderSideNow(){
   const el=$('#side');if(!el)return;
+  el.classList.toggle('has-voice',!!VC);
+  if(S.view!=='home'&&S.servers[S.view]){el.innerHTML=serverSideHTML(S.servers[S.view])+voicePanelHTML();return}
+  S.view='home';
   const keep=document.activeElement&&document.activeElement.id==='q';
   const head=S.tab==='calls'?'Звонки':'Чаты';
   el.innerHTML=`<div class="side-h"><h1>${head}</h1>
@@ -166,7 +183,7 @@ function renderSide(){
     <nav class="tabbar glass pill">
       <button class="${S.tab==='chats'?'on':''}" data-act="tab" data-t="chats">${ic('chats')}Чаты</button>
       <button class="${S.tab==='calls'?'on':''}" data-act="tab" data-t="calls">${ic('calls')}Звонки</button>
-      <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}Настройки</button></nav>`;
+      <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}Настройки</button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 }
 function chatListHTML(){
@@ -229,18 +246,27 @@ function renderStatus(){
   const el=$('#status'),c=S.chats[S.cur];if(!el||!c)return;
   const ty=Object.keys(S.typing[c.id]||{});
   if(ty.length){el.className='typing';el.textContent=c.type==='dm'?'печатает…':`${ty.map(i=>(S.users[i]||{}).name).join(', ')} печатает…`;return}
+  if(c.type==='channel'){el.className='';const g=S.servers[c.server];el.textContent=g?g.name+' · '+g.members.filter(i=>(S.users[i]||{}).online).length+' в сети':'';return}
   el.className='';el.textContent=c.type==='dm'?seen(peerOf(c)):`${c.members.length} участник${c.members.length%10===1&&c.members.length!==11?'':c.members.length%10>=2&&c.members.length%10<=4&&(c.members.length<12||c.members.length>14)?'а':'ов'}`;
 }
 async function openChat(id){
+  if(S.chats[id]&&S.chats[id].server)S.view=S.chats[id].server;else if(S.chats[id])S.view='home';
   if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;
   S.cur=id;S.reply=S.edit=null;
   history.replaceState(null,'','#'+id);
   renderSide();renderMain();
   if(!S.msgs[id]){
-    try{const r=await api('/api/messages?chat='+id);S.msgs[id]=r.messages;S.more[id]=r.more}catch(e){toast(e.message);S.msgs[id]=[]}
+    try{const r=await api('/api/messages?chat='+id);S.msgs[id]=mergeMsgs(r.messages,S.msgs[id]);S.more[id]=r.more}catch(e){toast(e.message);S.msgs[id]=S.msgs[id]||[]}
     if(S.cur===id)renderMsgs(true);
   }
   markRead();
+}
+/* history that arrived from the server + anything sent or received while it was loading */
+function mergeMsgs(loaded,live){
+  if(!live||!live.length)return loaded;
+  const ids=new Set(loaded.map(m=>m.id)),out=loaded.slice();
+  live.forEach(m=>{if(!ids.has(m.id)&&!(m.pending&&loaded.some(x=>x.from===m.from&&x.text===m.text&&Math.abs(x.ts-m.ts)<15e3)))out.push(m)});
+  return out.sort((a,b)=>a.ts-b.ts);
 }
 function closeChat(){if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;S.cur=null;history.replaceState(null,'',location.pathname);renderSide();renderMain()}
 
@@ -278,17 +304,20 @@ function renderMsgs(toBottom){
   const list=S.msgs[c.id];
   if(!list){box.innerHTML='<div class="sys">Загружаем…</div>';return}
   const near=box.scrollHeight-box.scrollTop-box.clientHeight<140;
-  let h=S.more[c.id]?`<button class="gbtn more" data-act="older">Показать раньше</button>`:'';
-  if(!list.length)h+=`<div class="sys glass pill" style="margin-top:auto">Напиши первое сообщение 👋</div>`;
+  const win=S.win[c.id]||WIN,from=Math.max(0,list.length-win),shown=list.slice(from);
+  let h=(from>0||S.more[c.id])?`<button class="gbtn more" data-act="older">Показать раньше</button>`:'';
+  if(!list.length)h+=`<div class="sys glass pill" style="margin-top:auto">${c.type==='channel'?'Это начало канала '+esc(chatName(c))+' 👋':'Напиши первое сообщение 👋'}</div>`;
   let day='';
-  list.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}h+=msgHTML(c,m,list[i-1],list[i+1])});
+  const fresh=S.fresh;S.fresh=null;
+  shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');h+=x});
   const prevH=box.scrollHeight,prevT=box.scrollTop;
   box.innerHTML=h;
   if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;
 }
 async function loadOlder(){
   const c=S.cur,l=S.msgs[c];if(!l||!l.length)return;
-  try{const r=await api(`/api/messages?chat=${c}&before=${l[0].ts}`);S.msgs[c]=r.messages.concat(l);S.more[c]=r.more;if(S.cur===c)renderMsgs(null)}catch(e){toast(e.message)}
+  const win=S.win[c]||WIN;if(l.length>win){S.win[c]=win+WIN;renderMsgs(null);return}
+  try{const r=await api(`/api/messages?chat=${c}&before=${l[0].ts}`);S.msgs[c]=r.messages.concat(l);S.more[c]=r.more;S.win[c]=(S.win[c]||WIN)+r.messages.length;if(S.cur===c)renderMsgs(null)}catch(e){toast(e.message)}
 }
 function markRead(){
   const c=S.chats[S.cur];if(!c||document.hidden)return;
@@ -389,6 +418,7 @@ async function startDM(uid){
 }
 function infoSheet(){
   const c=S.chats[S.cur];if(!c)return;
+  if(c.type==='channel'){const g=S.servers[c.server];if(g)serverSheet(g);return}
   if(c.type==='dm'){const u=peerOf(c);
     sheet(`<div class="prof">${avatar(u,'xl')}<h3>${esc(u.name)}</h3><small>@${esc(u.username)} · ${esc(seen(u))}</small>${u.bio?`<p style="margin:8px 0 0">${esc(u.bio)}</p>`:''}</div>
       <div class="btns" style="justify-content:center"><button class="gbtn" data-act="call" data-k="audio">${ic('phone')}Звонок</button><button class="gbtn" data-act="call" data-k="video">${ic('video')}Видео</button></div>`);return}
@@ -397,14 +427,14 @@ function infoSheet(){
     <div class="btns"><button class="gbtn danger" data-act="leave">Выйти из группы</button></div>`);
 }
 function settingsSheet(){
-  const me=S.me,th=store.get('theme','auto'),w=store.get('wall','aurora');
+  const me=S.me,th=store.get('theme','auto'),w=store.get('wall','slate');
   const np='Notification' in window?Notification.permission:'unsupported';
   sheet(`<div class="prof"><button data-act="ava" title="Сменить фото" aria-label="Сменить фото">${avatar(me,'xl',false)}</button><small>нажми на фото, чтобы сменить</small></div>
     <label class="field"><span>Имя</span><input class="input" id="pname" maxlength="40" value="${esc(me.name)}"></label>
     <label class="field"><span>О себе</span><input class="input" id="pbio" maxlength="140" value="${esc(me.bio||'')}" placeholder="Пара слов о себе"></label>
     <div class="set-row"><span class="mid"><b>Логин</b><small>@${esc(me.username)} — по нему тебя находят</small></span><button class="gbtn" data-act="copyname">${ic('copy')}</button></div>
     <div class="set-row"><span class="mid"><b>Тема</b></span><div class="seg" style="width:220px">${[['auto','Авто'],['light','Светлая'],['dark','Тёмная']].map(([k,n])=>`<button class="${th===k?'on':''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
-    <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${['aurora','sunset','ocean','mono'].map(k=>`<button class="${w===k?'on':''}" data-act="wall" data-w="${k}" aria-label="${k}"></button>`).join('')}</div></div>
+    <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}</div></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np==='default'?'<button class="gbtn" data-act="notif">Включить</button>':''}</div>
     <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Glint на телефон или ПК</small></span><button class="gbtn" data-act="install">Как?</button></div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
@@ -429,7 +459,7 @@ function connect(){
   WS=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);
   WS.onopen=async()=>{
     if(wsTry>0){ /* back after a drop: catch up on what was missed */
-      try{const r=await api('/api/me');if(!r.me)return location.reload();r.chats.forEach(c=>S.chats[c.id]=c);r.users.forEach(u=>S.users[u.id]=u);
+      try{const r=await api('/api/me');if(!r.me)return location.reload();r.chats.forEach(c=>S.chats[c.id]=c);r.users.forEach(u=>S.users[u.id]=u);S.servers={};(r.servers||[]).forEach(g=>S.servers[g.id]=g);if(VC)voiceRejoin();
         if(S.cur){const m=await api('/api/messages?chat='+S.cur);S.msgs[S.cur]=m.messages;S.more[S.cur]=m.more}
         Object.keys(S.msgs).forEach(k=>{if(k!==S.cur)delete S.msgs[k]});renderSide();renderMsgs();renderStatus();markRead();updateTitle()}catch(e){}
     }
@@ -443,16 +473,17 @@ function onWS(m){
   switch(m.t){
     case 'msg':{
       const c=S.chats[m.chat];if(!c)return;
-      const l=S.msgs[m.chat];
+      const l=S.msgs[m.chat]||(S.cur===m.chat?(S.msgs[m.chat]=[]):null);
       if(l){if(!l.some(x=>x.id===m.msg.id)){
         if(m.msg.from===S.me.id){const i=l.findIndex(x=>x.pending&&x.text===m.msg.text&&!!x.img===!!m.msg.img);if(i>=0)l.splice(i,1)}
         l.push(m.msg)}}
       c.last=m.msg;
       if(S.typing[m.chat])delete S.typing[m.chat][m.msg.from];
       const mine=m.msg.from===S.me.id,here=S.cur===m.chat&&!document.hidden;
+      S.fresh=m.msg.id;
       if(!mine&&!m.msg.sys&&!m.msg.call){
-        if(!here){c.unread=(c.unread||0)+1;beep([880,1320],.07,.03,.05)}
-        notify(chatName(c),c.type==='group'?`${(S.users[m.msg.from]||{}).name}: ${lastText(m.msg)}`:lastText(m.msg),m.chat);
+        if(!here){c.unread=(c.unread||0)+1;if(c.type!=='channel')beep([880,1320],.07,.03,.05)}
+        if(c.type!=='channel'||(m.msg.text||'').includes('@'+S.me.username))notify(chatName(c),c.type!=='dm'?`${(S.users[m.msg.from]||{}).name}: ${lastText(m.msg)}`:lastText(m.msg),m.chat);
       }
       if(S.cur===m.chat){renderMsgs();renderStatus();markRead()}
       renderSide();updateTitle();
@@ -476,6 +507,21 @@ function onWS(m){
       toast(m.error);if(CALL&&CALL.state==='calling'&&!CALL.id)hangup(true);return;
     }
     case 'call-started':case 'call-incoming':case 'call-accepted':case 'call-end':case 'rtc':return onCallMsg(m);
+    case 'server':{
+      m.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));S.servers[m.server.id]=m.server;
+      if(m.removed&&S.cur===m.removed){delete S.chats[m.removed];closeChat()}
+      if(m.removed&&VC&&VC.cid===m.removed)voiceLeave(true);
+      renderSide();if(S.chats[S.cur]&&S.chats[S.cur].server===m.server.id)renderStatus();return;
+    }
+    case 'server-gone':{
+      const g=S.servers[m.server];delete S.servers[m.server];
+      if(g)g.channels.forEach(ch=>delete S.chats[ch.id]);
+      if(VC&&VC.sid===m.server)voiceLeave(true);
+      if(S.view===m.server)S.view='home';
+      if(S.cur&&!S.chats[S.cur])closeChat();else renderSide();return;
+    }
+    case 'voice':{const g=S.servers[m.server];if(!g)return;const ch=g.channels.find(x=>x.id===m.channel);if(ch)ch.users=m.users;renderSide();return}
+    case 'vjoined':case 'vrtc':case 'vpeer-left':case 'vkicked':return onVoiceMsg(m);
   }
 }
 
@@ -495,6 +541,7 @@ async function getMedia(video){
 }
 async function startCall(chatId,kind){
   if(CALL){toast('Ты уже в звонке');return}
+  if(VC){toast('Сначала выйди из голосового канала');return}
   const c=S.chats[chatId];if(!c||c.type!=='dm')return;
   closeLayer();
   const peer=peerOf(c);
@@ -539,7 +586,7 @@ function attachLocal(){
 }
 async function onCallMsg(m){
   if(m.t==='call-incoming'){
-    if(CALL){wsSend({t:'call-reject',callId:m.callId});return}
+    if(CALL||VC){wsSend({t:'call-reject',callId:m.callId});return}
     S.users[m.from.id]=Object.assign(S.users[m.from.id]||{},m.from);
     CALL={id:m.callId,chat:m.chat,peer:S.users[m.from.id],kind:m.kind,dir:'in',state:'ringing',mic:true,cam:false,screen:false,remote:new MediaStream(),pending:[],rs:{cam:m.kind==='video',screen:false,mic:true}};
     renderCall();ring('in');
@@ -685,6 +732,161 @@ function dragPiP(el){
 addEventListener('beforeunload',e=>{if(CALL&&CALL.state==='active'){e.preventDefault();e.returnValue=''}});
 addEventListener('pagehide',()=>{if(CALL)hangup()});
 
+/* =================================================================== SERVERS */
+function serverUnread(g){return g.channels.reduce((n,ch)=>n+((S.chats[ch.id]||{}).unread||0),0)}
+function renderRail(){
+  const el=$('#rail');if(!el)return;
+  const homeUnread=Object.values(S.chats).filter(c=>c.type!=='channel').reduce((n,c)=>n+(c.unread||0),0);
+  const list=Object.values(S.servers).sort((a,b)=>a.name.localeCompare(b.name));
+  el.innerHTML=`<button class="rbtn home ${S.view==='home'?'on':''}" data-act="view" data-v="home" title="Личные сообщения" aria-label="Личные сообщения">${ic('home')}${homeUnread?`<span class="badge">${homeUnread>99?'99+':homeUnread}</span>`:''}</button>
+    <span class="sep"></span>
+    ${list.map(g=>{const u=serverUnread(g),inV=VC&&VC.sid===g.id;
+      return `<button class="rbtn ${S.view===g.id?'on':''} ${u?'unread':''}" style="--c:${esc(g.color)}" data-act="view" data-v="${g.id}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${esc(initials(g.name))}${inV?`<span class="vdot">${ic('vol')}</span>`:''}</button>`}).join('')}
+    <button class="rbtn add" data-act="addserver" title="Создать или войти на сервер" aria-label="Добавить сервер">${ic('plus')}</button>`;
+}
+function serverSideHTML(g){
+  const own=g.owner===S.me.id;
+  const text=g.channels.filter(c=>c.type==='text'),voice=g.channels.filter(c=>c.type==='voice');
+  return `<div class="srv-h"><h1>${esc(g.name)}</h1>
+      <button class="gbtn ic" data-act="invite" title="Пригласить" aria-label="Пригласить">${ic('link')}</button>
+      <button class="gbtn ic" data-act="srvmenu" title="Настройки сервера" aria-label="Настройки сервера">${ic('gear')}</button></div>
+    <div class="list">
+      <div class="ch-group"><span>Текстовые каналы</span>${own?`<button data-act="newch" data-k="text" title="Создать текстовый канал" aria-label="Создать текстовый канал">${ic('plus')}</button>`:''}</div>
+      ${text.map(ch=>{const c=S.chats[ch.id]||{};return `<button class="ch ${S.cur===ch.id?'on':''} ${c.unread?'unread':''}" data-act="open" data-id="${ch.id}"><span class="hash">#</span><span class="nm">${esc(ch.name)}</span>${c.unread?`<span class="badge">${c.unread>99?'99+':c.unread}</span>`:''}</button>`}).join('')}
+      <div class="ch-group"><span>Голосовые каналы</span>${own?`<button data-act="newch" data-k="voice" title="Создать голосовой канал" aria-label="Создать голосовой канал">${ic('plus')}</button>`:''}</div>
+      ${voice.map(ch=>`<button class="ch ${VC&&VC.cid===ch.id?'on':''}" data-act="vjoin" data-id="${ch.id}" data-s="${g.id}">${ic('vol')}<span class="nm">${esc(ch.name)}</span>${ch.users&&ch.users.length?`<small style="color:var(--fg3)">${ch.users.length}</small>`:''}</button>
+        ${ch.users&&ch.users.length?`<div class="vusers">${ch.users.map(v=>{const u=S.users[v.id]||{name:'?'};return `<div class="vu ${VC&&VC.speaking&&VC.speaking.has(v.id)?'speaking':''}" data-vu="${v.id}">${avatar(u,'xs',false)}<span>${esc(u.name)}</span><span class="st">${v.mute?ic('micOff'):''}${v.deaf?ic('deafOff'):''}</span></div>`}).join('')}</div>`:''}`).join('')}
+    </div>`;
+}
+function voicePanelHTML(){
+  if(!VC)return '';
+  const g=S.servers[VC.sid],ch=g&&g.channels.find(x=>x.id===VC.cid);
+  return `<div class="vpanel glass"><span class="mid"><b>${VC.state==='on'?'Голосовая связь':'Подключение…'}</b><small>${esc(ch?ch.name:'')} · ${esc(g?g.name:'')}</small></span>
+    <button class="gbtn ic ${VC.mute?'off':''}" data-act="vmute" title="${VC.mute?'Включить микрофон':'Выключить микрофон'}" aria-label="Микрофон">${ic(VC.mute?'micOff':'mic')}</button>
+    <button class="gbtn ic ${VC.deaf?'off':''}" data-act="vdeaf" title="${VC.deaf?'Включить звук':'Выключить звук'}" aria-label="Звук">${ic(VC.deaf?'deafOff':'deaf')}</button>
+    <button class="gbtn ic danger" data-act="vleave" title="Отключиться" aria-label="Отключиться">${ic('end')}</button></div>`;
+}
+function addServerSheet(){
+  sheet(`<h2>Сервер</h2><p class="sub">Создай свой сервер с каналами или войди по приглашению</p>
+    <label class="field"><span>Название нового сервера</span><input class="input" id="sname" maxlength="40" placeholder="Например, Друзья"></label>
+    <div class="btns" style="margin-top:0"><button class="gbtn primary" data-act="mkserver">Создать сервер</button></div>
+    <div class="section-t" style="padding-left:4px;margin-top:14px">Или войти по приглашению</div>
+    <label class="field"><span>Ссылка или код приглашения</span><input class="input" id="scode" placeholder="https://…/#join/abc123" autocomplete="off" spellcheck="false"></label>
+    <div class="btns" style="margin-top:0"><button class="gbtn" data-act="joincode">Войти</button></div>`);
+  setTimeout(()=>$('#sname').focus(),50);
+}
+async function joinSheet(code){
+  try{
+    const r=await api('/api/servers/preview?code='+encodeURIComponent(code));
+    if(r.joined){S.view=r.id;renderSide();return}
+    sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(r.color)}">${esc(initials(r.name))}</div><h2>${esc(r.name)}</h2><p class="sub">${r.members} участник(ов) · тебя пригласили на сервер</p>
+      <div class="btns" style="justify-content:center"><button class="gbtn" data-act="closemenu">Не сейчас</button><button class="gbtn primary" data-act="dojoin" data-code="${esc(code)}">Присоединиться</button></div></div>`);
+  }catch(e){toast(e.message)}
+}
+const inviteLink=g=>`${location.origin}/#join/${g.invite}`;
+function inviteSheet(g){
+  if(g.owner!==S.me.id){sheet(`<h2>Пригласить</h2><p class="sub">Попроси создателя сервера прислать ссылку-приглашение.</p><div class="btns"><button class="gbtn" data-act="closemenu">Понятно</button></div>`);return}
+  sheet(`<h2>Пригласить на «${esc(g.name)}»</h2><p class="sub">Отправь ссылку друзьям. По ней они попадут на сервер.</p>
+    <div class="invite"><input class="input" readonly value="${esc(inviteLink(g))}" id="inv"><button class="gbtn primary" data-act="copyinv">${ic('copy')}Копировать</button></div>
+    ${navigator.share?`<div class="btns"><button class="gbtn" data-act="shareinv">Поделиться…</button></div>`:''}`);
+}
+function serverSheet(g){
+  const own=g.owner===S.me.id;
+  sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(g.color)}">${esc(initials(g.name))}</div></div>
+    ${own?`<label class="field"><span>Название</span><input class="input" id="srvname" maxlength="40" value="${esc(g.name)}"></label>`:`<h2 style="text-align:center">${esc(g.name)}</h2>`}
+    ${own?`<div class="section-t" style="padding-left:4px">Каналы</div>${g.channels.map(ch=>`<div class="set-row"><span class="mid">${ch.type==='voice'?'🔊 ':'# '}${esc(ch.name)}</span><button class="gbtn ic" data-act="delch" data-id="${ch.id}" title="Удалить канал" aria-label="Удалить канал">${ic('trash')}</button></div>`).join('')}`:''}
+    <div class="section-t" style="padding-left:4px">Участники · ${g.members.length}</div>
+    <div>${g.members.map(i=>S.users[i]).filter(Boolean).map(u=>`<div class="row">${avatar(u,'s')}<span class="mid"><span class="top"><span class="nm">${esc(u.name)}${u.id===g.owner?' <small style="color:var(--fg3)">создатель</small>':''}</span></span><span class="sub"><span class="lm">${esc(seen(u))}</span></span></span>${u.id!==S.me.id?`<button class="gbtn ic" data-act="dm" data-id="${u.id}" title="Написать" aria-label="Написать">${ic('chats')}</button>`:''}</div>`).join('')}</div>
+    <div class="btns">${own?`<button class="gbtn" data-act="newinv">Новая ссылка</button><button class="gbtn danger" data-act="delsrv">Удалить сервер</button><button class="gbtn primary" data-act="savesrv">Сохранить</button>`:`<button class="gbtn danger" data-act="leavesrv">Покинуть сервер</button>`}</div>`);
+}
+function newChannelSheet(type){
+  sheet(`<h2>${type==='voice'?'Голосовой канал':'Текстовый канал'}</h2><p class="sub">${type==='voice'?'В голосовом канале можно разговаривать всем вместе, до 8 человек':'Канал для переписки всех участников сервера'}</p>
+    <label class="field"><span>Название</span><input class="input" id="chname" maxlength="32" placeholder="${type==='voice'?'Например, Болталка':'например, мемы'}"></label>
+    <div class="btns"><button class="gbtn" data-act="closemenu">Отмена</button><button class="gbtn primary" data-act="mkch" data-k="${type}">Создать</button></div>`);
+  setTimeout(()=>$('#chname').focus(),50);
+}
+
+/* =================================================================== VOICE CHANNELS
+   Everyone in a channel is connected to everyone else (mesh), up to 8 people.
+   The newcomer calls each person already inside; the server only relays the signals. */
+let VC=null;
+async function voiceJoin(sid,cid){
+  if(CALL){toast('Сначала заверши звонок');return}
+  if(VC&&VC.cid===cid)return;
+  if(VC)voiceLeave();
+  VC={sid,cid,state:'connecting',mute:false,deaf:false,peers:new Map(),speaking:new Set()};
+  renderSide();
+  try{VC.local=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}
+  catch(e){toast(e.name==='NotAllowedError'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Не удалось включить микрофон');VC=null;renderSide();return}
+  if(!VC||VC.cid!==cid){return}
+  watchLevel(S.me.id,VC.local);
+  if(!wsSend({t:'vjoin',channel:cid})){toast('Нет связи с сервером');voiceLeave(true);return}
+  beep([523,784],.09,.02,.05);
+}
+function voiceRejoin(){if(VC){const {sid,cid}=VC;VC.peers.forEach(p=>closePeer(p));VC.peers.clear();wsSend({t:'vjoin',channel:cid,mute:VC.mute,deaf:VC.deaf})}}
+function voiceLeave(silent){
+  if(!VC)return;
+  if(!silent)wsSend({t:'vleave'});
+  VC.peers.forEach(p=>closePeer(p));
+  VC.local&&VC.local.getTracks().forEach(t=>t.stop());
+  clearInterval(VC.levelT);
+  VC=null;beep([784,523],.09,.02,.05);renderSide();
+}
+function closePeer(p){try{p.pc.close()}catch(e){}if(p.audio){p.audio.srcObject=null;p.audio.remove()}}
+async function voicePeer(uid,offer){
+  const pc=new RTCPeerConnection({iceServers:await iceServers()});
+  const p={pc,uid,pending:[],audio:null};VC.peers.set(uid,p);
+  VC.local.getTracks().forEach(t=>pc.addTrack(t,VC.local));
+  pc.onicecandidate=e=>{if(e.candidate)wsSend({t:'vrtc',to:uid,data:{cand:e.candidate.toJSON()}})};
+  pc.ontrack=e=>{
+    if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}
+    const st=e.streams[0]||new MediaStream([e.track]);p.audio.srcObject=st;p.audio.muted=VC.deaf;p.audio.play().catch(()=>{});
+    watchLevel(uid,st);
+  };
+  pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected'&&VC&&VC.state!=='on'){VC.state='on';renderSide()}if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}};
+  if(offer){const o=await pc.createOffer();await pc.setLocalDescription(o);wsSend({t:'vrtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
+  return p;
+}
+async function onVoiceMsg(m){
+  if(!VC||m.channel!==VC.cid)return;
+  if(m.t==='vjoined'){VC.state=m.peers.length?'connecting':'on';renderSide();for(const uid of m.peers)await voicePeer(uid,true);return}
+  if(m.t==='vkicked'){toast('Голосовой канал закрыт');voiceLeave(true);return}
+  if(m.t==='vpeer-left'){const p=VC.peers.get(m.user);if(p){closePeer(p);VC.peers.delete(m.user)}VC.speaking.delete(m.user);return}
+  if(m.t==='vrtc'){
+    let p=VC.peers.get(m.from);const d=m.data;
+    try{
+      if(d.sdp){
+        if(!p)p=await voicePeer(m.from,false);
+        await p.pc.setRemoteDescription(d.sdp);
+        if(d.sdp.type==='offer'){const a=await p.pc.createAnswer();await p.pc.setLocalDescription(a);wsSend({t:'vrtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}})}
+        for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
+      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}
+    }catch(e){console.error(e)}
+  }
+}
+/* who is speaking: measure each audio stream's loudness and light up their avatar */
+function watchLevel(uid,stream){
+  const a=ac();if(!a||!VC)return;
+  try{
+    const src=a.createMediaStreamSource(stream),an=a.createAnalyser();an.fftSize=512;src.connect(an);
+    VC.meters=VC.meters||new Map();VC.meters.set(uid,an);
+  }catch(e){return}
+  if(VC.levelT)return;
+  const buf=new Uint8Array(256);
+  VC.levelT=setInterval(()=>{
+    if(!VC)return;let changed=false;
+    VC.meters.forEach((an,id)=>{
+      an.getByteTimeDomainData(buf);let sum=0;for(let i=0;i<buf.length;i++){const v=(buf[i]-128)/128;sum+=v*v}
+      const loud=Math.sqrt(sum/buf.length)>.04&&!(id===S.me.id&&VC.mute);
+      if(loud!==VC.speaking.has(id)){changed=true;loud?VC.speaking.add(id):VC.speaking.delete(id)}
+    });
+    if(changed)document.querySelectorAll('[data-vu]').forEach(e=>e.classList.toggle('speaking',VC.speaking.has(e.dataset.vu)));
+  },150);
+}
+function voiceMute(){if(!VC)return;VC.mute=!VC.mute;if(VC.local)VC.local.getAudioTracks().forEach(t=>t.enabled=!VC.mute);wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf});renderSide()}
+function voiceDeaf(){if(!VC)return;VC.deaf=!VC.deaf;VC.peers.forEach(p=>{if(p.audio)p.audio.muted=VC.deaf});if(VC.deaf&&!VC.mute)voiceMute();else{wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf});renderSide()}}
+addEventListener('pagehide',()=>{if(VC)wsSend({t:'vleave'})});
+
 /* =================================================================== EVENTS */
 let lpT=null,lpFired=false;
 document.addEventListener('click',async e=>{
@@ -693,6 +895,28 @@ document.addEventListener('click',async e=>{
   const a=el.dataset.act,id=el.dataset.id;
   switch(a){
     case 'amode':authMode=el.dataset.m;viewAuth();break;
+    case 'view':S.view=el.dataset.v;S.q='';if(!mobile()){const g=S.servers[S.view];if(g){const first=g.channels.find(c=>c.type==='text');if(first&&S.chats[first.id]&&(!S.cur||(S.chats[S.cur]||{}).server!==g.id)){openChat(first.id);break}}else if(S.cur&&(S.chats[S.cur]||{}).server)closeChat()}renderSide();break;
+    case 'addserver':addServerSheet();break;
+    case 'mkserver':try{const r=await api('/api/servers',{name:$('#sname').value});S.servers[r.server.id]=r.server;closeLayer();S.view=r.server.id;renderSide();toast('Сервер создан. Пригласи друзей кнопкой со ссылкой')}catch(err){toast(err.message)}break;
+    case 'joincode':{const v=$('#scode').value.trim(),m=/([\w-]{4,20})\s*$/.exec(v.replace(/^.*#join\//,''));if(!m){toast('Вставь ссылку-приглашение');break}closeLayer();joinSheet(m[1]);break}
+    case 'dojoin':try{const r=await api('/api/servers/join',{code:el.dataset.code});S.servers[r.server.id]=r.server;closeLayer();S.view=r.server.id;
+      const me=await api('/api/me');me.chats.forEach(c=>S.chats[c.id]=c);me.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));
+      const first=r.server.channels.find(c=>c.type==='text');if(first&&S.chats[first.id])openChat(first.id);else renderSide()}catch(err){toast(err.message)}break;
+    case 'invite':inviteSheet(S.servers[S.view]);break;
+    case 'copyinv':try{await navigator.clipboard.writeText($('#inv').value);toast('Ссылка скопирована')}catch(err){$('#inv').select()}break;
+    case 'shareinv':try{await navigator.share({title:'Glint',text:'Заходи на мой сервер в Glint',url:$('#inv').value})}catch(err){}break;
+    case 'srvmenu':serverSheet(S.servers[S.view]);break;
+    case 'newch':newChannelSheet(el.dataset.k);break;
+    case 'mkch':try{await api('/api/servers/channel',{server:S.view,type:el.dataset.k,name:$('#chname').value});closeLayer()}catch(err){toast(err.message)}break;
+    case 'delch':{if(!el.dataset.sure){el.dataset.sure=1;el.innerHTML='Удалить?';el.classList.add('danger');el.style.width='auto';el.style.padding='0 12px';return}try{await api('/api/servers/channel/delete',{server:S.view,channel:id});el.closest('.set-row').remove()}catch(err){toast(err.message)}break}
+    case 'savesrv':try{await api('/api/servers/update',{server:S.view,name:$('#srvname').value});closeLayer();toast('Сохранено')}catch(err){toast(err.message)}break;
+    case 'newinv':try{const r=await api('/api/servers/update',{server:S.view,newInvite:true});S.servers[r.server.id]=r.server;inviteSheet(r.server);toast('Старая ссылка больше не работает')}catch(err){toast(err.message)}break;
+    case 'delsrv':{if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Удалить навсегда?';return}try{await api('/api/servers/delete',{server:S.view});closeLayer()}catch(err){toast(err.message)}break}
+    case 'leavesrv':{if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно покинуть?';return}try{const sid=S.view;await api('/api/servers/leave',{server:sid});closeLayer()}catch(err){toast(err.message)}break}
+    case 'vjoin':voiceJoin(el.dataset.s,id);break;
+    case 'vleave':voiceLeave();break;
+    case 'vmute':voiceMute();break;
+    case 'vdeaf':voiceDeaf();break;
     case 'tab':S.tab=el.dataset.t;if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;
     case 'back':closeChat();break;
@@ -768,6 +992,7 @@ document.addEventListener('touchstart',e=>{const b=e.target.closest('[data-act="
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"]'))e.stopImmediatePropagation()},true);
 addEventListener('popstate',()=>{if(mobile()&&S.cur&&!location.hash)closeChat()});
+addEventListener('hashchange',()=>{const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}});
 addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur)});
 setInterval(()=>{if(S.cur)renderStatus()},60e3);
 
