@@ -1,4 +1,4 @@
-/* Glint — messenger client: chats, calls, video calls, screen sharing */
+/* Manasenger — messenger client: chats, calls, video calls, screen sharing */
 'use strict';
 const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -40,6 +40,9 @@ const P={
   deafOff:'<path d="m2 2 20 20"/><path d="M3 18v-6a9 9 0 0 1 14.6-7M21 12v6"/><path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>',
   leave:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   link:'<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  smile:'<circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2M9 9h.01M15 9h.01"/>',
+  image:'<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
+  save:'<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
   home:'<path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9 9 0 0 1-4-.9L3 20l1.1-4A8.4 8.4 0 1 1 21 11.5Z"/>'
 };
 const ic=(n,cls='ico')=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -47,7 +50,7 @@ const TICK1='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-w
 const TICK2='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m1 6.5 3.2 3L10.5 2.5M7.5 9.2 14.5 2.5"/></svg>';
 
 /* ---------- state ---------- */
-const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{},servers:{},view:'home',win:{}};
+const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{},servers:{},view:'home',win:{},stickers:[],stk:false};
 const WIN=120; /* messages kept on screen at once; older ones appear on demand */
 
 /* ---------- helpers ---------- */
@@ -93,7 +96,7 @@ const durText=s=>s<60?`${s} с`:`${Math.floor(s/60)} мин ${s%60?s%60+' с':''
 function lastText(m){
   if(!m)return 'Нет сообщений';if(m.del)return 'Сообщение удалено';if(m.sys)return m.sys;
   if(m.call)return (m.call.kind==='video'?'📹 ':'📞 ')+(m.call.missed?'Пропущенный звонок':'Звонок, '+durText(m.call.dur));
-  const who=m.from===S.me.id?'Вы: ':'';return who+(m.img&&!m.text?'📷 Фото':(m.img?'📷 ':'')+m.text);
+  const who=m.from===S.me.id?'Вы: ':'';if(m.sticker)return who+'Стикер';return who+(m.img&&!m.text?'📷 Фото':(m.img?'📷 ':'')+m.text);
 }
 const sortedChats=()=>Object.values(S.chats).filter(c=>c.type!=='channel').sort((a,b)=>((b.last&&b.last.ts)||b.created)-((a.last&&a.last.ts)||a.created));
 
@@ -124,7 +127,7 @@ function notify(title,body,tag){
   if(!('Notification' in window)||Notification.permission!=='granted'||!document.hidden)return;
   try{const n=new Notification(title,{body,tag,icon:'/icon-192.png'});n.onclick=()=>{focus();n.close()}}catch(e){}
 }
-function updateTitle(){const n=Object.values(S.chats).reduce((a,c)=>a+(c.unread||0),0);document.title=n?`(${n}) Glint`:'Glint'}
+function updateTitle(){const n=Object.values(S.chats).reduce((a,c)=>a+(c.unread||0),0);document.title=n?`(${n}) Manasenger`:'Manasenger'}
 
 /* =================================================================== AUTH */
 let authMode='login';
@@ -132,7 +135,7 @@ function viewAuth(){
   $('#app').className='auth';
   $('#app').innerHTML=`<form class="card glass" id="authForm" autocomplete="on">
     <img class="logo" src="/icon-192.png" alt="">
-    <h1>Glint</h1><p>Сообщения, звонки и видео — в одном стекле</p>
+    <h1>Manasenger</h1><p>Сообщения, звонки, серверы и стикеры</p>
     <div class="seg" role="tablist"><button type="button" class="${authMode==='login'?'on':''}" data-act="amode" data-m="login">Вход</button><button type="button" class="${authMode==='reg'?'on':''}" data-act="amode" data-m="reg">Регистрация</button></div>
     ${authMode==='reg'?`<label class="field"><span>Имя</span><input class="input" name="name" maxlength="40" placeholder="Как тебя зовут" autocomplete="name"></label>`:''}
     <label class="field"><span>Логин</span><input class="input" name="username" required maxlength="20" placeholder="например, olya_p" autocomplete="username" autocapitalize="none" spellcheck="false"></label>
@@ -153,8 +156,8 @@ async function boot(){
   let r;try{r=await api('/api/me')}catch(e){$('#app').innerHTML=`<div class="auth"><div class="card glass empty"><b>Нет связи</b>Проверь интернет и обнови страницу.</div></div>`;return}
   if(!r.me){viewAuth();return}
   S.me=r.me;S.chats={};r.chats.forEach(c=>S.chats[c.id]=c);r.users.forEach(u=>S.users[u.id]=u);S.users[S.me.id]=S.me;
-  S.servers={};(r.servers||[]).forEach(g=>S.servers[g.id]=g);
-  $('#app').className='app';
+  S.servers={};(r.servers||[]).forEach(g=>S.servers[g.id]=g);S.stickers=r.stickers||[];
+  $('#app').className='app';applyAppWall();
   renderShell();connect();updateTitle();
   const h=location.hash.slice(1),jm=/^join\/([\w-]{4,20})$/.exec(h);
   if(jm){history.replaceState(null,'',location.pathname);joinSheet(jm[1]);return}
@@ -224,22 +227,24 @@ function renderMain(){
   const c=S.chats[S.cur];
   $('#app').classList.toggle('open',!!c);
   if(!c){el.innerHTML=`<div class="nochat">${avatar(S.me,'l',false)}<b style="font-size:20px;display:block;margin-bottom:6px">Привет, ${esc(S.me.name)}!</b>Выбери чат слева или найди друга по логину.<br>Твой логин: <b>@${esc(S.me.username)}</b></div>`;return}
-  el.innerHTML=`<header class="chat-h glass pill">
+  el.innerHTML=`<div class="chat-bg" id="chatbg"></div><header class="chat-h glass pill">
       <button class="gbtn ic back" data-act="back" aria-label="Назад">${ic('back')}</button>
       <button class="who" data-act="info">${chatAvatar(c,'s')}<span style="min-width:0"><b>${esc(chatName(c))}</b><small id="status"></small></span></button>
       ${c.type==='dm'?`<button class="gbtn ic" data-act="call" data-k="audio" title="Аудиозвонок" aria-label="Аудиозвонок">${ic('phone')}</button><button class="gbtn ic" data-act="call" data-k="video" title="Видеозвонок" aria-label="Видеозвонок">${ic('video')}</button>`:''}
       <button class="gbtn ic" data-act="chatmenu" aria-label="Ещё">${ic('more')}</button></header>
     <div class="msgs" id="msgs"></div>
     <div class="composer">
+      <div id="stkp"></div>
       <div id="ctx"></div>
       <div class="comp-row">
-        <button class="gbtn ic glass" style="width:50px;height:50px" data-act="attach" title="Фото" aria-label="Прикрепить фото">${ic('clip')}</button>
-        <div class="comp-in glass pill"><textarea id="txt" rows="1" placeholder="Сообщение" maxlength="4000" aria-label="Сообщение"></textarea>
+        <button class="gbtn ic glass cbig" data-act="attach" title="Фото" aria-label="Прикрепить фото">${ic('clip')}</button>
+        <div class="comp-in glass pill"><textarea id="txt" rows="1" placeholder="Сообщение" maxlength="4000" aria-label="Сообщение" enterkeyhint="send"></textarea>
+          <button class="gbtn ic stkbtn" data-act="stk" title="Стикеры" aria-label="Стикеры">${ic('smile')}</button>
           <button class="sendb" data-act="send" aria-label="Отправить">${ic('send')}</button></div>
       </div></div>
     <input type="file" id="file" accept="image/*" hidden>`;
   const t=$('#txt');t.value=S.draft[c.id]||'';autosize(t);
-  renderStatus();renderCtx();renderMsgs(true);
+  renderStatus();renderCtx();renderMsgs(true);applyChatWall(c.id);S.stk=false;
   if(!mobile())t.focus();
 }
 function renderStatus(){
@@ -283,18 +288,22 @@ function msgHTML(c,m,prev,next){
   const meta=`<span class="meta">${m.edited?'изм. ':''}${tm(m.ts)}${ticks}</span>`;
   let inner;
   if(m.del)inner=`<span class="del">Сообщение удалено</span>${meta}`;
+  else if(m.sticker){
+    const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
+    return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${c.type!=='dm'&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${c.type!=='dm'&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(u.name)}</div>`:''}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy">${meta}${re2}</div></div>`;
+  }
   else if(m.call){
     const miss=m.call.missed,out=m.from===S.me.id;
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}"><div class="bub callm ${miss?'miss':''}"><span class="ci">${ic(m.call.kind==='video'?'video':'phone')}</span>
       <span><b>${out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
   }else{
-    inner=(c.type==='group'&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(u.name)}</div>`:'')+
+    inner=(c.type!=='dm'&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(u.name)}</div>`:'')+
       (m.reply?`<button class="rq" data-act="jump" data-id="${esc(m.reply.id)}"><b>${esc((S.users[m.reply.from]||{}).name||'')}</b><span>${esc(m.reply.text)}</span></button>`:'')+
       (m.img?`<img class="pic" src="${esc(m.img)}" alt="Фото" data-act="zoom" loading="lazy">`:'')+
       (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
   }
   const re=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
-  return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${c.type==='group'&&!me?avatar(u,'xs',false):''}<div class="bub" data-act="msg" data-id="${m.id}">${inner}${re}</div></div>`;
+  return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${c.type!=='dm'&&!me?avatar(u,'xs',false):''}<div class="bub" data-act="msg" data-id="${m.id}">${inner}${re}</div></div>`;
 }
 function linkify(t){
   return esc(t).replace(/\bhttps?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
@@ -370,7 +379,7 @@ function shrink(file,max=1600,q=.82){
 function msgMenu(id,x,y){
   const l=S.msgs[S.cur]||[],m=l.find(v=>v.id===id);if(!m||m.del||m.pending||m.sys)return;
   const me=m.from===S.me.id;
-  const items=[['reply','reply','Ответить'],m.text?['copy','copy','Копировать']:null,me&&m.text&&!m.call?['edit','edit','Изменить']:null,me&&!m.call?['del','trash','Удалить','bad']:null].filter(Boolean);
+  const items=[['reply','reply','Ответить'],m.sticker&&!S.stickers.some(x=>x.img===m.sticker)?['savestk','save','Сохранить стикер']:null,m.text?['copy','copy','Копировать']:null,me&&m.text&&!m.call?['edit','edit','Изменить']:null,me&&!m.call?['del','trash','Удалить','bad']:null].filter(Boolean);
   if(m.call)return;
   openMenu(`<div class="emo">${['❤️','👍','😂','😮','😢','🔥'].map(e=>`<button data-act="react" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}</div>`+
     items.map(([a,i,t,cls])=>`<button class="it ${cls||''}" data-act="mm-${a}" data-id="${m.id}">${ic(i)}${t}</button>`).join(''),x,y);
@@ -411,7 +420,7 @@ function newChatSheet(group){
   if(group)$('#gcreate').onclick=async()=>{
     try{const r=await api('/api/chats/group',{name:$('#gname').value,members:[...sel]});r.users.forEach(u=>S.users[u.id]=u);S.chats[r.chat.id]=r.chat;closeLayer();openChat(r.chat.id)}catch(e){toast(e.message)}
   };
-  setTimeout(()=>(group?$('#gname'):$('#pq')).focus(),50);
+  setTimeout(()=>{const i=group?$('#gname'):$('#pq');if(i&&!touch)i.focus()},50);
 }
 async function startDM(uid){
   try{const r=await api('/api/chats/dm',{userId:uid});r.users.forEach(u=>S.users[u.id]=u);S.chats[r.chat.id]=Object.assign(S.chats[r.chat.id]||{},r.chat);S.q='';openChat(r.chat.id)}catch(e){toast(e.message)}
@@ -429,21 +438,21 @@ function infoSheet(){
 function settingsSheet(){
   const me=S.me,th=store.get('theme','auto'),w=store.get('wall','slate');
   const np='Notification' in window?Notification.permission:'unsupported';
-  sheet(`<div class="prof"><button data-act="ava" title="Сменить фото" aria-label="Сменить фото">${avatar(me,'xl',false)}</button><small>нажми на фото, чтобы сменить</small></div>
+  sheet(`<div class="prof"><button data-act="ava" title="Сменить аватарку" aria-label="Сменить аватарку">${avatar(me,'xl',false)}</button><div class="btns" style="justify-content:center;margin:4px 0 0"><button class="gbtn" data-act="ava">${ic('image')}Сменить аватарку</button>${me.avatar?`<button class="gbtn" data-act="avadel">Убрать</button>`:''}</div></div>
     <label class="field"><span>Имя</span><input class="input" id="pname" maxlength="40" value="${esc(me.name)}"></label>
     <label class="field"><span>О себе</span><input class="input" id="pbio" maxlength="140" value="${esc(me.bio||'')}" placeholder="Пара слов о себе"></label>
     <div class="set-row"><span class="mid"><b>Логин</b><small>@${esc(me.username)} — по нему тебя находят</small></span><button class="gbtn" data-act="copyname">${ic('copy')}</button></div>
     <div class="set-row"><span class="mid"><b>Тема</b></span><div class="seg" style="width:220px">${[['auto','Авто'],['light','Светлая'],['dark','Тёмная']].map(([k,n])=>`<button class="${th===k?'on':''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
-    <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}</div></div>
+    <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k&&!S.appWall?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}<button class="wall-pick ${S.appWall?'on':''}" data-act="appwall" title="Своё фото" aria-label="Обои из галереи" ${S.appWall?`style="background-image:url('${S.appWall}')"`:''}>${S.appWall?'':ic('image')}</button></div>${S.appWall?'<div class="btns" style="margin-top:8px"><button class="gbtn" data-act="appwalldel">Убрать своё фото</button></div>':''}</div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np==='default'?'<button class="gbtn" data-act="notif">Включить</button>':''}</div>
-    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Glint на телефон или ПК</small></span><button class="gbtn" data-act="install">Как?</button></div>
+    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК</small></span><button class="gbtn" data-act="install">Как?</button></div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
       <label class="field" style="margin-top:10px"><span>Текущий пароль</span><input class="input" id="op" type="password" autocomplete="current-password"></label>
       <label class="field"><span>Новый пароль</span><input class="input" id="nwp" type="password" minlength="6" autocomplete="new-password"></label></details>
     <div class="btns"><button class="gbtn danger" data-act="logout">Выйти</button><button class="gbtn primary" data-act="saveprof">Сохранить</button></div>`);
 }
 function installSheet(){
-  sheet(`<h2>Установить Glint</h2><p class="sub">Glint работает как приложение: своя иконка, отдельное окно, уведомления.</p>
+  sheet(`<h2>Установить Manasenger</h2><p class="sub">Manasenger работает как приложение: своя иконка, отдельное окно, уведомления.</p>
     <div class="set-row"><span class="mid"><b>iPhone / iPad</b><small>Safari → кнопка «Поделиться» → «На экран „Домой“»</small></span></div>
     <div class="set-row"><span class="mid"><b>Android</b><small>Chrome → меню ⋮ → «Установить приложение»</small></span></div>
     <div class="set-row"><span class="mid"><b>Компьютер</b><small>Chrome или Edge → значок установки справа в адресной строке</small></span></div>
@@ -773,7 +782,7 @@ function addServerSheet(){
     <div class="section-t" style="padding-left:4px;margin-top:14px">Или войти по приглашению</div>
     <label class="field"><span>Ссылка или код приглашения</span><input class="input" id="scode" placeholder="https://…/#join/abc123" autocomplete="off" spellcheck="false"></label>
     <div class="btns" style="margin-top:0"><button class="gbtn" data-act="joincode">Войти</button></div>`);
-  setTimeout(()=>$('#sname').focus(),50);
+  setTimeout(()=>{const i=$('#sname');if(i&&!touch)i.focus()},50);
 }
 async function joinSheet(code){
   try{
@@ -803,7 +812,7 @@ function newChannelSheet(type){
   sheet(`<h2>${type==='voice'?'Голосовой канал':'Текстовый канал'}</h2><p class="sub">${type==='voice'?'В голосовом канале можно разговаривать всем вместе, до 8 человек':'Канал для переписки всех участников сервера'}</p>
     <label class="field"><span>Название</span><input class="input" id="chname" maxlength="32" placeholder="${type==='voice'?'Например, Болталка':'например, мемы'}"></label>
     <div class="btns"><button class="gbtn" data-act="closemenu">Отмена</button><button class="gbtn primary" data-act="mkch" data-k="${type}">Создать</button></div>`);
-  setTimeout(()=>$('#chname').focus(),50);
+  setTimeout(()=>{const i=$('#chname');if(i&&!touch)i.focus()},50);
 }
 
 /* =================================================================== VOICE CHANNELS
@@ -887,11 +896,157 @@ function voiceMute(){if(!VC)return;VC.mute=!VC.mute;if(VC.local)VC.local.getAudi
 function voiceDeaf(){if(!VC)return;VC.deaf=!VC.deaf;VC.peers.forEach(p=>{if(p.audio)p.audio.muted=VC.deaf});if(VC.deaf&&!VC.mute)voiceMute();else{wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf});renderSide()}}
 addEventListener('pagehide',()=>{if(VC)wsSend({t:'vleave'})});
 
+/* =================================================================== PHOTOS: picker, editor, stickers, wallpapers */
+function pickImage(cb){const f=document.createElement('input');f.type='file';f.accept='image/*';f.onchange=()=>{if(f.files[0])cb(f.files[0])};f.click()}
+function loadImg(file){return new Promise((ok,bad)=>{if(!/^image\//.test(file.type))return bad(new Error('Это не картинка'));const u=URL.createObjectURL(file),i=new Image();i.onload=()=>ok(i);i.onerror=()=>bad(new Error('Не удалось открыть картинку'));i.src=u})}
+
+/* editor: drag to move, pinch or slider to zoom; stickers also get a shape and a caption */
+let ED=null;
+async function imageEditor(file,mode){
+  let img;try{img=await loadImg(file)}catch(e){toast(e.message);return}
+  ED={img,mode,zoom:1,x:0,y:0,shape:mode==='avatar'?'circle':'round',text:''};
+  const st=mode==='sticker';
+  sheet(`<h2>${st?'Новый стикер':'Аватарка'}</h2><p class="sub">${st?'Двигай фото пальцем, увеличивай ползунком':'Выбери, какая часть фото будет видна'}</p>
+    <div class="ed-wrap ${st?'chk':''}"><canvas id="edc" width="600" height="600" aria-label="Предпросмотр"></canvas></div>
+    <label class="field" style="margin-top:12px"><span>Масштаб</span><input type="range" id="edz" min="1" max="4" step="0.01" value="1"></label>
+    ${st?`<div class="seg" style="margin-bottom:12px">${[['round','Скруглённый'],['circle','Круг'],['square','Квадрат'],['full','Целиком']].map(([k,n])=>`<button class="${k==='round'?'on':''}" data-act="ed-shape" data-v="${k}">${n}</button>`).join('')}</div>
+      <label class="field"><span>Подпись на стикере (необязательно)</span><input class="input" id="edt" maxlength="30" placeholder="Например: ну и ну 😄"></label>`:''}
+    <div class="btns"><button class="gbtn" data-act="closemenu">Отмена</button><button class="gbtn primary" data-act="ed-save" id="edsave">${st?'Сохранить стикер':'Поставить'}</button></div>`);
+  const cv=$('#edc');
+  $('#edz').oninput=e=>{ED.zoom=+e.target.value;edDraw()};
+  if(st)$('#edt').oninput=e=>{ED.text=e.target.value;edDraw()};
+  const pts=new Map();let base=null;
+  cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});base={x:ED.x,y:ED.y,zoom:ED.zoom,pts:new Map([...pts].map(([k,v])=>[k,{...v}]))}});
+  cv.addEventListener('pointermove',e=>{
+    if(!pts.has(e.pointerId))return;pts.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    const k=cv.width/cv.getBoundingClientRect().width,P=[...pts.values()],B=[...base.pts.values()];
+    if(P.length===1&&B.length>=1){ED.x=base.x+(P[0].x-B[0].x)*k;ED.y=base.y+(P[0].y-B[0].y)*k}
+    if(P.length>=2&&B.length>=2){const d=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y);ED.zoom=Math.max(1,Math.min(4,base.zoom*d(P[0],P[1])/Math.max(1,d(B[0],B[1]))));$('#edz').value=ED.zoom}
+    edDraw();
+  });
+  const up=e=>{pts.delete(e.pointerId);base={x:ED.x,y:ED.y,zoom:ED.zoom,pts:new Map([...pts].map(([k,v])=>[k,{...v}]))}};
+  cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+  cv.addEventListener('wheel',e=>{e.preventDefault();ED.zoom=Math.max(1,Math.min(4,ED.zoom*(e.deltaY<0?1.08:.93)));$('#edz').value=ED.zoom;edDraw()},{passive:false});
+  edDraw();
+}
+function edPaint(ctx,size){
+  const {img,zoom,shape,text}=ED,k=size/600;
+  ctx.clearRect(0,0,size,size);ctx.save();
+  const r=size*.18;
+  if(shape==='circle'){ctx.beginPath();ctx.arc(size/2,size/2,size/2,0,Math.PI*2);ctx.clip()}
+  else if(shape==='round'){ctx.beginPath();ctx.roundRect?ctx.roundRect(0,0,size,size,r):ctx.rect(0,0,size,size);ctx.clip()}
+  const fit=shape==='full'?Math.min(size/img.naturalWidth,size/img.naturalHeight):Math.max(size/img.naturalWidth,size/img.naturalHeight);
+  const w=img.naturalWidth*fit*zoom,h=img.naturalHeight*fit*zoom;
+  ctx.drawImage(img,(size-w)/2+ED.x*k,(size-h)/2+ED.y*k,w,h);
+  ctx.restore();
+  if(text&&ED.mode==='sticker'){
+    let fs=size*.13;ctx.font=`900 ${fs}px ${getComputedStyle(document.body).fontFamily}`;
+    while(ctx.measureText(text).width>size*.9&&fs>size*.06){fs-=2;ctx.font=`900 ${fs}px ${getComputedStyle(document.body).fontFamily}`}
+    ctx.textAlign='center';ctx.textBaseline='bottom';ctx.lineJoin='round';ctx.lineWidth=fs*.2;ctx.strokeStyle='rgba(10,16,26,.92)';
+    ctx.strokeText(text,size/2,size*.95);ctx.fillStyle='#fff';ctx.fillText(text,size/2,size*.95);
+  }
+}
+function edDraw(){const cv=$('#edc');if(cv&&ED)edPaint(cv.getContext('2d'),600)}
+async function edSave(){
+  const b=$('#edsave');if(b)b.disabled=true;
+  try{
+    if(ED.mode==='avatar'){
+      const cv=document.createElement('canvas');cv.width=cv.height=320;const x=cv.getContext('2d');x.fillStyle='#2b3a50';x.fillRect(0,0,320,320);ED.shape='square';edPaint(x,320);
+      const r=await api('/api/profile',{avatar:cv.toDataURL('image/jpeg',.88)});S.me=S.users[S.me.id]=Object.assign(S.users[S.me.id],r.me);closeLayer();renderSide();toast('Аватарка обновлена');return;
+    }
+    /* stickers keep a transparent background: WebP where the browser can make it, otherwise PNG, kept under ~250 KB */
+    let d='';for(const size of [512,384,300]){
+      const cv=document.createElement('canvas');cv.width=cv.height=size;edPaint(cv.getContext('2d'),size);
+      d=cv.toDataURL('image/webp',.86);if(!d.startsWith('data:image/webp'))d=cv.toDataURL('image/png');
+      if(d.length<330e3)break;
+    }
+    const r=await api('/api/stickers',{img:d});S.stickers=r.stickers;closeLayer();S.stk=true;renderStickers();toast('Стикер готов — он в наборе 😊');
+  }catch(e){toast(e.message);if(b)b.disabled=false}
+}
+function renderStickers(){
+  const el=$('#stkp');if(!el)return;
+  document.querySelectorAll('.stkbtn').forEach(b=>b.classList.toggle('on',S.stk));
+  if(!S.stk){el.innerHTML='';return}
+  el.innerHTML=`<div class="stk-panel glass"><div class="stk-grid">
+    <button class="stk-add" data-act="stknew" title="Сделать стикер из фото">${ic('plus')}<small>Из фото</small></button>
+    ${S.stickers.map(x=>`<button class="stk-it" data-act="stksend" data-id="${x.id}" data-stk="${x.id}" title="Отправить"><img src="${esc(x.img)}" alt="Стикер" loading="lazy"></button>`).join('')}
+  </div>${S.stickers.length?'<small class="stk-hint">Нажми — отправить · удерживай — удалить</small>':'<small class="stk-hint">Сделай свой первый стикер из фото в галерее</small>'}</div>`;
+}
+function sendSticker(id){
+  const c=S.chats[S.cur];if(!c)return;
+  if(!wsSend({t:'send',chat:c.id,sticker:id,reply:S.reply&&S.reply.m.id,cid:'s'+Date.now()})){toast('Нет связи. Переподключаемся…');return}
+  S.reply=null;renderCtx();if(mobile()){S.stk=false;renderStickers()}
+}
+function stickerMenu(id,x,y){openMenu(`<button class="it" data-act="stksend" data-id="${id}">${ic('send')}Отправить</button><button class="it bad" data-act="stkdel" data-id="${id}">${ic('trash')}Удалить из набора</button>`,x,y)}
+
+/* wallpapers from the gallery are kept on this device (IndexedDB), not uploaded */
+const IDB={
+  db:null,
+  open(){return this.db||(this.db=new Promise((ok,bad)=>{const r=indexedDB.open('manasenger',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onsuccess=()=>ok(r.result);r.onerror=()=>bad(r.error)}))},
+  async run(mode,fn){const db=await this.open();return new Promise((ok,bad)=>{const t=db.transaction('kv',mode),q=fn(t.objectStore('kv'));t.oncomplete=()=>ok(q&&q.result);t.onerror=()=>bad(t.error)})},
+  get(k){return this.run('readonly',s=>s.get(k)).catch(()=>null)},
+  set(k,v){return this.run('readwrite',s=>s.put(v,k))},
+  del(k){return this.run('readwrite',s=>s.delete(k)).catch(()=>{})}
+};
+async function toWallBlob(file){
+  const img=await loadImg(file),k=Math.min(1,1800/Math.max(img.naturalWidth,img.naturalHeight));
+  const cv=document.createElement('canvas');cv.width=Math.round(img.naturalWidth*k);cv.height=Math.round(img.naturalHeight*k);cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+  return new Promise(ok=>cv.toBlob(ok,'image/jpeg',.82));
+}
+const URLS={};
+function blobUrl(key,b){if(URLS[key])URL.revokeObjectURL(URLS[key]);URLS[key]=b?URL.createObjectURL(b):'';return URLS[key]}
+async function applyAppWall(){
+  const b=await IDB.get('wall:app'),w=$('.wall');S.appWall=b?blobUrl('app',b):'';
+  w.classList.toggle('custom',!!b);w.style.backgroundImage=b?`url("${S.appWall}")`:'';
+}
+const CWALLS={none:'',dusk:'linear-gradient(160deg,#2c3e5c,#1b2433 60%,#3a4f6e)',sky:'linear-gradient(160deg,#5d86b5,#2e4766)',sea:'linear-gradient(160deg,#2e6f86,#17303d)',paper:'linear-gradient(160deg,#c9d6e4,#9fb2c8)'};
+async function applyChatWall(cid){
+  const bg=$('#chatbg');if(!bg||S.cur!==cid)return;
+  const v=await IDB.get('wall:'+cid);if(S.cur!==cid)return;
+  if(v instanceof Blob){bg.style.backgroundImage=`url("${blobUrl('c',v)}")`;bg.className='chat-bg on'}
+  else if(typeof v==='string'&&CWALLS[v]){bg.style.backgroundImage=CWALLS[v];bg.className='chat-bg on'}
+  else{bg.style.backgroundImage='';bg.className='chat-bg'}
+}
+async function setChatWall(v){if(v==='none')await IDB.del('wall:'+S.cur);else await IDB.set('wall:'+S.cur,v);closeLayer();applyChatWall(S.cur)}
+function chatWallSheet(){
+  sheet(`<h2>Обои чата</h2><p class="sub">Видны только тебе, на этом устройстве</p>
+    <div class="walls cw">${Object.entries(CWALLS).map(([k,g])=>`<button data-act="cwall" data-v="${k}" style="${g?`background:${g}`:''}" aria-label="${k}">${k==='none'?'Нет':''}</button>`).join('')}
+    <button class="wall-pick" data-act="cwallpick" aria-label="Из галереи">${ic('image')}</button></div>
+    <div class="btns"><button class="gbtn" data-act="closemenu">Готово</button></div>`);
+}
+
+/* swipes on phones: from the left edge — back; a message to the left — reply */
+(function(){
+  let sx=0,sy=0,el=null,edge=false,bub=null,dx=0;
+  document.addEventListener('touchstart',e=>{
+    if(!S.cur||e.touches.length>1)return;const t=e.touches[0];sx=t.clientX;sy=t.clientY;dx=0;
+    edge=sx<28&&mobile();bub=e.target.closest('.m:not(.sys)');if(bub&&!bub.querySelector('[data-act="msg"]'))bub=null;
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(!S.cur)return;const t=e.touches[0];dx=t.clientX-sx;const dy=t.clientY-sy;
+    if(Math.abs(dy)>Math.abs(dx)){if(bub){bub.style.transform='';bub=null}return}
+    if(bub&&dx<0){bub.style.transform=`translateX(${Math.max(-70,dx)}px)`;clearTimeout(lpT)}
+  },{passive:true});
+  document.addEventListener('touchend',()=>{
+    if(edge&&dx>90){closeChat()}
+    if(bub){const id=bub.dataset.id;bub.style.transition='transform .2s';bub.style.transform='';setTimeout(()=>{if(bub)bub.style.transition=''},220);
+      if(dx<-60){const m=(S.msgs[S.cur]||[]).find(x=>x.id===id);if(m&&!m.del&&!m.pending&&!m.call){S.edit=null;S.reply={m};renderCtx();navigator.vibrate&&navigator.vibrate(10)}}}
+    edge=false;bub=null;
+  },{passive:true});
+})();
+
 /* =================================================================== EVENTS */
-let lpT=null,lpFired=false;
+let lpT=null,lpFired=false,downEl=null,downAt=0;
+/* on phones the keyboard closes when you tap a button and the page jumps, so the tap can land on the dim background:
+   remember what was under the finger when it touched the screen and act on that */
+document.addEventListener('pointerdown',e=>{downEl=e.target.closest('[data-act]');downAt=Date.now()},true);
 document.addEventListener('click',async e=>{
   if(lpFired){lpFired=false;e.preventDefault();return}
-  const el=e.target.closest('[data-act]');if(!el)return;
+  let el=e.target.closest('[data-act]');
+  if(downEl&&downEl!==el&&Date.now()-downAt<1500&&document.contains(downEl)&&(!el||el.dataset.act==='closemenu'))el=downEl;
+  downEl=null;
+  if(!el)return;
+  if(el.dataset.act==='closemenu'&&el.classList.contains('scrim')&&e.target!==el)return;
   const a=el.dataset.act,id=el.dataset.id;
   switch(a){
     case 'amode':authMode=el.dataset.m;viewAuth();break;
@@ -904,7 +1059,7 @@ document.addEventListener('click',async e=>{
       const first=r.server.channels.find(c=>c.type==='text');if(first&&S.chats[first.id])openChat(first.id);else renderSide()}catch(err){toast(err.message)}break;
     case 'invite':inviteSheet(S.servers[S.view]);break;
     case 'copyinv':try{await navigator.clipboard.writeText($('#inv').value);toast('Ссылка скопирована')}catch(err){$('#inv').select()}break;
-    case 'shareinv':try{await navigator.share({title:'Glint',text:'Заходи на мой сервер в Glint',url:$('#inv').value})}catch(err){}break;
+    case 'shareinv':try{await navigator.share({title:'Manasenger',text:'Заходи на мой сервер в Manasenger',url:$('#inv').value})}catch(err){}break;
     case 'srvmenu':serverSheet(S.servers[S.view]);break;
     case 'newch':newChannelSheet(el.dataset.k);break;
     case 'mkch':try{await api('/api/servers/channel',{server:S.view,type:el.dataset.k,name:$('#chname').value});closeLayer()}catch(err){toast(err.message)}break;
@@ -933,13 +1088,26 @@ document.addEventListener('click',async e=>{
     case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}
     case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});closeLayer();break;
-    case 'mm-reply':{const m=S.msgs[S.cur].find(x=>x.id===id);S.edit=null;S.reply={m};renderCtx();closeLayer();$('#txt').focus();break}
+    case 'mm-reply':{const m=S.msgs[S.cur].find(x=>x.id===id);S.edit=null;S.reply={m};renderCtx();closeLayer();if(!touch)$('#txt').focus();break}
+    case 'mm-savestk':{const m=S.msgs[S.cur].find(x=>x.id===id);closeLayer();try{const r=await api('/api/stickers',{chat:S.cur,fromMsg:m.id});S.stickers=r.stickers;toast('Стикер сохранён')}catch(err){toast(err.message)}break}
+    case 'stk':S.stk=!S.stk;renderStickers();break;
+    case 'stksend':sendSticker(id);break;
+    case 'stknew':pickImage(f=>imageEditor(f,'sticker'));break;
+    case 'stkdel':{try{const r=await api('/api/stickers/delete',{id});S.stickers=r.stickers;closeLayer();renderStickers()}catch(err){toast(err.message)}break}
+    case 'ed-shape':ED.shape=el.dataset.v;document.querySelectorAll('[data-act="ed-shape"]').forEach(b=>b.classList.toggle('on',b===el));edDraw();break;
+    case 'ed-save':edSave();break;
+    case 'chatwall':chatWallSheet();break;
+    case 'cwall':setChatWall(el.dataset.v);break;
+    case 'cwallpick':pickImage(async f=>{try{const b=await toWallBlob(f);await IDB.set('wall:'+S.cur,b);closeLayer();applyChatWall(S.cur);toast('Обои чата установлены')}catch(err){toast(err.message)}});break;
+    case 'appwall':pickImage(async f=>{try{const b=await toWallBlob(f);await IDB.set('wall:app',b);await applyAppWall();settingsSheet();toast('Обои установлены')}catch(err){toast(err.message)}});break;
+    case 'appwalldel':await IDB.del('wall:app');await applyAppWall();settingsSheet();break;
+    case 'avadel':try{const r=await api('/api/profile',{avatar:''});S.me=S.users[S.me.id]=Object.assign(S.users[S.me.id],r.me);settingsSheet();renderSide()}catch(err){toast(err.message)}break;
     case 'mm-copy':{const m=S.msgs[S.cur].find(x=>x.id===id);try{await navigator.clipboard.writeText(m.text);toast('Скопировано')}catch(err){toast('Не удалось скопировать')}closeLayer();break}
     case 'mm-edit':{const m=S.msgs[S.cur].find(x=>x.id===id);S.reply=null;S.edit={m};const t=$('#txt');t.value=m.text;autosize(t);renderCtx();closeLayer();t.focus();break}
     case 'mm-del':{if(!el.dataset.sure){el.dataset.sure=1;el.lastChild.textContent='Точно удалить?';return}wsSend({t:'del',chat:S.cur,id});closeLayer();break}
     case 'ctxx':S.reply=S.edit=null;if($('#txt'))$('#txt').value=S.draft[S.cur]||'';renderCtx();break;
     case 'chatmenu':{const c=S.chats[S.cur];const r=el.getBoundingClientRect();
-      openMenu(`<button class="it" data-act="info">${ic(c.type==='dm'?'users':'users')}${c.type==='dm'?'Профиль':'Участники'}</button>${c.type==='group'?`<button class="it bad" data-act="leave">${ic('x')}Выйти из группы</button>`:''}`,r.left+r.width/2-100,r.bottom);break}
+      openMenu(`<button class="it" data-act="info">${ic('users')}${c.type==='dm'?'Профиль':'Участники'}</button><button class="it" data-act="chatwall">${ic('image')}Обои чата</button>${c.type==='group'?`<button class="it bad" data-act="leave">${ic('x')}Выйти из группы</button>`:''}`,r.left+r.width/2-100,r.bottom);break}
     case 'leave':{if(!el.dataset.sure){el.dataset.sure=1;el.lastChild.textContent='Точно выйти?';return}try{await api('/api/chats/leave',{chat:S.cur});const id2=S.cur;closeLayer();delete S.chats[id2];closeChat()}catch(err){toast(err.message)}break}
     case 'call':startCall(S.cur,el.dataset.k);break;
     case 'callu':startCall(el.dataset.chat,el.dataset.k);break;
@@ -953,12 +1121,12 @@ document.addEventListener('click',async e=>{
     case 'c-min':CALL.min=true;renderCall();break;
     case 'c-max':CALL.min=false;renderCall();break;
     case 'theme':store.set('theme',el.dataset.v);applyTheme();settingsSheet();break;
-    case 'wall':store.set('wall',el.dataset.w);applyTheme();settingsSheet();break;
+    case 'wall':store.set('wall',el.dataset.w);await IDB.del('wall:app');await applyAppWall();applyTheme();settingsSheet();break;
     case 'notif':try{await Notification.requestPermission()}catch(err){}settingsSheet();break;
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;
     case 'copyname':try{await navigator.clipboard.writeText('@'+S.me.username);toast('Логин скопирован')}catch(err){}break;
-    case 'ava':{const f=document.createElement('input');f.type='file';f.accept='image/*';f.onchange=async()=>{try{const d=await shrink(f.files[0],320,.85);const r=await api('/api/profile',{avatar:d});S.me=S.users[S.me.id]=Object.assign(S.users[S.me.id],r.me);settingsSheet();renderSide()}catch(err){toast(err.message)}};f.click();break}
+    case 'ava':pickImage(f=>imageEditor(f,'avatar'));break;
     case 'saveprof':{
       const b={name:$('#pname').value,bio:$('#pbio').value};
       if($('#nwp').value){b.password=$('#op').value;b.newPassword=$('#nwp').value}
@@ -966,12 +1134,14 @@ document.addEventListener('click',async e=>{
     case 'logout':if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно выйти?';return}await api('/api/logout',{}).catch(()=>{});location.reload();break;
   }
 });
+document.addEventListener('focusin',e=>{if(e.target.id==='txt'&&mobile()){S.stk=false;renderStickers();setTimeout(()=>{const b=$('#msgs');if(b)b.scrollTop=b.scrollHeight},300)}});
 document.addEventListener('submit',e=>{if(e.target.id==='authForm'){e.preventDefault();authSubmit(e.target)}});
 document.addEventListener('input',e=>{
   if(e.target.id==='q'){S.q=e.target.value;$('#list').innerHTML=chatListHTML();clearTimeout(qT);qT=setTimeout(searchUsers,250);return}
   if(e.target.id==='txt'){autosize(e.target);const now=Date.now();if(S.cur&&e.target.value&&(!S.lastTyping||now-S.lastTyping>2500)){S.lastTyping=now;wsSend({t:'typing',chat:S.cur})}}
 });
 document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.matches('.sheet input:not([type=checkbox])')&&!e.isComposing){const b=e.target.closest('.sheet').querySelector('.gbtn.primary');if(b){e.preventDefault();b.click()}return}
   if(e.target.id==='txt'&&e.key==='Enter'&&!e.shiftKey&&!touch&&!e.isComposing){e.preventDefault();sendMsg()}
   if(e.key==='Escape'){if($('#layer').innerHTML)closeLayer();else if(S.reply||S.edit){S.reply=S.edit=null;renderCtx()}}
   if(e.target.id==='txt'&&e.key==='ArrowUp'&&!e.target.value){const l=S.msgs[S.cur]||[];const m=[...l].reverse().find(x=>x.from===S.me.id&&x.text&&!x.del&&!x.pending);if(m){e.preventDefault();S.edit={m};e.target.value=m.text;renderCtx()}}
@@ -985,8 +1155,8 @@ document.addEventListener('paste',async e=>{
   if(f){e.preventDefault();try{sendMsg(await shrink(f))}catch(err){toast(err.message)}}
 });
 /* right click on desktop, long press on phones: message menu */
-document.addEventListener('contextmenu',e=>{const b=e.target.closest('[data-act="msg"]');if(b&&!e.target.closest('a')){e.preventDefault();msgMenu(b.dataset.id,e.clientX,e.clientY)}});
-document.addEventListener('touchstart',e=>{const b=e.target.closest('[data-act="msg"]');if(!b)return;const t=e.touches[0];lpFired=false;
+document.addEventListener('contextmenu',e=>{const sk=e.target.closest('[data-stk]');if(sk){e.preventDefault();stickerMenu(sk.dataset.stk,e.clientX,e.clientY);return}const b=e.target.closest('[data-act="msg"]');if(b&&!e.target.closest('a')){e.preventDefault();msgMenu(b.dataset.id,e.clientX,e.clientY)}});
+document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]');if(sk){const t=e.touches[0];lpFired=false;lpT=setTimeout(()=>{lpFired=true;navigator.vibrate&&navigator.vibrate(12);stickerMenu(sk.dataset.stk,t.clientX,t.clientY)},450);return}const b=e.target.closest('[data-act="msg"]');if(!b)return;const t=e.touches[0];lpFired=false;
   lpT=setTimeout(()=>{lpFired=true;navigator.vibrate&&navigator.vibrate(12);msgMenu(b.dataset.id,t.clientX,t.clientY)},420)},{passive:true});
 ['touchend','touchmove','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
 /* on phones a short tap on a bubble does nothing; the menu is on long press */

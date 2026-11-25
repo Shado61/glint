@@ -1,31 +1,38 @@
-/* Glint — liquid glass interface */
+/* Manasenger — liquid glass interface, blue-grey */
 :root{
   --f:-apple-system,BlinkMacSystemFont,"SF Pro Text","SF Pro Display","Inter","Segoe UI",Roboto,system-ui,sans-serif;
-  --fg:#eef3f9;--fg2:rgba(214,226,240,.74);--fg3:rgba(196,210,228,.52);
-  --glass:rgba(150,175,205,.10);--glass2:rgba(170,195,225,.16);--glass3:rgba(190,212,238,.24);
-  --edge:rgba(220,232,248,.26);--edge2:rgba(200,218,240,.13);
-  --shadow:0 18px 44px -18px rgba(5,10,20,.6),0 2px 8px rgba(5,10,25,.2);
-  --blur:blur(20px) saturate(150%);
-  --acc:#6f9bcf;--acc2:#4f78a8;--good:#4fd1a1;--bad:#ef6b73;
-  --mine:linear-gradient(135deg,#5f8cc0,#4a7099);
-  --theirs:rgba(120,145,175,.24);
+  --fg:#ecf2fa;--fg2:rgba(206,221,240,.76);--fg3:rgba(180,200,226,.55);
+  --glass:rgba(30,44,64,.74);--glass2:rgba(48,66,92,.82);--glass3:rgba(66,88,120,.9);
+  --edge:rgba(170,200,238,.24);--edge2:rgba(150,182,222,.14);
+  --shadow:0 18px 44px -18px rgba(3,8,18,.7),0 2px 8px rgba(3,8,20,.25);
+  --blur:blur(18px) saturate(140%);
+  --acc:#5b8fd0;--acc2:#3f6aa3;--good:#4fd1a1;--bad:#ef6b73;
+  --mine:linear-gradient(135deg,#4f84c2,#3a6398);
+  --theirs:rgba(52,72,100,.92);
   --r:22px;--r2:16px;
   --safe-t:env(safe-area-inset-top,0px);--safe-b:env(safe-area-inset-bottom,0px);
   color-scheme:dark;
 }
+/* phones: blur behind panels is the main cause of lag, so panels are solid there */
+@media (max-width:760px),(pointer:coarse){
+  :root{--glass:rgba(27,40,58,.97);--glass2:rgba(44,61,86,.97);--glass3:rgba(62,83,114,.98);--blur:none}
+  :root.light{--glass:rgba(240,245,251,.98);--glass2:rgba(248,250,254,.98);--glass3:#fff}
+  .glass::before{display:none}
+  input,textarea,select{font-size:16px!important} /* stops iPhone from zooming into fields */
+}
 :root.light{
-  --fg:#17212e;--fg2:rgba(30,45,65,.72);--fg3:rgba(30,45,65,.5);
-  --glass:rgba(255,255,255,.46);--glass2:rgba(255,255,255,.6);--glass3:rgba(255,255,255,.76);
-  --edge:rgba(255,255,255,.9);--edge2:rgba(255,255,255,.55);
-  --shadow:0 18px 44px -20px rgba(40,60,90,.35),0 2px 8px rgba(40,60,90,.08);
-  --theirs:rgba(255,255,255,.72);
+  --fg:#152235;--fg2:rgba(28,46,72,.74);--fg3:rgba(28,46,72,.52);
+  --glass:rgba(236,242,250,.84);--glass2:rgba(244,248,253,.9);--glass3:rgba(255,255,255,.96);
+  --edge:rgba(255,255,255,.95);--edge2:rgba(150,175,210,.32);
+  --shadow:0 16px 40px -20px rgba(30,55,95,.38),0 2px 8px rgba(30,55,95,.08);
+  --theirs:rgba(255,255,255,.95);
   color-scheme:light;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{height:100%;margin:0}
 html{height:100dvh}body{height:100dvh}
-body{font:15px/1.4 var(--f);color:var(--fg);background:#18202b;overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
-:root.light body{background:#e4eaf1}
+body{font:15px/1.4 var(--f);color:var(--fg);background:#121b28;overflow:hidden;overscroll-behavior:none;-webkit-font-smoothing:antialiased;letter-spacing:-.01em}
+:root.light body{background:#d9e3ef}
 button,input,textarea{font:inherit;color:inherit}
 button{cursor:pointer;border:0;background:none;padding:0}
 input,textarea{outline:none}
@@ -34,11 +41,14 @@ a{color:inherit}
 .hidden{display:none!important}
 
 /* ---------- wallpaper: soft colour blobs under the glass ---------- */
-.wall{position:fixed;inset:0;overflow:hidden;z-index:0;background:linear-gradient(160deg,#2a3648 0%,#18202b 55%,#141a23 100%)}
-:root.light .wall{background:linear-gradient(160deg,#dfe7f0 0%,#eef2f7 60%,#e3e9f1 100%)}
+.wall{position:fixed;inset:0;overflow:hidden;z-index:0;background:linear-gradient(160deg,#22344e 0%,#141e2c 55%,#101826 100%);background-size:cover;background-position:center}
+:root.light .wall{background:linear-gradient(160deg,#cddbec 0%,#e6edf6 60%,#d3dfed 100%)}
+.wall.custom i{display:none}
+.wall.custom::after{content:"";position:absolute;inset:0;background:rgba(10,18,30,.35)}
+:root.light .wall.custom::after{background:rgba(230,238,248,.25)}
 .wall i{position:absolute;border-radius:50%;opacity:.7;will-change:transform;animation:float 40s ease-in-out infinite alternate}
 @media (max-width:760px),(pointer:coarse){.wall i{animation:none}}
-.wall .b1{width:62vmax;height:62vmax;left:-16vmax;top:-20vmax;background:radial-gradient(circle,rgba(88,128,178,.75),transparent 62%)}
+.wall .b1{width:62vmax;height:62vmax;left:-16vmax;top:-20vmax;background:radial-gradient(circle,rgba(70,120,185,.8),transparent 62%)}
 .wall .b2{width:52vmax;height:52vmax;right:-18vmax;top:6vh;background:radial-gradient(circle,rgba(120,140,170,.55),transparent 62%);animation-duration:46s}
 .wall .b3{width:50vmax;height:50vmax;left:20vw;bottom:-26vmax;background:radial-gradient(circle,rgba(70,110,160,.6),transparent 62%);animation-duration:52s}
 .wall .b4{width:36vmax;height:36vmax;left:-10vmax;bottom:-8vmax;background:radial-gradient(circle,rgba(140,170,200,.4),transparent 62%);animation-duration:44s}
@@ -343,3 +353,61 @@ textarea.input{height:auto;padding:12px 16px;resize:vertical}
 .join-card .rbtn{width:84px;height:84px;border-radius:28px;font-size:30px;margin:0 auto 12px}
 .invite{display:flex;gap:8px;align-items:center;margin:8px 0}
 .invite input{flex:1;min-width:0;font-size:13px}
+
+/* ---------- phone comfort ---------- */
+.cbig{width:50px;height:50px}
+@media (max-width:760px){
+  .gbtn{height:44px}.gbtn.ic{width:44px}
+  .row{padding:12px 10px}
+  .ch{padding:11px 10px}
+  .chat-h{padding:6px 8px}
+  .composer{left:8px;right:8px}
+  .cbig{width:48px;height:48px}
+  .menu .it{padding:13px 14px}
+  .m{max-width:86%}
+}
+.m{touch-action:pan-y}
+
+/* ---------- chat wallpaper ---------- */
+.chat-bg{position:absolute;inset:0;z-index:0;border-radius:inherit;background-size:cover;background-position:center;display:none}
+.chat-bg.on{display:block}
+.chat-bg.on::after{content:"";position:absolute;inset:0;border-radius:inherit;background:rgba(10,18,30,.28)}
+:root.light .chat-bg.on::after{background:rgba(235,242,250,.2)}
+.main>.msgs,.main>.composer,.main>.chat-h{z-index:1}
+.main>.chat-h,.main>.composer{z-index:4}
+.wall-pick{display:grid;place-items:center;height:56px;border-radius:14px;border:2px dashed var(--edge);color:var(--fg2);background-size:cover;background-position:center}
+.wall-pick.on{border:2px solid #fff}
+.walls.cw{grid-template-columns:repeat(3,1fr)}
+.walls.cw button{height:70px;border-radius:14px;border:1px solid var(--edge2);color:var(--fg2);font-weight:600}
+
+/* ---------- stickers ---------- */
+.stkbtn{width:40px;height:40px;background:none;border:0;box-shadow:none;color:var(--fg2)}
+.stkbtn.on{color:var(--acc)}
+.stk-panel{margin-bottom:6px;padding:10px;border-radius:22px;max-height:min(300px,42dvh);overflow-y:auto;-webkit-overflow-scrolling:touch}
+.stk-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));gap:6px}
+.stk-it,.stk-add{aspect-ratio:1;border-radius:16px;display:grid;place-items:center;padding:4px;transition:transform .15s,background .15s}
+.stk-it:hover{background:rgba(255,255,255,.08)}
+.stk-it:active{transform:scale(.9)}
+.stk-it img{width:100%;height:100%;object-fit:contain;-webkit-user-drag:none;user-select:none;-webkit-touch-callout:none}
+.stk-add{border:2px dashed var(--edge);color:var(--fg2);gap:2px;font-size:11px;align-content:center}
+.stk-add svg{width:22px;height:22px}
+.stk-hint{display:block;text-align:center;color:var(--fg3);font-size:12px;margin-top:8px}
+.bub.stkb{background:none!important;border:0;box-shadow:none;padding:0;min-width:0}
+.bub.stkb .stk{display:block;width:min(170px,42vw);height:auto;-webkit-user-drag:none;-webkit-touch-callout:none;user-select:none}
+.bub.stkb .meta{float:none;display:inline-flex;margin:2px 0 0;padding:2px 8px;border-radius:999px;background:rgba(20,30,45,.55);color:#fff;opacity:1;font-size:10.5px}
+.m.me .bub.stkb{text-align:right}
+
+/* ---------- photo editor ---------- */
+.ed-wrap{width:min(78vw,300px);aspect-ratio:1;margin:0 auto;border-radius:24px;overflow:hidden;background:#0d1520;touch-action:none}
+.ed-wrap.chk{background:repeating-conic-gradient(#2a384c 0 25%,#1f2b3b 0 50%) 0 0/22px 22px}
+:root.light .ed-wrap.chk{background:repeating-conic-gradient(#e2e9f2 0 25%,#f6f9fc 0 50%) 0 0/22px 22px}
+.ed-wrap canvas{width:100%;height:100%;display:block;cursor:grab;touch-action:none}
+input[type=range]{width:100%;accent-color:var(--acc);height:28px}
+.sheet .seg button{font-size:12.5px}
+/* phones: the big panels let the wallpaper show through (no blur, so it stays fast) */
+@media (max-width:760px){
+  .side,.main,.rail{background:rgba(18,28,42,.8)}
+  :root.light .side,:root.light .main,:root.light .rail{background:rgba(236,242,250,.82)}
+  .toast{top:auto;bottom:calc(96px + var(--safe-b));transform:translate(-50%,160%)}
+  .toast.on{transform:translate(-50%,0)}
+}

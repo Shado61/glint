@@ -1,4 +1,4 @@
-/* Glint — messenger server: accounts, chats, real-time messages, WebRTC call signaling.
+/* Manasenger — messenger server: accounts, chats, real-time messages, WebRTC call signaling.
    Storage: Postgres (DATABASE_URL) or data/db.json for local runs. */
 'use strict';
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
@@ -137,7 +137,7 @@ API['GET /api/me']=(req,res,b,u)=>{
   const ids=new Set();chats.forEach(c=>c.members.forEach(m=>ids.add(m)));
   const servers=Object.values(DB.servers).filter(g=>g.members.includes(u.id));
   servers.forEach(g=>g.members.forEach(m=>ids.add(m)));
-  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),stickers:u.stickers||[],users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 API['POST /api/profile']=(req,res,b,u)=>{
   need(u);
@@ -191,6 +191,31 @@ API['GET /api/calls']=(req,res,b,u)=>{
   out.sort((a,b)=>b.ts-a.ts);
   const list=out.slice(0,60);
   return {calls:list,users:[...new Set(list.map(x=>x.user))].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+};
+
+/* ---------- stickers: each user keeps a personal pack made from their photos ---------- */
+const MAX_STICKERS=60,MAX_STICKER=260e3;
+function cleanSticker(v){
+  const s=String(v||'');
+  if(s.length>MAX_STICKER*1.37)throw E(413,'Стикер слишком большой');
+  if(!/^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/.test(s))throw E(400,'Это не картинка');
+  return s;
+}
+API['POST /api/stickers']=(req,res,b,u)=>{
+  need(u);if(!limit('stk:'+u.id,30,600e3))throw E(429,'Слишком много стикеров подряд');
+  u.stickers=u.stickers||[];
+  if(u.stickers.length>=MAX_STICKERS)throw E(400,`Не больше ${MAX_STICKERS} стикеров. Удали ненужные.`);
+  let img;
+  if(b.fromMsg){ /* save a sticker someone sent into your own pack */
+    const c=DB.chats[String(b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');
+    const m=(DB.msgs[c.id]||[]).find(x=>x.id===String(b.fromMsg));if(!m||!m.sticker)throw E(404,'Стикер не найден');
+    img=m.sticker;if(u.stickers.some(x=>x.img===img))throw E(409,'Этот стикер уже есть у тебя');
+  }else img=cleanSticker(b.img);
+  const st={id:'s'+rid(6),img};u.stickers.unshift(st);mark('u:'+u.id);
+  return {stickers:u.stickers};
+};
+API['POST /api/stickers/delete']=(req,res,b,u)=>{
+  need(u);u.stickers=(u.stickers||[]).filter(x=>x.id!==String(b.id||''));mark('u:'+u.id);return {stickers:u.stickers};
 };
 /* STUN finds the public address; TURN relays the call when two networks cannot connect directly */
 API['GET /api/ice']=(req,res,b,u)=>{
@@ -368,10 +393,12 @@ function handle(ws,u,m){
       if(!member(c,u.id))throw E(404,'Чат не найден');
       if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
       const text=String(m.text||'').slice(0,MAX_TEXT).trim(),img=cleanImg(m.img);
-      if(!text&&!img)return;
-      const msg={id:'m'+rid(8),from:u.id,ts:now(),text};
-      if(img)msg.img=img;
-      if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':'')).slice(0,120)}}
+      const stk=m.sticker?(u.stickers||[]).find(x=>x.id===String(m.sticker)):null;
+      if(m.sticker&&!stk)throw E(404,'Стикер не найден');
+      if(!text&&!img&&!stk)return;
+      const msg={id:'m'+rid(8),from:u.id,ts:now(),text:stk?'':text};
+      if(stk)msg.sticker=stk.img;else if(img)msg.img=img;
+      if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':r.sticker?'Стикер':'')).slice(0,120)}}
       c.read=c.read||{};c.read[u.id]=msg.ts;
       addMsg(c,msg);ws.send(JSON.stringify({t:'ack',cid:m.cid,id:msg.id}));
       return;
@@ -381,7 +408,7 @@ function handle(ws,u,m){
       const msg=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));
       if(!msg||msg.from!==u.id||msg.sys||msg.call)throw E(403,'Можно менять только свои сообщения');
       if(m.t==='edit'){const t=String(m.text||'').slice(0,MAX_TEXT).trim();if(!t)return;msg.text=t;msg.edited=now()}
-      else{msg.del=true;delete msg.text;delete msg.img;delete msg.reply}
+      else{msg.del=true;delete msg.text;delete msg.img;delete msg.reply;delete msg.sticker}
       mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(msg)});return;
     }
     case 'react':{
@@ -494,7 +521,7 @@ server.on('upgrade',(req,sock,head)=>{
 setInterval(()=>{wss.clients.forEach(ws=>{if(!ws.isAlive)return ws.terminate();ws.isAlive=false;ws.ping()})},25e3).unref();
 
 load().then(where=>server.listen(PORT,()=>{
-  console.log(`\n  Glint работает: ${BASE}  (порт ${PORT})`);
+  console.log(`\n  Manasenger работает: ${BASE}  (порт ${PORT})`);
   console.log(`  Данные: ${where} · пользователей ${Object.keys(DB.users).length}`);
   console.log(`  Звонки: ${process.env.TURN_URL?'STUN + TURN':'только STUN (TURN не задан)'}\n`);
 })).catch(e=>{console.error('Не удалось запустить:',e);process.exit(1)});

@@ -1,12 +1,12 @@
 {
-  "name": "Glint",
-  "short_name": "Glint",
+  "name": "Manasenger",
+  "short_name": "Manasenger",
   "description": "Мессенджер: чаты, звонки, видеозвонки, демонстрация экрана",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#0b1020",
-  "theme_color": "#0b1020",
+  "background_color": "#121b28",
+  "theme_color": "#121b28",
   "orientation": "any",
   "icons": [
     {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
