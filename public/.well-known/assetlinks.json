@@ -1,1 +1,14 @@
-[]
+[
+ {
+  "relation": [
+   "delegate_permission/common.handle_all_urls"
+  ],
+  "target": {
+   "namespace": "android_app",
+   "package_name": "com.manasenger.app",
+   "sha256_cert_fingerprints": [
+    "7E:29:E1:E0:52:EC:38:D1:74:BE:E0:41:40:1F:16:A6:6A:12:C9:A6:BE:48:16:7B:04:C8:AA:B2:7D:B0:BE:22"
+   ]
+  }
+ }
+]
