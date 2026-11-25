@@ -643,14 +643,27 @@ function linkify(t){
 }
 /* ---------- TikTok ---------- */
 const TT_RE=/https?:\/\/(?:www\.|m\.|vm\.|vt\.)?tiktok\.com\/[^\s<]+/i;
-function ttCard(text){const m=TT_RE.exec(text);if(!m)return '';return `<button class="ttcard" data-act="ttplay" data-u="${esc(m[0])}"><span class="tt-logo">♪</span><span class="mid"><b>Видео TikTok</b><small>Нажмите, чтобы смотреть здесь</small></span><span class="tt-play">▶</span></button>`}
+function ttCard(text){const m=TT_RE.exec(text);if(!m)return '';const k=m[0],x=TTI.get(k);if(!x)setTimeout(()=>ttInfo(k),0);
+  const th=x&&x.thumb,bad=x&&x.ok===false;
+  return `<button class="ttcard${th?' has-th':''}" data-act="ttplay" data-u="${esc(k)}">${th?`<img class="tt-th" src="${esc(th)}" alt="" loading="lazy" referrerpolicy="no-referrer">`:'<span class="tt-logo">♪</span>'}<span class="mid"><b>${esc(x&&x.author?'@'+x.author:'Видео TikTok')}</b><small>${esc(bad?'Видео недоступно для просмотра здесь':x&&x.title?x.title:'Нажмите, чтобы смотреть здесь')}</small></span><span class="tt-play">▶</span></button>`}
+/* preview (picture, author) for TikTok links in chats, fetched once per link */
+const TTI=new Map(),TTQ=new Set();
+async function ttInfo(u){if(TTQ.has(u))return;TTQ.add(u);
+  try{const id=await ttId(u),r=await api('/api/tiktok/meta?id='+id);TTI.set(u,r)}catch(e){TTI.set(u,{})}
+  document.querySelectorAll('.ttcard').forEach(b=>{if(b.dataset.u===u){const t=document.createElement('div');t.innerHTML=ttCard(u);b.replaceWith(t.firstChild)}})}
 async function ttId(u){const m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(u);if(m)return m[1];return (await api('/api/tiktok?u='+encodeURIComponent(u))).id}
 const ttFrame=id=>`<iframe class="ttframe" src="https://www.tiktok.com/player/v1/${id}?autoplay=1&music_info=1&description=1&rel=0&native_context_menu=0" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
 async function ttPlay(u){
-  let id;try{id=await ttId(u)}catch(e){toast(e.message);return}
-  let el=$('#ttview');if(!el){el=document.createElement('div');el.id='ttview';el.className='ttview';document.body.appendChild(el)}
-  el.innerHTML=`<div class="tt-box">${ttFrame(id)}<div class="tt-bar"><button class="gbtn" data-act="ttext" data-u="${esc(u)}">Открыть в TikTok</button><button class="gbtn ic" data-act="ttclose" aria-label="Закрыть">${ic('x')}</button></div></div>`;
+  let el=$('#ttview');if(!el){el=document.createElement('div');el.id='ttview';el.className='ttview';el.setAttribute('role','dialog');document.body.appendChild(el)}
+  const bar=`<div class="tt-bar"><button class="gbtn" data-act="ttext" data-u="${esc(u)}">Открыть полностью</button><button class="gbtn ic" data-act="ttclose" aria-label="Закрыть">${ic('x')}</button></div>`;
+  el.innerHTML=`<div class="tt-box"><div class="tt-stub"><span class="tt-logo big">♪</span>Загружаем видео…</div>${bar}</div>`;
   VP.a.pause();
+  let id;try{id=await ttId(u)}catch(e){id=null}
+  let meta=TTI.get(u);if(id&&!meta){try{meta=await api('/api/tiktok/meta?id='+id);TTI.set(u,meta)}catch(e){}}
+  if(!$('#ttview'))return;
+  const box=$('#ttview .tt-box');
+  if(!id||(meta&&meta.ok===false)){box.innerHTML=`<div class="tt-stub"><span class="tt-logo big">♪</span><b>Это видео нельзя посмотреть здесь</b><small>Автор запретил встраивание, видео удалено или скрыто</small><button class="gbtn primary" data-act="ttweb" data-u="${esc(u)}">Открыть во внешнем браузере</button></div>${bar}`;return}
+  box.innerHTML=`${ttFrame(id)}${bar}`;
 }
 function ttClose(){const el=$('#ttview');if(el)el.remove()}
 /* the whole TikTok: in the computer app a separate window, on phones over Manasenger (or in the TikTok app) */
@@ -2517,6 +2530,7 @@ let lpT=null,lpFired=false,downEl=null,downAt=0;
    remember what was under the finger when it touched the screen and act on that */
 document.addEventListener('pointerdown',e=>{downEl=e.target.closest('[data-act]');downAt=Date.now()},true);
 document.addEventListener('click',async e=>{
+  const ta=e.target.closest&&e.target.closest('a[href]');if(ta&&TT_RE.test(ta.href)&&!e.ctrlKey&&!e.metaKey){e.preventDefault();ttPlay(ta.href);return}
   if(lpFired){lpFired=false;e.preventDefault();return}
   let el=e.target.closest('[data-act]');
   if(downEl&&downEl!==el&&Date.now()-downAt<1500&&document.contains(downEl)&&(!el||el.dataset.act==='closemenu'))el=downEl;
@@ -2552,6 +2566,7 @@ document.addEventListener('click',async e=>{
     case 'ttclose':ttClose();break;
     case 'ttopen':ttOpen();break;
     case 'ttext':ttClose();ttOpen(el.dataset.u);break;
+    case 'ttweb':ttClose();window.open(el.dataset.u,'_blank','noopener,noreferrer');break;
     case 'ttgo':{const v=($('#ttu')||{}).value||'';if(!TT_RE.test(v)){toast('Вставьте ссылку вида tiktok.com/…');break}ttPlay(TT_RE.exec(v)[0]);break}
     case 'tab':if(el.dataset.t==='tiktok'&&IN_APK()&&store.get('apk',0)>=4){ttOpen();break}S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;

@@ -301,6 +301,17 @@ API['POST /api/logout']=(req,res,b)=>{
 API['GET /api/version']=()=>({v:APP_VERSION});
 /* a short TikTok link (vm.tiktok.com/…) → the video number, so the video can play inside Manasenger */
 const TT=new Map();
+/* title, author and picture of a TikTok video (official oEmbed); ok:false when it is gone or the author turned embedding off */
+const TTM=new Map();
+async function ttMeta(id){
+  if(TTM.has(id))return TTM.get(id);
+  const r=await fetch('https://www.tiktok.com/oembed?url='+encodeURIComponent('https://www.tiktok.com/@_/video/'+id),{signal:AbortSignal.timeout(6000)}).catch(()=>null);
+  if(!r)return {};
+  const j=await r.json().catch(()=>null);
+  const m=r.ok&&j&&j.html?{ok:true,title:String(j.title||'').slice(0,200),author:String(j.author_name||'').slice(0,80),thumb:/^https:\/\/[\w.-]+\.(tiktokcdn(-us|-eu)?\.com|ibyteimg\.com)\//.test(j.thumbnail_url||'')?j.thumbnail_url:''}:{ok:false};
+  TTM.set(id,m);if(TTM.size>800)TTM.delete(TTM.keys().next().value);return m;
+}
+API['GET /api/tiktok/meta']=async(req,res,b,u,q)=>{need(u);const id=String(q.get('id')||'');if(!/^\d{8,25}$/.test(id))throw E(400,'Нет видео');return Object.assign({id},await ttMeta(id))};
 API['GET /api/tiktok']=async(req,res,b,u,q)=>{
   need(u);const url=String(q.get('u')||'');
   let m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(url);if(m)return {id:m[1]};
@@ -1149,7 +1160,7 @@ function handle(ws,u,m){
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.mdl':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.jpg':'image/jpeg','.jpeg':'image/jpeg'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
-  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src https://www.tiktok.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
+  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob: https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.tiktokcdn-eu.com https://*.ibyteimg.com; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src https://www.tiktok.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
 /* answers bigger than a couple of kilobytes (the chat list, message history) go out compressed: several times less to download */
 function send(res,code,o){
   const h=Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Accept-Encoding'},SEC);let b=Buffer.from(JSON.stringify(o));
