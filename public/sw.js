@@ -3,7 +3,7 @@
    - The page itself is always asked from the server first (that is how a new version arrives), the saved copy only offline.
    - Pictures (/img/…) and the mask library never change: kept and shown instantly.
    - Push: message and call notifications even when Manasenger is closed. */
-const V='manasenger-v6',APP='mn-app',IMG='mn-img';
+const V='manasenger-v7',APP='mn-app',IMG='mn-img';
 self.addEventListener('install',e=>{self.skipWaiting()});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>![V,APP,IMG].includes(k)).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 async function trim(name,max){const c=await caches.open(name),ks=await c.keys();if(ks.length>max)for(const k of ks.slice(0,ks.length-Math.round(max*.8)))await c.delete(k)}
@@ -26,10 +26,10 @@ self.addEventListener('push',e=>{
     const ws=await windows();
     /* a window with this chat is open on screen: it shows the message itself */
     if(d.type==='msg'&&ws.some(w=>w.visibilityState==='visible'&&w.focused))return;
-    const call=d.type==='call';
+    const call=d.type==='call'||d.type==='gcall';
     const opts={body:d.body||'',tag:d.tag||'mn',icon:d.icon||'/icon-192.png',badge:'/icon-192.png',renotify:true,
       data:d,timestamp:Date.now(),vibrate:call?[400,200,400,200,400,200,400]:[120,60,120]};
-    if(call){opts.requireInteraction=true;opts.actions=[{action:'answer',title:'✅ Ответить'},{action:'decline',title:'❌ Отклонить'}]}
+    if(call){opts.requireInteraction=true;opts.actions=[{action:'answer',title:d.type==='gcall'?'✅ Войти':'✅ Ответить'},{action:'decline',title:'❌ Отклонить'}]}
     else{
       /* several messages from one chat stack into one notification */
       const old=(await self.registration.getNotifications({tag:opts.tag}))[0];
@@ -42,12 +42,13 @@ self.addEventListener('push',e=>{
 self.addEventListener('notificationclick',e=>{
   const d=e.notification.data||{},act=e.action;e.notification.close();
   e.waitUntil((async()=>{
+    if(d.type==='gcall'&&act==='decline')return;
     if(d.type==='call'&&act==='decline'){
       await fetch('/api/call/reject',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({callId:d.callId})}).catch(()=>{});
       return;
     }
-    const msg=d.type==='call'?{t:'notif-call',callId:d.callId,answer:act==='answer'}:{t:'notif-chat',chat:d.chat};
-    const url=d.type==='call'?`/#call=${d.callId}${act==='answer'?'&a=1':''}`:(d.chat?`/#chat=${d.chat}`:'/');
+    const msg=d.type==='call'?{t:'notif-call',callId:d.callId,answer:act==='answer'}:d.type==='gcall'?{t:'notif-gcall',chat:d.chat,answer:act==='answer'}:{t:'notif-chat',chat:d.chat};
+    const url=d.type==='call'?`/#call=${d.callId}${act==='answer'?'&a=1':''}`:d.type==='gcall'?`/#gcall=${d.chat}${act==='answer'?'&a=1':''}`:(d.chat?`/#chat=${d.chat}`:'/');
     const ws=await windows();
     const w=ws.find(x=>x.visibilityState==='visible')||ws[0];
     if(w){try{await w.focus()}catch(x){}w.postMessage(msg);return}

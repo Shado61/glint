@@ -54,10 +54,14 @@ async function flushNow(){
   if(!DIRTY.size)return;
   const keys=[...DIRTY];DIRTY.clear();
   if(!pool){fs.mkdirSync(path.dirname(DATA_FILE),{recursive:true});fs.writeFileSync(DATA_FILE+'.tmp',JSON.stringify(DB));fs.renameSync(DATA_FILE+'.tmp',DATA_FILE);return}
-  for(const k of keys){
-    const id=k.slice(2),v=k==='s:all'?DB.sessions:DB[TB[k[0]]][id];
-    if(v===undefined)await pool.query('DELETE FROM glint_kv WHERE k=$1',[k]);
-    else await pool.query('INSERT INTO glint_kv(k,v) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET v=EXCLUDED.v',[k,JSON.stringify(v)]);
+  /* sign-ins are saved first; anything that fails to save is tried again on the next round, never dropped */
+  keys.sort((a,b)=>(b==='s:all')-(a==='s:all'));
+  for(let i=0;i<keys.length;i++){
+    const k=keys[i],id=k.slice(2),v=k==='s:all'?DB.sessions:DB[TB[k[0]]][id];
+    try{
+      if(v===undefined)await pool.query('DELETE FROM glint_kv WHERE k=$1',[k]);
+      else await pool.query('INSERT INTO glint_kv(k,v) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET v=EXCLUDED.v',[k,JSON.stringify(v)]);
+    }catch(e){keys.slice(i).forEach(x=>DIRTY.add(x));throw e}
   }
 }
 function flush(){flushing=flushing.then(flushNow).catch(e=>console.error('[db]',e.message));return flushing}
@@ -83,6 +87,7 @@ function chatFor(c,uid){
   if(c.petOn)o.petOn=true;
   if(!c.pet&&c.type==='dm'&&c.st&&c.st.n>=1){c.pet={name:'Серийчик',best:c.st.n};mark('c:'+c.id)}
   if(c.pet)o.pet=c.pet;
+  const gr=GROOMS.get(c.id);if(gr)o.gcall=groomOut(gr);
   return o;
 }
 const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m;
@@ -122,9 +127,15 @@ function userOf(req){
   const s=DB.sessions[sha(t)];if(!s||s.exp<now())return null;
   return DB.users[s.uid]||null;
 }
+/* you sign in once: the sign-in lasts a year and renews itself every day you use Manasenger */
+const SESSION_DAYS=365;
+function setCookie(res,t){res.setHeader('Set-Cookie',`glint=${t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS*86400}${BASE.startsWith('https')?'; Secure':''}`)}
 function newSession(res,uid){
-  const t=rid(32);DB.sessions[sha(t)]={uid,exp:now()+90*864e5};mark('s:all');
-  res.setHeader('Set-Cookie',`glint=${t}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${90*86400}${BASE.startsWith('https')?'; Secure':''}`);
+  const t=rid(32);DB.sessions[sha(t)]={uid,exp:now()+SESSION_DAYS*864e5,seen:now()};mark('s:all');setCookie(res,t);return t;
+}
+function renewSession(req,res){
+  const t=cookies(req).glint,s=t&&DB.sessions[sha(t)];
+  if(s&&now()-(s.seen||0)>864e5){s.seen=now();s.exp=now()+SESSION_DAYS*864e5;mark('s:all');setCookie(res,t)}
 }
 
 /* ---------- validation ---------- */
@@ -224,7 +235,9 @@ function cleanMedia(v,u){
   const id=String(v.url||'').replace(/^\/media\//,''),m=DB.media[id];if(!m||m.owner!==u.id)throw E(400,'Файл не найден');
   const o={k:m.kind,url:'/media/'+id,dur:Math.max(0,Math.min(3600,+v.dur||0))};
   if(m.kind==='voice'&&Array.isArray(v.wave))o.wave=v.wave.slice(0,48).map(x=>Math.max(0,Math.min(31,x|0)));
-  if(m.kind==='video'){o.w=+v.w||0;o.h=+v.h||0;if(v.poster){const pi=cleanImg(v.poster);if(pi&&pi.length<300e3)o.poster=putImg(pi)}}
+  if(m.kind==='video'){o.w=+v.w||0;o.h=+v.h||0}
+  if((m.kind==='video'||m.kind==='round')&&v.poster){const pi=cleanImg(v.poster);if(pi&&pi.length<300e3)o.poster=putImg(pi)}
+  if(m.kind==='round'&&v.mirror)o.mirror=1;
   return o;
 }
 
@@ -237,18 +250,25 @@ API['POST /api/register']=(req,res,b)=>{
   if(pass.length<6||pass.length>200)throw E(400,'Пароль — минимум 6 символов');
   if(Object.values(DB.users).some(u=>u.username===username))throw E(409,'Этот логин уже занят');
   const u={id:'u'+rid(6),username,name,pass:hashPass(pass),color:COLORS[crypto.randomInt(COLORS.length)],created:now(),lastSeen:now()};
-  DB.users[u.id]=u;mark('u:'+u.id);newSession(res,u.id);
-  return {me:pubUser(u)};
+  DB.users[u.id]=u;mark('u:'+u.id);const token=newSession(res,u.id);
+  return {me:pubUser(u),token};
 };
 API['POST /api/login']=(req,res,b)=>{
   const username=String(b.username||'').toLowerCase().trim();
   if(!limit('login:'+ip(req),10,600e3)||!limit('login:'+username,10,600e3))throw E(429,'Слишком много попыток. Подожди 10 минут.');
   const u=Object.values(DB.users).find(x=>x.username===username);
   if(!u||!checkPass(String(b.password||''),u.pass))throw E(401,'Неверный логин или пароль');
-  newSession(res,u.id);return {me:pubUser(u)};
+  const token=newSession(res,u.id);return {me:pubUser(u),token};
 };
-API['POST /api/logout']=(req,res)=>{
-  const t=cookies(req).glint;if(t){delete DB.sessions[sha(t)];mark('s:all')}
+API['POST /api/session/keep']=(req,res,b,u)=>{need(u);return {token:cookies(req).glint||''}};
+/* the app also keeps the sign-in on the device: if the browser loses its cookie, it signs back in by itself */
+API['POST /api/session/restore']=(req,res,b)=>{
+  const t=String(b.token||'');if(!/^[\w-]{20,80}$/.test(t)||!limit('restore:'+ip(req),20,600e3))return {ok:false};
+  const s=DB.sessions[sha(t)];if(!s||s.exp<now()||!DB.users[s.uid])return {ok:false};
+  s.seen=now();s.exp=now()+SESSION_DAYS*864e5;mark('s:all');setCookie(res,t);return {ok:true};
+};
+API['POST /api/logout']=(req,res,b)=>{
+  const t=cookies(req).glint||String(b&&b.token||'');if(t){delete DB.sessions[sha(t)];mark('s:all')}
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
@@ -266,6 +286,7 @@ API['POST /api/call/reject']=(req,res,b,u)=>{need(u);const call=CALLS.get(String
 API['POST /api/chats/mute']=(req,res,b,u)=>{need(u);const c=DB.chats[String(b&&b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');c.muted=(c.muted||[]).filter(x=>x!==u.id);if(b.on)c.muted.push(u.id);mark('c:'+c.id);return {chat:chatFor(c,u.id)}};
 API['GET /api/me']=(req,res,b,u)=>{
   if(!u)return {me:null};
+  renewSession(req,res);
   selfChat(u);
   const chats=Object.values(DB.chats).filter(c=>member(c,u.id)).map(c=>chatFor(c,u.id));
   const ids=new Set();chats.forEach(c=>c.members.forEach(m=>ids.add(m)));
@@ -714,7 +735,7 @@ function pushPreview(m){
   return 'Новое сообщение';
 }
 function pushMsg(c,m){
-  if(!webpush||m.sys||c.type==='self')return;
+  if(!webpush||m.sys||c.type==='self'||(m.call&&m.call.group))return;
   const from=DB.users[m.from];if(!from)return;
   for(const uid of c.members){
     if(uid===m.from&&!m.call)continue;
@@ -732,17 +753,75 @@ function broadcastUser(u){const p=pubUser(u);contactsOf(u.id).forEach(i=>sendTo(
 /* calls: one-to-one; the server only passes offers, answers and network candidates between the two sides */
 const CALLS=new Map(); /* callId -> {id,a,b,chat,kind,state,ts} */
 const inCall=uid=>[...CALLS.values()].some(c=>(c.a===uid||c.b===uid)&&c.state!=='ended');
+const busyAny=uid=>inCall(uid)||!!groomOf(uid);
 function endCall(call,reason,by){
   if(!call||call.state==='ended')return;
   const was=call.state;call.state='ended';CALLS.delete(call.id);
   [call.a,call.b].forEach(x=>sendTo(x,{t:'call-end',callId:call.id,reason,by}));
-  if(was==='ringing'&&!looking(call.b))pushTo(call.b,{type:'call-end',callId:call.id,tag:'call'+call.id});
+  if(was==='ringing'&&!looking(call.b))pushTo(call.b,{type:'call-end',callId:call.id,tag:callTag(call.id)});
   const c=DB.chats[call.chat];
   if(c){
     const dur=was==='active'?Math.round((now()-call.started)/1000):0;
     addMsg(c,{id:'m'+rid(8),from:call.a,ts:now(),call:{kind:call.kind,dur,missed:was!=='active'}});
   }
 }
+
+/* a short code that lets the phone app decline a call right from its own call screen */
+const callCode=id=>crypto.createHmac('sha256',(DB.keys.vapid&&DB.keys.vapid.privateKey)||'mn').update(String(id)).digest('base64url').slice(0,16);
+const callTag=id=>'mncall.'+id+'.'+callCode(id);
+API['POST /api/call/reject-code']=(req,res,b)=>{
+  const call=CALLS.get(String(b.callId||''));
+  if(call&&call.state==='ringing'&&String(b.code||'')===callCode(call.id))endCall(call,'rejected',call.b);return {ok:true};
+};
+
+/* ---------- group calls: in groups and server channels, everyone connects with everyone ---------- */
+const GROOMS=new Map(); /* chatId -> {chat,kind,started,by,users:Map(uid->{ws,mic,cam,screen})} */
+const GROUP_MAX=8;
+const groomOut=r=>({kind:r.kind,started:r.started,by:r.by,users:[...r.users.entries()].map(([id,v])=>({id,mic:v.mic!==false,cam:!!v.cam,screen:!!v.screen}))});
+const groomOf=uid=>{for(const [cid,r] of GROOMS)if(r.users.has(uid))return cid;return null};
+function groomBroadcast(c){const r=GROOMS.get(c.id);toChat(c,{t:'groom',chat:c.id,room:r?groomOut(r):null})}
+function groomLeave(uid,cid,ws){
+  const r=GROOMS.get(cid);if(!r||!r.users.has(uid))return;
+  if(ws&&r.users.get(uid).ws!==ws)return;
+  r.users.delete(uid);r.users.forEach(v=>{if(v.ws.readyState===1)v.ws.send(JSON.stringify({t:'gpeer-left',chat:cid,user:uid}))});
+  const c=DB.chats[cid];
+  if(!r.users.size){GROOMS.delete(cid);if(c){
+    const dur=Math.round((now()-r.started)/1000);
+    addMsg(c,{id:'m'+rid(8),from:r.by,ts:now(),call:{kind:r.kind,dur,group:true,missed:!r.joined}});
+    c.members.forEach(m=>{if(!looking(m))pushTo(m,{type:'call-end',tag:'mngcall.'+cid})});
+  }}
+  if(c)groomBroadcast(c);
+}
+function groomJoin(ws,u,c,kind,m){
+  if(!member(c,u.id)||!['group','channel'].includes(c.type))throw E(400,'Групповой звонок — в группе или канале сервера');
+  if(inCall(u.id))throw E(409,'Сначала заверши звонок');
+  if(voiceChannelOf(u.id))throw E(409,'Сначала выйди из голосового канала');
+  const prev=groomOf(u.id);if(prev&&prev!==c.id)groomLeave(u.id,prev);
+  let r=GROOMS.get(c.id),fresh=false;
+  if(!r){r={chat:c.id,kind:kind==='video'?'video':'audio',started:now(),by:u.id,users:new Map()};GROOMS.set(c.id,r);fresh=true}
+  if(r.users.has(u.id)){const old=r.users.get(u.id);if(old.ws!==ws)groomLeave(u.id,c.id)}
+  if(r.users.size>=GROUP_MAX)throw E(400,`В звонке максимум ${GROUP_MAX} человек`);
+  if(!fresh)r.joined=true;
+  const peers=[...r.users.keys()];
+  r.users.set(u.id,{ws,mic:m.mic!==false,cam:!!m.cam,screen:false});
+  ws.send(JSON.stringify({t:'gjoined',chat:c.id,kind:r.kind,peers}));
+  groomBroadcast(c);
+  if(fresh){ /* everyone else in the chat: it rings, and a notification if Manasenger is closed */
+    const title=c.type==='group'?(c.name||'Группа'):((DB.servers[c.server]||{}).name||'Сервер')+' · #'+(c.name||'канал');
+    c.members.forEach(x=>{if(x===u.id)return;
+      sendTo(x,{t:'gcall-ring',chat:c.id,from:pubUser(u),kind:r.kind});
+      if(!looking(x)&&!(c.muted||[]).includes(x))pushTo(x,{type:'gcall',chat:c.id,tag:'mngcall.'+c.id,kind:r.kind,title,body:`${u.name}: ${r.kind==='video'?'📹 групповой видеозвонок':'📞 групповой звонок'}`,icon:'/icon-192.png'});
+    });
+  }
+}
+/* "Проверить" in settings: a test notification to every device of this account, with the answer of each push service */
+API['POST /api/push/test']=async(req,res,b,u)=>{
+  need(u);if(!webpush)return {sent:0,error:'на сервере нет модуля уведомлений'};
+  const subs=u.push||[];
+  const out=await Promise.all(subs.map(sub=>webpush.sendNotification(sub,JSON.stringify({type:'msg',tag:'test',title:'Manasenger',body:'🔔 Уведомления работают!',icon:'/icon-192.png'}),{TTL:600,urgency:'high'})
+    .then(r=>r.statusCode).catch(e=>{if(e.statusCode===404||e.statusCode===410){u.push=u.push.filter(x=>x.endpoint!==sub.endpoint);mark('u:'+u.id)}return e.statusCode||String(e.message).slice(0,80)})));
+  return {sent:subs.length,results:out};
+};
 
 function onSocket(ws,u){
   if(!SOCKS.has(u.id))SOCKS.set(u.id,new Set());
@@ -762,6 +841,7 @@ function onSocket(ws,u){
     const s=SOCKS.get(u.id);if(s){s.delete(ws);if(!s.size){SOCKS.delete(u.id);ONLINE.delete(u.id);u.lastSeen=now();mark('u:'+u.id);broadcastUser(u)}}
     if(!SOCKS.has(u.id))for(const c of CALLS.values())if(c.a===u.id||(c.b===u.id&&c.state==='active'))endCall(c,'offline',u.id);
     const vc=voiceChannelOf(u.id);if(vc&&VOICE.get(vc).get(u.id).ws===ws)voiceLeave(u.id,vc);
+    const gc=groomOf(u.id);if(gc)groomLeave(u.id,gc,ws);
   });
 }
 function handle(ws,u,m){
@@ -837,7 +917,7 @@ function handle(ws,u,m){
     case 'vjoin':{
       const cid=String(m.channel||''),g=serverOfVoice(cid);
       if(!g||!g.members.includes(u.id))throw E(404,'Канал не найден');
-      if(inCall(u.id))throw E(409,'Сначала заверши звонок');
+      if(busyAny(u.id))throw E(409,'Сначала заверши звонок');
       const prev=voiceChannelOf(u.id);if(prev===cid){const r=VOICE.get(cid).get(u.id);if(r.ws!==ws){voiceLeave(u.id,cid,true)}else return}else if(prev)voiceLeave(u.id,prev);
       const room=VOICE.get(cid)||new Map();
       if(room.size>=VOICE_MAX)throw E(400,`В голосовом канале максимум ${VOICE_MAX} человек`);
@@ -854,6 +934,16 @@ function handle(ws,u,m){
       const d=m.data;if(!d||typeof d!=='object'||JSON.stringify(d).length>60e3)return;
       peer.ws.send(JSON.stringify({t:'vrtc',channel:cid,from:u.id,data:d}));return;
     }
+    /* ----- group calls ----- */
+    case 'gcall':if(!limit('gcall:'+u.id,10,60e3))throw E(429,'Слишком часто');groomJoin(ws,u,c,m.kind,m);return;
+    case 'gleave':{const cid=groomOf(u.id);if(cid)groomLeave(u.id,cid,ws);return}
+    case 'gstate':{const cid=groomOf(u.id);if(!cid)return;const r=GROOMS.get(cid),v=r.users.get(u.id);if(v.ws!==ws)return;v.mic=m.mic!==false;v.cam=!!m.cam;v.screen=!!m.screen;const ch=DB.chats[cid];if(ch)groomBroadcast(ch);return}
+    case 'grtc':{
+      const cid=groomOf(u.id),to=String(m.to||'');if(!cid)return;
+      const peer=GROOMS.get(cid).users.get(to);if(!peer||peer.ws.readyState!==1)return;
+      const d=m.data;if(!d||typeof d!=='object'||JSON.stringify(d).length>60e3)return;
+      peer.ws.send(JSON.stringify({t:'grtc',chat:cid,from:u.id,data:d}));return;
+    }
     /* ----- calls ----- */
     case 'call':{
       if(!member(c,u.id)||c.type!=='dm')throw E(400,'Звонить можно в личном чате');
@@ -861,7 +951,8 @@ function handle(ws,u,m){
       const other=c.members.find(x=>x!==u.id);
       if(inCall(u.id))throw E(409,'Ты уже в звонке');
       if(voiceChannelOf(u.id))throw E(409,'Сначала выйди из голосового канала');
-      const busy=inCall(other)||!!voiceChannelOf(other);
+      if(groomOf(u.id))throw E(409,'Сначала выйди из группового звонка');
+      const busy=inCall(other)||!!voiceChannelOf(other)||!!groomOf(other);
       const call={id:'k'+rid(8),a:u.id,b:other,chat:c.id,kind:m.kind==='video'?'video':'audio',state:'ringing',ts:now()};
       CALLS.set(call.id,call);
       ws.send(JSON.stringify({t:'call-started',callId:call.id,chat:c.id,to:other,kind:call.kind}));
@@ -869,7 +960,7 @@ function handle(ws,u,m){
       /* the other person may be offline or have Manasenger closed: it keeps ringing for 45 seconds and
          their phone or computer gets a call notification; when they open Manasenger the call comes in */
       const reached=sendTo(other,{t:'call-incoming',callId:call.id,chat:c.id,from:pubUser(u),kind:call.kind});
-      if(!looking(other))pushTo(other,{type:'call',callId:call.id,chat:c.id,tag:'call'+call.id,kind:call.kind,title:u.name,body:call.kind==='video'?'📹 Входящий видеозвонок':'📞 Входящий звонок',icon:'/icon-192.png'});
+      if(!looking(other))pushTo(other,{type:'call',callId:call.id,chat:c.id,tag:callTag(call.id),code:callCode(call.id),kind:call.kind,title:u.name,body:call.kind==='video'?'📹 Входящий видеозвонок':'📞 Входящий звонок',icon:'/icon-192.png'});
       if(!reached)ws.send(JSON.stringify({t:'call-waiting',callId:call.id}));
       setTimeout(()=>{if(call.state==='ringing')endCall(call,'timeout')},45e3);
       return;
