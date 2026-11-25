@@ -1,0 +1,87 @@
+# Builds the Android app (APK) and the computer apps, and puts them on the "Скачать приложения" release page.
+name: Apps
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ['android/**', 'desktop/**', '.github/workflows/apps.yml']
+permissions:
+  contents: write
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '17' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.7' }
+      # the signing key stays the same between builds (kept in the build cache), so the app updates in place
+      - uses: actions/cache@v4
+        with: { path: ~/keystore, key: manasenger-keystore-v1 }
+      - name: Signing key
+        run: |
+          mkdir -p ~/keystore
+          if [ ! -f ~/keystore/release.jks ]; then
+            openssl rand -hex 16 > ~/keystore/pass
+            keytool -genkeypair -keystore ~/keystore/release.jks -alias manasenger -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass "$(cat ~/keystore/pass)" -keypass "$(cat ~/keystore/pass)" -dname "CN=Manasenger, O=Manasenger, C=KZ"
+          fi
+          FP=$(keytool -list -v -keystore ~/keystore/release.jks -alias manasenger -storepass "$(cat ~/keystore/pass)" | grep 'SHA256:' | head -1 | sed 's/.*SHA256: //')
+          echo "FP=$FP" >> $GITHUB_ENV
+      - name: Build APK
+        env: { VERSION_CODE: '${{ github.run_number }}' }
+        run: |
+          export KEYSTORE=$HOME/keystore/release.jks KS_PASS=$(cat ~/keystore/pass)
+          gradle -p android assembleRelease --no-daemon
+          cp android/app/build/outputs/apk/release/app-release.apk Manasenger.apk
+      # lets the app open full screen without the browser bar: the site confirms the app's signature
+      - name: Site confirms the app (assetlinks)
+        run: |
+          python3 - <<'PY'
+          import json,os
+          p='public/.well-known/assetlinks.json';fp=os.environ['FP']
+          try: d=json.load(open(p))
+          except Exception: d=[]
+          if not d: d=[{"relation":["delegate_permission/common.handle_all_urls"],"target":{"namespace":"android_app","package_name":"com.manasenger.app","sha256_cert_fingerprints":[]}}]
+          fps=d[0]["target"]["sha256_cert_fingerprints"]
+          if fp not in fps: fps.append(fp)
+          json.dump(d,open(p,'w'),indent=1)
+          PY
+          if ! git diff --quiet public/.well-known/assetlinks.json; then
+            git config user.name "Manasenger build"; git config user.email "build@users.noreply.github.com"
+            git add public/.well-known/assetlinks.json; git commit -m "Подпись Android-приложения для полноэкранного режима"; git pull --rebase; git push
+          fi
+      - uses: actions/upload-artifact@v4
+        with: { name: android, path: Manasenger.apk }
+  desktop:
+    strategy:
+      matrix: { os: [windows-latest, macos-latest, ubuntu-latest] }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Build
+        working-directory: desktop
+        env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+        run: npm install && npm run dist
+      - uses: actions/upload-artifact@v4
+        with: { name: 'desktop-${{ matrix.os }}', path: 'desktop/dist/Manasenger-*' }
+  release:
+    needs: [android, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: out, merge-multiple: true }
+      - run: ls -la out
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apps
+          name: 'Скачать приложения Manasenger'
+          make_latest: true
+          body: |
+            **Android:** скачайте `Manasenger.apk` и откройте файл на телефоне (разрешите установку из этого источника).
+            **Windows:** `Manasenger-Setup.exe` · **Mac:** `Manasenger-mac.dmg` · **Linux:** `Manasenger-linux.AppImage`
+            Приложения открывают ваш Manasenger — аккаунт, чаты и звонки те же.
+          files: out/*

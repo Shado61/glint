@@ -1,0 +1,10 @@
+plugins { id 'com.android.application' }
+android {
+  namespace 'com.manasenger.app'
+  compileSdk 34
+  defaultConfig { applicationId 'com.manasenger.app'; minSdk 21; targetSdk 34; versionCode((System.getenv('VERSION_CODE') ?: '1') as int); versionName '1.' + (System.getenv('VERSION_CODE') ?: '1') }
+  signingConfigs { release { storeFile file(System.getenv('KEYSTORE') ?: 'none'); storePassword System.getenv('KS_PASS'); keyAlias 'manasenger'; keyPassword System.getenv('KS_PASS') } }
+  buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0' }
