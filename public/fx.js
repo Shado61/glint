@@ -195,23 +195,32 @@ const SP={
   moustache:sprite('moustache',256,(x,s)=>{x.fillStyle='#2a1c12';for(const k of [-1,1]){x.save();x.translate(s/2,s/2);x.scale(k,1);x.beginPath();x.moveTo(0,-s*.06);x.bezierCurveTo(s*.16,-s*.22,s*.4,-s*.14,s*.46,s*.04);x.bezierCurveTo(s*.4,-s*.02,s*.3,s*.12,s*.16,s*.1);x.bezierCurveTo(s*.08,s*.1,s*.02,s*.06,0,s*.06);x.closePath();x.fill();x.restore()}}),
   tear:sprite('tear',64,(x,s)=>{x.fillStyle='rgba(110,180,255,.9)';x.beginPath();x.moveTo(s*.5,s*.05);x.quadraticCurveTo(s*.9,s*.6,s*.5,s*.95);x.quadraticCurveTo(s*.1,s*.6,s*.5,s*.05);x.fill()}),
 };
+const IMGS={};
+function imgTex(name){let i=IMGS[name];if(!i){i=IMGS[name]=new Image();i.src='/vendor/masks/'+name}return i.complete&&i.naturalWidth?i:blank()}
 const E=ch=>()=>tex['e'+ch]||(tex['e'+ch]=emojiTex(ch));
 
 const MASKS=[
   {id:'none',e:'🚫',n:'Без маски'},
+  /* ---- real 3D masks from open-source face filters ---- */
+  {id:'dog3d',e:'🐶',n:'Пёсик',hint:'Открой рот',
+    m3:[{mdl:'dog_ears',flipV:true,s:.3,t:[0,-6.5,-2.5]},{mdl:'dog_nose',flipV:true,s:.22,t:[0,-3.2,6.1]}],
+    props:[{t:SP.tongue,lm:14,dy:.1,s:.2,show:b=>b[B.jawOpen]>.25}]},
+  {id:'tiger3d',e:'🐅',n:'Тигр 3D',m3:[{mdl:'tiger',flipV:true,s:[12.6,18.9,12.6],t:[0,-.215,-1.05]}],noOcc:true},
+  {id:'cloud',e:'🌧️',n:'Тучка',m3:[{mdl:'cloud',flipV:true,s:[3.5,2,3.5],t:[0,9.5,-2]},{mdl:'cloud',flipV:true,s:[2.4,1.8,2.4],t:[6,10.5,-3]},{mdl:'cloud',flipV:true,s:[2.6,2.2,2.6],t:[-5.5,9,-1]}],
+    fx:{kind:'rain',from:'cloud',on:()=>true,rate:22}},
+  {id:'thug',e:'🕶️',n:'Thug Life',m3:[{mdl:'glasses_thug',s:.108,t:[0,2.2,3.6],drop:true}]},
+  {id:'clownhat',e:'🎪',n:'Колпак',m3:[{mdl:'clown_hat',s:4.3,t:[0,19.5,-2.5]}]},
+  {id:'earrings',e:'💎',n:'Серьги',m3:[{mdl:'earring',s:.85,t:[8.1,-4.2,-1.8]},{mdl:'earring',s:.85,t:[-8.1,-4.2,-1.8]}]},
   /* ---- animals ---- */
   {id:'cat',e:'🐱',n:'Котик',
     paint(x){const [nx,ny]=up(4);x.fillStyle='#f08aa8';x.beginPath();x.moveTo(nx-PS*.03,ny-PS*.015);x.lineTo(nx+PS*.03,ny-PS*.015);x.lineTo(nx,ny+PS*.02);x.closePath();x.fill();
       x.strokeStyle='rgba(25,25,35,.85)';x.lineWidth=PS*.005;x.lineCap='round';for(const s of [-1,1])for(const k of [-1,0,1]){x.beginPath();x.moveTo(nx+s*PS*.06,ny+PS*.03);x.lineTo(nx+s*PS*.27,ny+PS*(.02+k*.035));x.stroke()}
       for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.03,()=>{x.beginPath();x.arc(a,b,PS*.035,0,Math.PI*2)},'rgba(255,120,150,.35)')}},
     props:[{t:SP.catEar,at:[-5,10,-.5],w:5.5,h:6.5,r:.3},{t:SP.catEar,at:[5,10,-.5],w:5.5,h:6.5,r:-.3}]},
-  {id:'dog',e:'🐶',n:'Пёсик',hint:'Открой рот',
-    props:[{t:SP.dogEar,at:[-7.6,5,-1.5],w:5,h:9,r:-.3},{t:SP.dogEar,at:[7.6,5,-1.5],w:5,h:9,r:.3},{t:SP.dogNose,at:[0,-.6,8.2],w:3.4,h:2.5},
-      {t:SP.tongue,lm:14,dy:.1,s:.18,show:b=>b[B.jawOpen]>.25}]},
   {id:'bunny',e:'🐰',n:'Зайка',
     paint(x){const [nx,ny]=up(4);x.fillStyle='#f08aa8';x.beginPath();x.ellipse(nx,ny,PS*.025,PS*.017,0,0,Math.PI*2);x.fill()},
     props:[{t:SP.bunnyEar,at:[-2.8,15.5,-1],w:5,h:11,r:.12},{t:SP.bunnyEar,at:[2.8,15.5,-1],w:5,h:11,r:-.12},{t:SP.teeth,lm:13,dy:.03,s:.12}]},
-  {id:'tiger',e:'🐯',n:'Тигр',
+  {id:'tigerpaint',e:'🐯',n:'Тигр-грим',
     paint(x){ovalFill(x,'rgba(240,140,40,.62)',PS*.04);
       x.save();poly(x,R.oval);x.clip();x.strokeStyle='rgba(20,14,10,.82)';x.lineCap='round';
       const st=[[.12,.25,.3,.3],[.1,.4,.28,.42],[.12,.55,.26,.55],[.88,.25,.7,.3],[.9,.4,.72,.42],[.88,.55,.74,.55],[.42,.06,.46,.2],[.58,.06,.54,.2],[.5,.04,.5,.16]];
@@ -359,18 +368,24 @@ const FS_BEAUTY=`precision mediump float;varying vec2 vt,vu;uniform sampler2D f,
 void main(){vec2 s=vec2(vt.x,1.-vt.y);vec3 c=texture2D(f,s).rgb;vec3 acc=c;float wsum=1.;
  for(int i=0;i<12;i++){float a=float(i)*.5236;vec2 o=vec2(cos(a),sin(a))*px*(mod(float(i),2.)>.5?3.:6.);vec3 q=texture2D(f,s+o).rgb;vec3 d=q-c;float w=exp(-dot(d,d)*40.);acc+=q*w;wsum+=w;}
  vec3 sm=acc/wsum;float m=texture2D(mk,vu).a;vec3 o2=mix(c,sm,m*.75)+m*.025;gl_FragColor=vec4(o2,m);}`;
+/* 3D models: perspective like the face tracker's camera, simple light; depth so the head hides what is behind it */
+const VS_3=`attribute vec3 p,n;attribute vec2 uv;uniform mat4 mv;uniform vec3 pr;uniform float fv;varying vec2 vu;varying vec3 vn;
+void main(){vec4 v=mv*vec4(p,1.);vu=vec2(uv.x,fv>0.?1.-uv.y:uv.y);vn=(mv*vec4(n,0.)).xyz;gl_Position=vec4(pr.z*pr.x*v.x,pr.y*v.y,-1.002*v.z-2.002,-v.z);}`;
+const FS_3=`precision mediump float;varying vec2 vu;varying vec3 vn;uniform sampler2D t;uniform vec4 col;uniform float useT,lit,al;
+void main(){vec4 c=col;if(useT>0.)c*=texture2D(t,vu);c.a*=al;if(c.a<.03)discard;float l=1.;if(lit>0.){vec3 N=normalize(vn);l=.5+.6*max(dot(N,normalize(vec3(.3,.5,1.))),0.)+.25*pow(max(dot(N,normalize(vec3(-.2,.6,1.))),0.),12.);}gl_FragColor=vec4(c.rgb*l,c.a);}`;
 const VS_S=`attribute vec4 p;attribute vec3 ta;varying vec2 vt;varying float va;void main(){vt=ta.xy;va=ta.z;gl_Position=p;}`;
 const FS_S=`precision mediump float;varying vec2 vt;varying float va;uniform sampler2D t;uniform vec3 tint;uniform float useTint;void main(){vec4 c=texture2D(t,vt);if(useTint>0.)c.rgb*=tint;gl_FragColor=vec4(c.rgb,c.a*va);}`;
 
 function Renderer(canvas){
-  const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:false,premultipliedAlpha:false,preserveDrawingBuffer:false})||canvas.getContext('experimental-webgl');
+  const gl=canvas.getContext('webgl',{alpha:false,antialias:false,depth:true,premultipliedAlpha:false,preserveDrawingBuffer:false})||canvas.getContext('experimental-webgl');
   if(!gl)return null;
+  gl.getExtension('OES_element_index_uint');
   try{
   const prog=(vs,fs)=>{const p=gl.createProgram();for(const [t,s] of [[gl.VERTEX_SHADER,vs],[gl.FRAGMENT_SHADER,fs]]){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh));gl.attachShader(p,sh)}
     gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw new Error(gl.getProgramInfoLog(p));const u={},a={};
     const nu=gl.getProgramParameter(p,gl.ACTIVE_UNIFORMS);for(let i=0;i<nu;i++){const n=gl.getActiveUniform(p,i).name;u[n]=gl.getUniformLocation(p,n)}
     const na=gl.getProgramParameter(p,gl.ACTIVE_ATTRIBUTES);for(let i=0;i<na;i++){const n=gl.getActiveAttrib(p,i).name;a[n]=gl.getAttribLocation(p,n)}return {p,u,a}};
-  const P={frame:prog(VS_Q,FS_FRAME),copy:prog(VS_Q,FS_COPY),paint:prog(VS_M,FS_PAINT),warp:prog(VS_M,FS_WARP),beauty:prog(VS_M,FS_BEAUTY),spr:prog(VS_S,FS_S)};
+  const P={m3:prog(VS_3,FS_3),frame:prog(VS_Q,FS_FRAME),copy:prog(VS_Q,FS_COPY),paint:prog(VS_M,FS_PAINT),warp:prog(VS_M,FS_WARP),beauty:prog(VS_M,FS_BEAUTY),spr:prog(VS_S,FS_S)};
   const buf=d=>{const b=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,b);gl.bufferData(gl.ARRAY_BUFFER,d,gl.STATIC_DRAW);return b};
   const quad=buf(new Float32Array([-1,-1,1,-1,-1,1,1,1]));
   const ib=gl.createBuffer();gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,ib);gl.bufferData(gl.ELEMENT_ARRAY_BUFFER,TRI,gl.STATIC_DRAW);
@@ -424,10 +439,74 @@ function Renderer(canvas){
         unit(0,texOf(s.src),p.u.t);gl.uniform1f(p.u.useTint,s.tint?1:0);if(s.tint)gl.uniform3f(p.u.tint,s.tint[0],s.tint[1],s.tint[2]);gl.drawArrays(gl.TRIANGLES,0,s.v.length/7)}
       gl.disableVertexAttribArray(p.a.p);gl.disableVertexAttribArray(p.a.ta);gl.disable(gl.BLEND);
     },
+    /* 5) 3D models. list: [{mdl, mv(Float32Array 16), alpha}], occ: head shape that only fills depth */
+    models(list,occ,mir,asp){
+      if(!list.length)return;const p=P.m3;gl.useProgram(p.p);
+      gl.enable(gl.DEPTH_TEST);gl.depthFunc(gl.LEQUAL);gl.clear(gl.DEPTH_BUFFER_BIT);gl.uniform3f(p.u.pr,FOV/asp,FOV,mir);
+      const draw=(g,part,mv,al,depthOnly)=>{
+        gl.uniformMatrix4fv(p.u.mv,false,mv);
+        gl.bindBuffer(gl.ARRAY_BUFFER,part.vb);gl.enableVertexAttribArray(p.a.p);gl.vertexAttribPointer(p.a.p,3,gl.FLOAT,false,0,0);
+        if(p.a.n>=0){gl.bindBuffer(gl.ARRAY_BUFFER,part.nb);gl.enableVertexAttribArray(p.a.n);gl.vertexAttribPointer(p.a.n,3,gl.FLOAT,false,0,0)}
+        if(p.a.uv>=0){gl.bindBuffer(gl.ARRAY_BUFFER,part.ub);gl.enableVertexAttribArray(p.a.uv);gl.vertexAttribPointer(p.a.uv,2,gl.FLOAT,false,0,0)}
+        const tx=!depthOnly&&part.img&&part.img.complete!==false?texOf(part.img):null;
+        unit(0,tx||texOf(blank()),p.u.t);gl.uniform1f(p.u.useT,tx?1:0);gl.uniform4f(p.u.col,...part.color);gl.uniform1f(p.u.lit,part.lit?1:0);gl.uniform1f(p.u.al,al);gl.uniform1f(p.u.fv,g.flipV?1:0);
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER,part.ib);gl.drawElements(gl.TRIANGLES,part.n,part.i32?gl.UNSIGNED_INT:gl.UNSIGNED_SHORT,0);
+      };
+      if(occ){gl.colorMask(false,false,false,false);for(const part of occ.mdl.gl(gl).parts)draw(occ.mdl,part,occ.mv,1,true);gl.colorMask(true,true,true,true)}
+      gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);
+      for(const it of list){const g=it.mdl.gl(gl);if(!g)continue;for(const part of g.parts)draw(it.mdl,part,it.mv,it.alpha==null?1:it.alpha)}
+      [p.a.p,p.a.n,p.a.uv].forEach(a=>{if(a>=0)gl.disableVertexAttribArray(a)});gl.disable(gl.DEPTH_TEST);gl.disable(gl.BLEND);
+    },
     destroy(){try{const e=gl.getExtension('WEBGL_lose_context');e&&e.loseContext()}catch(e){}}
   };
   }catch(e){console.warn('[fx] WebGL',e);return null}
 }
+
+/* =============================================================== 3D models from open-source face filters
+   (Jeeliz FaceFilter, Apache 2.0; MindAR examples, CC-BY 4.0 — authors in /vendor/masks/CREDITS.txt),
+   converted to a small binary format: header JSON + vertex arrays. */
+let BLANK=null;const blank=()=>BLANK||(BLANK=(()=>{const c=cnv(2);const x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,2,2);return c})());
+const MODELS={};
+class Model{
+  constructor(name,flipV){this.name=name;this.flipV=!!flipV;this.ready=false;this.parts=[];this.per=new WeakMap();
+    if(name)this.loading=fetch('/vendor/masks/'+name+'.mdl').then(r=>{if(!r.ok)throw new Error(r.status);return r.arrayBuffer()}).then(b=>this.parse(b)).catch(e=>{console.warn('[fx] model',name,e)})}
+  parse(buf){
+    const hl=new DataView(buf).getUint32(0,true),h=JSON.parse(new TextDecoder().decode(new Uint8Array(buf,4,hl))),o=4+hl;
+    this.bbox=h.bbox;
+    this.parts=h.parts.map(q=>{const P={v:q.v,n:q.i,i32:q.i32,color:q.color,lit:q.lit!==false,
+      pos:new Float32Array(buf,o+q.pos,q.v*3),nrm:new Float32Array(buf,o+q.nrm,q.v*3),uv:new Float32Array(buf,o+q.uv,q.v*2),idx:q.i32?new Uint32Array(buf,o+q.idx,q.i):new Uint16Array(buf,o+q.idx,q.i)};
+      if(q.tex){P.img=new Image();P.img.src='/vendor/masks/'+q.tex}return P});
+    this.ready=true;
+  }
+  static of(name,flipV){return MODELS[name]||(MODELS[name]=new Model(name,flipV))}
+  /* buffers on the graphics chip, made once per drawing surface */
+  gl(gl){
+    if(!this.ready)return null;let g=this.per.get(gl);if(g)return g;
+    const buf=(t,d)=>{const b=gl.createBuffer();gl.bindBuffer(t,b);gl.bufferData(t,d,gl.STATIC_DRAW);return b};
+    g={parts:this.parts.map(q=>({vb:buf(gl.ARRAY_BUFFER,q.pos),nb:buf(gl.ARRAY_BUFFER,q.nrm),ub:buf(gl.ARRAY_BUFFER,q.uv),ib:buf(gl.ELEMENT_ARRAY_BUFFER,q.idx),n:q.n,i32:q.i32,color:q.color,lit:q.lit,img:q.img}))};
+    this.per.set(gl,g);return g;
+  }
+}
+/* the head as a shape that hides things behind it: the face surface plus a rounded back of the head */
+function headOccluder(){
+  if(MODELS._head)return MODELS._head;
+  const pos=[],idx=[];
+  for(let i=0;i<NV;i++)pos.push(G.CANONICAL[i*3],G.CANONICAL[i*3+1],G.CANONICAL[i*3+2]-.3);
+  for(const t of G.FACES)idx.push(t);
+  const base=pos.length/3,SEG=18,RING=12,c=[0,1.5,-3.2],rad=[7.4,10.5,8.6];
+  for(let a=0;a<=RING;a++)for(let b=0;b<=SEG;b++){const th=a/RING*Math.PI,ph=b/SEG*Math.PI*2;pos.push(c[0]+rad[0]*Math.sin(th)*Math.cos(ph),c[1]+rad[1]*Math.cos(th),c[2]+rad[2]*Math.sin(th)*Math.sin(ph))}
+  for(let a=0;a<RING;a++)for(let b=0;b<SEG;b++){const i=base+a*(SEG+1)+b;idx.push(i,i+SEG+1,i+1,i+1,i+SEG+1,i+SEG+2)}
+  const m=new Model(null);m.parts=[{v:pos.length/3,n:idx.length,i32:false,color:[0,0,0,1],lit:false,pos:new Float32Array(pos),nrm:new Float32Array(pos.length),uv:new Float32Array(pos.length/3*2),idx:new Uint16Array(idx)}];m.ready=true;
+  return MODELS._head=m;
+}
+/* column-major 4x4: M = T·Rz·Ry·Rx·S */
+function local(t,r,sc){
+  const d=Math.PI/180,[ax,ay,az]=(r||[0,0,0]).map(v=>v*d),s=Array.isArray(sc)?sc:[sc,sc,sc];
+  const cx=Math.cos(ax),sx=Math.sin(ax),cy=Math.cos(ay),sy=Math.sin(ay),cz=Math.cos(az),sz=Math.sin(az);
+  const R=[cz*cy, sz*cy, -sy, cz*sy*sx-sz*cx, sz*sy*sx+cz*cx, cy*sx, cz*sy*cx+sz*sx, sz*sy*cx-cz*sx, cy*cx];
+  return new Float32Array([R[0]*s[0],R[1]*s[0],R[2]*s[0],0, R[3]*s[1],R[4]*s[1],R[5]*s[1],0, R[6]*s[2],R[7]*s[2],R[8]*s[2],0, t[0],t[1],t[2],1]);
+}
+function mul(a,b){const o=new Float32Array(16);for(let c=0;c<4;c++)for(let r=0;r<4;r++){let v=0;for(let k=0;k<4;k++)v+=a[k*4+r]*b[c*4+k];o[c*4+r]=v}return o}
 
 /* =============================================================== warps: points moved on screen, the picture follows */
 function bulge(P,n,cx,cy,r,k){const r2=r*r;for(let i=0;i<n;i++){const dx=P[i*2]-cx,dy=P[i*2+1]-cy,d2=dx*dx+dy*dy;if(d2<r2){const f=1+k*Math.pow(1-d2/r2,2);P[i*2]=cx+dx*f;P[i*2+1]=cy+dy*f}}}
@@ -458,6 +537,7 @@ const PK={
   tears:{t:SP.tear,life:1,size:.05,speed:.5,spread:.05,fall:true},
   confetti:{t:SP.band,life:2.2,size:.035,speed:.35,spread:2,fall:true,spin:true,colors:[[1,.31,.55],[1,.85,.29],[.17,.83,.49],[.18,.55,1]]},
   snow:{t:SP.dot,life:4,size:.035,speed:.25,fall:true,screen:true},
+  rain:{t:()=>imgTex('drop.png'),life:1.1,size:.05,speed:1.5,spread:.1,fall:true},
   angry:{t:()=>E('💢')(),life:.8,size:.16,speed:.15,spread:2.4,up:true,grow:.4},
   money:{t:()=>E('💸')(),life:3,size:.1,speed:.35,fall:true,screen:true,spin:true}
 };
@@ -528,7 +608,7 @@ class FX{
   get ok(){return !!this.r}
   needFace(){return this.mask.id!=='none'||this.beauty}
   set(maskId,filterId,bgId,beauty){
-    if(maskId!=null){const m=MASKS.find(x=>x.id===maskId)||MASKS[0];if(m!==this.mask){this.mask=m;this.parts.list=[]}}
+    if(maskId!=null){const m=MASKS.find(x=>x.id===maskId)||MASKS[0];if(m!==this.mask){this.mask=m;this.parts.list=[];this.maskT=performance.now();if(m.m3)m.m3.forEach(d=>Model.of(d.mdl,d.flipV))}}
     if(filterId!=null)this.filter=FILTERS.find(f=>f.id===filterId)||FILTERS[0];
     if(bgId!=null&&bgId!=='photo'){const b=BGS.find(x=>x.id===bgId)||BGS[0];if(b!==this.bg){this.bg=b;this.bgDrawn=false;this.bgPhoto=null}}
     if(beauty!=null)this.beauty=!!beauty;
@@ -581,6 +661,11 @@ class FX{
       if(m.warp){const Q=P.slice();warpPoints(m.warp,Q);for(let i=0;i<NV*2;i+=2){Q[i]/=W;Q[i+1]/=H}r.mesh('warp',Q,tc,mir)}
       if(this.beauty||m.beauty)r.mesh('beauty',tc,tc,mir,null,beautyMask());
       const pc=paintOf(m);if(pc)r.mesh('paint',tc,tc,mir,pc);
+      if(m.m3&&f.mat){const list=[],now=performance.now(),age=(now-(this.maskT||now))/1000;
+        for(const d of m.m3){if(d.show&&!(f.bs&&d.show(f.bs)))continue;const md=Model.of(d.mdl,d.flipV);if(!md.ready)continue;
+          let t=d.t;if(d.drop&&age<1){const k=1-Math.pow(1-age,3);t=[t[0],t[1]+(1-k)*22,t[2]]} /* falls into place, like the "deal with it" glasses */
+          list.push({mdl:md,mv:mul(f.mat,local(t,d.r,d.s)),alpha:d.alpha})}
+        r.models(list,m.noOcc?null:{mdl:headOccluder(),mv:f.mat},mir,W/H)}
       const spr=[];
       if(m.props)for(const p of m.props){if(p.show&&!(f.bs&&p.show(f.bs)))continue;const v=p.lm!=null?this.flat(p,P,fw,W,H,mir,f.bs):f.mat?this.prop3d(p,f.mat,W,H,mir):null;if(v)spr.push({src:p.t(),v,z:v.z||0})}
       spr.sort((a,b)=>b.z-a.z);
@@ -613,6 +698,7 @@ class FX{
     const dx=P[152*2]-P[168*2],dy=P[152*2+1]-P[168*2+1],dl=Math.hypot(dx,dy)||1,dn=[dx/dl,dy/dl];
     if(fx.from==='mouth'){const m=avg([13,14]);this.parts.emit(fx.kind,m[0],m[1],dn[0],dn[1],fw,W,H,dt,fx.rate)}
     else if(fx.from==='eyes'){for(const e of [R.eyeR,R.eyeL]){const c=avg(e);this.parts.emit(fx.kind,c[0],c[1]+fw*.04,dn[0],dn[1],fw,W,H,dt,(fx.rate||10)/2)}}
+    else if(fx.from==='cloud'){const t=[P[10*2]-dn[0]*fw*.85,P[10*2+1]-dn[1]*fw*.85];for(let k=0;k<2;k++)this.parts.emit(fx.kind,t[0]+(Math.random()-.5)*fw*.9,t[1],dn[0],dn[1],fw,W,H,dt,fx.rate/2)}
     else if(fx.from==='cheeks'){for(const i of [205,425])this.parts.emit(fx.kind,P[i*2],P[i*2+1],-dn[0],-dn[1],fw,W,H,dt,fx.rate||10)}
     else if(fx.from==='top'||fx.from==='head'){this.parts.emit(fx.kind,P[10*2]-dn[0]*fw*.3,P[10*2+1]-dn[1]*fw*.3,-dn[0],-dn[1],fw,W,H,dt,fx.rate)}
     else this.parts.emit(fx.kind,0,0,0,1,fw,W,H,dt,fx.rate);

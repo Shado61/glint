@@ -25,9 +25,9 @@ const MAX_TEXT=4000,MAX_IMG=1.2e6,PAGE=60,KEEP_MSGS=3000;
 /* ---------- storage ----------
    Everything lives in memory and is written back in the background:
    one row per user (u:), per chat (c:) and per chat history (m:), plus sessions. */
-let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{}};
+let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{},media:{}};
 /* one letter per table in the key-value store */
-const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories'};
+const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories',x:'media'};
 let pool=null;const DIRTY=new Set();
 const DATA_FILE=path.join(__dirname,'data','db.json');
 async function load(){
@@ -35,6 +35,8 @@ async function load(){
     const {Pool}=require('pg');
     pool=new Pool({connectionString:process.env.DATABASE_URL,ssl:/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL)?false:{rejectUnauthorized:false},max:4});
     await pool.query('CREATE TABLE IF NOT EXISTS glint_kv(k text PRIMARY KEY, v text NOT NULL)');
+    /* videos and voice messages: kept as binary in their own table and read in pieces, never all in memory */
+    await pool.query('CREATE TABLE IF NOT EXISTS glint_media(k text PRIMARY KEY, b bytea NOT NULL)');
     const r=await pool.query('SELECT k,v FROM glint_kv');
     for(const {k,v} of r.rows){
       const o=JSON.parse(v),id=k.slice(2);
@@ -78,6 +80,7 @@ function chatFor(c,uid){
   if(c.server)o.server=c.server;
   const st=streakOut(c);if(st)o.streak=st;
   /* chats that already had a streak before the pet existed get one right away */
+  if(c.petOn)o.petOn=true;
   if(!c.pet&&c.type==='dm'&&c.st&&c.st.n>=1){c.pet={name:'Серийчик',best:c.st.n};mark('c:'+c.id)}
   if(c.pet)o.pet=c.pet;
   return o;
@@ -88,12 +91,14 @@ const member=(c,uid)=>c&&c.members.includes(uid);
 /* ---------- fire streaks: both people write in a private chat every day; from 3 days in a row a fire appears ---------- */
 const TZ=+(process.env.STREAK_TZ||5); /* days are counted by this time zone (Almaty by default) */
 const dayKey=ts=>Math.floor((ts+TZ*3600e3)/864e5);
+/* in a private chat both people have to write that day; in a group or server channel with the pet added — at least two people */
 function bumpStreak(c,uid,ts){
-  if(c.type!=='dm')return 0;
+  if(c.type!=='dm'&&!c.petOn)return 0;
   const d=dayKey(ts),s=c.st=c.st||{n:0,last:0,d:0,u:[]};
   if(s.d!==d){s.d=d;s.u=[]}
   if(!s.u.includes(uid))s.u.push(uid);
-  if(s.last!==d&&c.members.every(m=>s.u.includes(m))){s.n=s.last===d-1?s.n+1:1;s.last=d;c.pet=c.pet||{name:'Серийчик'};c.pet.best=Math.max(c.pet.best||0,s.n);return s.n}
+  const done=c.type==='dm'?c.members.every(m=>s.u.includes(m)):s.u.length>=2;
+  if(s.last!==d&&done){s.n=s.last===d-1?s.n+1:1;s.last=d;c.pet=c.pet||{name:'Серийчик'};c.pet.best=Math.max(c.pet.best||0,s.n);return s.n}
   return 0;
 }
 function streakOut(c){
@@ -168,6 +173,59 @@ function migrate(){
     if(ch){mark('m:'+cid);n++}
   }
   if(n)console.log('  Картинки перенесены в отдельное хранилище:',n);
+}
+
+/* ---------- videos, video circles and voice messages ---------- */
+const MEDIA_DIR=path.join(__dirname,'data','media');
+const MEDIA_MAX={voice:6e6,round:15e6,video:45e6},MEDIA_TYPES=/^(video\/(mp4|webm|quicktime|x-matroska|3gpp)|audio\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav))(;.*)?$/;
+const USER_QUOTA=800e6;
+async function mediaSave(id,buf){
+  if(pool)await pool.query('INSERT INTO glint_media(k,b) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET b=EXCLUDED.b',[id,buf]);
+  else{fs.mkdirSync(MEDIA_DIR,{recursive:true});fs.writeFileSync(path.join(MEDIA_DIR,id),buf)}
+}
+async function mediaRange(id,start,len){
+  if(pool){const r=await pool.query('SELECT substring(b from $2 for $3) AS b FROM glint_media WHERE k=$1',[id,start+1,len]);return r.rows[0]?r.rows[0].b:null}
+  return await new Promise((ok,bad)=>{const fd=fs.openSync(path.join(MEDIA_DIR,id),'r'),b=Buffer.alloc(len);fs.read(fd,b,0,len,start,(e,n)=>{fs.closeSync(fd);e?bad(e):ok(b.subarray(0,n))})});
+}
+function rawBody(req,max){return new Promise((ok,bad)=>{const ch=[];let n=0;req.on('data',c=>{n+=c.length;if(n>max){bad(E(413,'Файл слишком большой'));req.destroy();return}ch.push(c)});req.on('end',()=>ok(Buffer.concat(ch)));req.on('error',bad)})}
+async function upload(req,res,u,url){
+  if(!u)return send(res,401,{error:'Войди в аккаунт'});
+  if(!sameOrigin(req))return send(res,403,{error:'запрос с чужого сайта'});
+  const kind=String(url.searchParams.get('kind')||'');if(!MEDIA_MAX[kind])return send(res,400,{error:'Неизвестный тип'});
+  const type=String(req.headers['content-type']||'');if(!MEDIA_TYPES.test(type))return send(res,400,{error:'Этот формат не поддерживается'});
+  if(!limit('up:'+u.id,40,3600e3))return send(res,429,{error:'Слишком много файлов за час'});
+  if(+req.headers['content-length']>MEDIA_MAX[kind])return send(res,413,{error:`Файл слишком большой (до ${Math.round(MEDIA_MAX[kind]/1e6)} МБ)`});
+  if((u.mediaBytes||0)>USER_QUOTA)return send(res,413,{error:'Место для твоих видео закончилось'});
+  let buf;try{buf=await rawBody(req,MEDIA_MAX[kind])}catch(e){return send(res,e.code||400,{error:e.message})}
+  if(buf.length<200)return send(res,400,{error:'Пустой файл'});
+  const id=crypto.randomBytes(12).toString('hex');
+  await mediaSave(id,buf);
+  DB.media[id]={t:type.split(';')[0],size:buf.length,owner:u.id,kind,ts:now()};mark('x:'+id);
+  u.mediaBytes=(u.mediaBytes||0)+buf.length;mark('u:'+u.id);
+  send(res,200,{url:'/media/'+id,id});
+}
+/* sends a file in pieces: phones ask for parts of a video (Range), that is how they seek and start fast */
+async function serveMedia(req,res,id){
+  const m=DB.media[id];if(!m||!userOf(req))return send(res,404,{error:'нет'});
+  const total=m.size;let start=0,end=total-1,code=200;
+  const r=/^bytes=(\d*)-(\d*)$/.exec(req.headers.range||'');
+  if(r){if(r[1]==='')start=Math.max(0,total-(+r[2]));else{start=+r[1];if(r[2])end=Math.min(total-1,+r[2])}
+    if(start>end||start>=total){res.writeHead(416,{'Content-Range':`bytes */${total}`});return res.end()}code=206}
+  const h=Object.assign({'Content-Type':m.t,'Accept-Ranges':'bytes','Cache-Control':'private, max-age=31536000, immutable','Content-Length':end-start+1},SEC);
+  if(code===206)h['Content-Range']=`bytes ${start}-${end}/${total}`;
+  if(req.method==='HEAD'){res.writeHead(code,h);return res.end()}
+  res.writeHead(code,h);
+  const CH=1<<20;try{for(let p=start;p<=end;p+=CH){const b=await mediaRange(id,p,Math.min(CH,end-p+1));if(!b)break;if(!res.write(b))await new Promise(k=>res.once('drain',k));if(res.destroyed)break}}catch(e){console.error('[media]',e.message)}
+  res.end();
+}
+/* a message with media: only files you uploaded yourself */
+function cleanMedia(v,u){
+  if(!v||typeof v!=='object')return null;
+  const id=String(v.url||'').replace(/^\/media\//,''),m=DB.media[id];if(!m||m.owner!==u.id)throw E(400,'Файл не найден');
+  const o={k:m.kind,url:'/media/'+id,dur:Math.max(0,Math.min(3600,+v.dur||0))};
+  if(m.kind==='voice'&&Array.isArray(v.wave))o.wave=v.wave.slice(0,48).map(x=>Math.max(0,Math.min(31,x|0)));
+  if(m.kind==='video'){o.w=+v.w||0;o.h=+v.h||0;if(v.poster){const pi=cleanImg(v.poster);if(pi&&pi.length<300e3)o.poster=putImg(pi)}}
+  return o;
 }
 
 /* ---------- REST API ---------- */
@@ -566,8 +624,15 @@ function closeVoice(cid){const room=VOICE.get(cid);if(!room)return;room.forEach(
    Some things open only after a long streak (the best one this pair ever had). ---------- */
 const PET_ITEMS={color:{ember:0,rose:0,sky:0,mint:0,grape:0,night:14,gold:30},hat:{none:0,cap:0,beanie:0,bow:0,flower:0,headphones:7,witch:7,tophat:14,crown:30},
   eyes:{none:0,round:0,sun:0,hearts:0,star:7},neck:{none:0,scarf:0,bowtie:0,beads:0,bandana:7,medal:30}};
+/* add the pet to a group or a server channel */
+API['POST /api/pet/enable']=(req,res,b,u)=>{
+  need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||(c.type!=='group'&&c.type!=='channel'))throw E(404,'Чат не найден');
+  if(!c.petOn){c.petOn=true;c.pet=c.pet||{name:'Серийчик',best:0};mark('c:'+c.id);
+    addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`🥚 ${u.name} поселил(а) здесь Серийчика. Пишите сюда каждый день — хотя бы двое, — и он вылупится и будет расти`});pushChat(c)}
+  return {chat:chatFor(c,u.id)};
+};
 API['POST /api/pet']=(req,res,b,u)=>{
-  need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||c.type!=='dm')throw E(404,'Чат не найден');
+  need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||(c.type!=='dm'&&!c.petOn))throw E(404,'Чат не найден');
   if(!c.pet)throw E(400,'Серийчик появится, когда вы напишете друг другу в один день');
   if(!limit('pet:'+u.id,60,60e3))throw E(429,'Слишком часто');
   const best=c.pet.best||0;
@@ -580,14 +645,15 @@ API['POST /api/pet']=(req,res,b,u)=>{
 };
 /* ---------- messages ---------- */
 const FIRE_DAYS=[3,7,10,30,50,100,365];
+const petLine=(c,n)=>{const nm=(c.pet&&c.pet.name)||'Серийчик';return n===3?`🐣 ${nm} вылупился! Вы общаетесь 3 дня подряд`:n===7?`✨ ${nm} подрос — 7 дней подряд!`:n===30?`👑 ${nm} стал Легендой — 30 дней подряд!`:`🔥 ${nm}: ${n} дней подряд!`};
 function sendMsgTo(c,u,msg){
   c.read=c.read||{};c.read[u.id]=msg.ts;
   addMsg(c,msg);
   const n=bumpStreak(c,u.id,msg.ts);
   if(n){
-    if(FIRE_DAYS.includes(n))addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:n===3?'🔥 Огонёк! Вы общаетесь 3 дня подряд':`🔥 ${n} дней подряд!`});
+    if(FIRE_DAYS.includes(n))addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:petLine(c,n)});
     mark('c:'+c.id);pushChat(c);
-  }else if(c.type==='dm'&&c.st&&c.st.u.length===1&&c.st.d===dayKey(msg.ts))pushChat(c);
+  }else if((c.type==='dm'||c.petOn)&&c.st&&c.st.u.length<=2&&c.st.d===dayKey(msg.ts)&&c.st.u[c.st.u.length-1]===u.id)pushChat(c);
   return msg;
 }
 function addMsg(c,m){
@@ -649,10 +715,12 @@ function handle(ws,u,m){
         if(pk&&(u.packs||[]).includes(pk.id))stk=pk.stickers.find(x=>x.id===String(m.sticker.id||''));
         if(!stk)throw E(404,'Стикер не найден');
       }
-      if(!text&&!img&&!stk)return;
+      const media=cleanMedia(m.media,u);
+      if(!text&&!img&&!stk&&!media)return;
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:stk?'':text};
       if(stk){msg.sticker=stk.img;msg.pack=pk.id}else if(img)msg.img=putImg(img);
-      if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':r.sticker?'Стикер':'')).slice(0,120)}}
+      if(media&&!stk){msg.media=media;if(media.k!=='video')msg.text=''}
+      if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':r.sticker?'Стикер':r.media?{voice:'🎤 Голосовое',round:'⭕ Видеосообщение',video:'🎬 Видео'}[r.media.k]:'')).slice(0,120)}}
       sendMsgTo(c,u,msg);ws.send(JSON.stringify({t:'ack',cid:m.cid,id:msg.id}));
       return;
     }
@@ -662,7 +730,7 @@ function handle(ws,u,m){
       const to=DB.chats[String(m.to||'')];if(!member(to,u.id))throw E(404,'Чат не найден');
       const src=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));if(!src||src.del||src.sys||src.call)throw E(404,'Сообщение не найдено');
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:src.text||''};
-      if(src.img)msg.img=src.img;if(src.sticker){msg.sticker=src.sticker;if(src.pack)msg.pack=src.pack}
+      if(src.img)msg.img=src.img;if(src.sticker){msg.sticker=src.sticker;if(src.pack)msg.pack=src.pack}if(src.media)msg.media=src.media;
       if(src.from!==u.id||src.fwd)msg.fwd=src.fwd||{from:src.from,name:(DB.users[src.from]||{}).name||''};
       sendMsgTo(to,u,msg);ws.send(JSON.stringify({t:'fwd-ok',to:to.id}));return;
     }
@@ -678,7 +746,7 @@ function handle(ws,u,m){
       const msg=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));
       if(!msg||msg.from!==u.id||msg.sys||msg.call)throw E(403,'Можно менять только свои сообщения');
       if(m.t==='edit'){const t=String(m.text||'').slice(0,MAX_TEXT).trim();if(!t)return;msg.text=t;msg.edited=now()}
-      else{msg.del=true;delete msg.text;delete msg.img;delete msg.reply;delete msg.sticker}
+      else{msg.del=true;delete msg.text;delete msg.img;delete msg.reply;delete msg.sticker;delete msg.media}
       mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(msg)});return;
     }
     case 'react':{
@@ -690,7 +758,7 @@ function handle(ws,u,m){
       if(!list.length)delete msg.react[e];
       mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(msg)});return;
     }
-    case 'pat':if(member(c,u.id)&&c.type==='dm'&&c.pet&&limit('pat:'+u.id,20,10e3))toChat(c,{t:'pat',chat:c.id,user:u.id},u.id);return;
+    case 'pat':if(member(c,u.id)&&c.pet&&limit('pat:'+u.id,20,10e3))toChat(c,{t:'pat',chat:c.id,user:u.id},u.id);return;
     case 'typing':if(member(c,u.id)&&limit('typ:'+u.id,8,3e3))toChat(c,{t:'typing',chat:c.id,user:u.id},u.id);return;
     case 'read':{
       if(!member(c,u.id))return;const ts=Math.min(+m.ts||0,now());
@@ -749,7 +817,7 @@ function handle(ws,u,m){
 }
 
 /* ---------- HTTP ---------- */
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.mdl':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
   'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
@@ -760,6 +828,7 @@ const sameOrigin=req=>{const o=req.headers.origin;if(!o)return true;try{return n
 const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://x'),p=decodeURIComponent(url.pathname);
+    if(p==='/api/upload'&&req.method==='POST')return upload(req,res,userOf(req),url);
     if(p.startsWith('/api/')){
       const fn=API[req.method+' '+p];if(!fn)return send(res,404,{error:'нет такого запроса'});
       if(req.method!=='GET'&&!sameOrigin(req))return send(res,403,{error:'запрос с чужого сайта'});
@@ -767,6 +836,7 @@ const server=http.createServer(async(req,res)=>{
       return send(res,200,await fn(req,res,b,userOf(req),url.searchParams));
     }
     if(p==='/healthz')return send(res,200,{ok:true});
+    if(p.startsWith('/media/')&&/^[0-9a-f]{24}$/.test(p.slice(7)))return serveMedia(req,res,p.slice(7));
     if(p.startsWith('/img/')){ /* pictures: only for signed-in people; a link never changes, so the phone keeps it */
       const h=p.slice(5);if(!/^[0-9a-f]{24}$/.test(h)||!userOf(req))return send(res,404,{error:'нет'});
       const im=imgBuf(h);if(!im)return send(res,404,{error:'картинка удалена'});
@@ -786,7 +856,7 @@ const server=http.createServer(async(req,res)=>{
       const body=()=>{const b=fs.readFileSync(f);return isIndex?Buffer.from(b.toString('utf8').replace(/\?v=[\w-]+/g,'?v='+APP_VERSION)):b};
       if(isIndex&&!/\bgzip\b/.test(req.headers['accept-encoding']||'')){res.writeHead(200,h);return res.end(body())}
       /* the big mask engine files are compressed once in the background; until then they go out as they are */
-      if(/\.(wasm|task|tflite)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
+      if(/\.(wasm|task|tflite|mdl)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
         const key=f+':'+(st&&st.mtimeMs),gz=GZ.get(key);
         if(gz&&gz!=='busy'){h['Content-Encoding']='gzip';h['Content-Length']=gz.length;res.writeHead(200,h);return res.end(gz)}
         if(!gz){GZ.set(key,'busy');zlib.gzip(fs.readFileSync(f),{level:6},(e,b)=>{if(e)GZ.delete(key);else GZ.set(key,b)})}

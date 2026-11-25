@@ -1,0 +1,16 @@
+3D masks used in Manasenger
+
+From Jeeliz FaceFilter demos — https://github.com/jeeliz/jeelizFaceFilter — Apache License 2.0, (c) Jeeliz:
+  dog_ears.mdl, dog_nose.mdl, dog_ears.png, dog_nose.jpg  (dog_face demo)
+  tiger.mdl, tiger.png                                       (tiger demo)
+  cloud.mdl, cloud.jpg, drop.png                             (cloud demo)
+
+From MindAR face-tracking examples — https://github.com/hiukim/mind-ar-js — models licensed CC-BY-4.0:
+  glasses_thug.mdl — "Thug Life | Cool glasses | Stylise goggles" by MR EXPERT
+      https://sketchfab.com/3d-models/thug-life-cool-glasses-stylise-goggles-75945f055a8c47098fa8aa4b6a698b07  (CC-BY-4.0)
+  clown_hat.mdl — "Clown Hat" by PatelDev
+      https://sketchfab.com/3d-models/clown-hat-0f5ef2e6205c4b438c593a979a3ccdae  (CC-BY-4.0)
+  earring.mdl, earring.png — "Earring Jade" by Softmind Game Factory
+      https://sketchfab.com/3d-models/earring-jade-c91e552728fb4b149d52193fd3e03ac5  (CC-BY-4.0)
+
+Models were converted to a compact binary format and textures resized; shapes are unchanged.
