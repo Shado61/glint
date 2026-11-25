@@ -177,6 +177,22 @@ const SP={
   bubble:sprite('bubble',128,(x,s)=>{const g=x.createRadialGradient(s*.35,s*.35,s*.05,s*.5,s*.5,s*.48);g.addColorStop(0,'rgba(255,255,255,.7)');g.addColorStop(.7,'rgba(180,220,255,.12)');g.addColorStop(1,'rgba(200,170,255,.6)');x.fillStyle=g;x.beginPath();x.arc(s*.5,s*.5,s*.46,0,Math.PI*2);x.fill()}),
   dot:sprite('dot',64,(x,s)=>{const g=x.createRadialGradient(s/2,s/2,0,s/2,s/2,s/2);g.addColorStop(0,'rgba(255,255,255,1)');g.addColorStop(1,'rgba(255,255,255,0)');x.fillStyle=g;x.fillRect(0,0,s,s)}),
   band:sprite('band',64,(x,s)=>{x.fillStyle='#fff';x.beginPath();x.arc(s/2,s/2,s*.46,0,Math.PI*2);x.fill()}),
+  /* cartoon parts that follow your face: blink, open mouth */
+  toonEye:sprite('toonEye',256,(x,s)=>{x.fillStyle='#fff';x.strokeStyle='#1d1a24';x.lineWidth=s*.035;x.beginPath();x.ellipse(s*.5,s*.52,s*.44,s*.42,0,0,Math.PI*2);x.fill();x.stroke();
+    x.fillStyle='#2a2140';x.beginPath();x.arc(s*.52,s*.58,s*.22,0,Math.PI*2);x.fill();x.fillStyle='#fff';x.beginPath();x.arc(s*.6,s*.5,s*.07,0,Math.PI*2);x.fill();x.beginPath();x.arc(s*.45,s*.66,s*.035,0,Math.PI*2);x.fill();
+    x.lineCap='round';x.lineWidth=s*.04;for(const [a,b,c,d] of [[.22,.2,.12,.06],[.4,.1,.36,-.02],[.6,.1,.66,-.02]]){x.beginPath();x.moveTo(a*s,b*s);x.lineTo(c*s,d*s+s*.04);x.stroke()}}),
+  toonMouthOpen:sprite('toonMouthOpen',256,(x,s)=>{x.fillStyle='#5a1020';x.strokeStyle='#1d1a24';x.lineWidth=s*.035;x.beginPath();x.moveTo(s*.06,s*.3);x.quadraticCurveTo(s*.5,s*.36,s*.94,s*.3);x.quadraticCurveTo(s*.9,s*.95,s*.5,s*.95);x.quadraticCurveTo(s*.1,s*.95,s*.06,s*.3);x.closePath();x.fill();
+    x.save();x.clip();x.fillStyle='#fff';x.fillRect(s*.1,s*.28,s*.8,s*.14);x.fillStyle='#ff6f8a';x.beginPath();x.ellipse(s*.5,s*.92,s*.28,s*.2,0,0,Math.PI*2);x.fill();x.restore();x.stroke()}),
+  toonMouth:sprite('toonMouth',256,(x,s)=>{x.strokeStyle='#1d1a24';x.lineWidth=s*.07;x.lineCap='round';x.beginPath();x.moveTo(s*.1,s*.4);x.quadraticCurveTo(s*.5,s*.8,s*.9,s*.4);x.stroke()}),
+  animeEye:sprite('animeEye',256,(x,s)=>{x.fillStyle='#fff';x.beginPath();x.ellipse(s*.5,s*.55,s*.34,s*.42,0,0,Math.PI*2);x.fill();
+    const g=x.createLinearGradient(0,s*.2,0,s*.95);g.addColorStop(0,'#2a1a5e');g.addColorStop(.6,'#6a4cff');g.addColorStop(1,'#c7b6ff');x.fillStyle=g;x.beginPath();x.ellipse(s*.5,s*.58,s*.28,s*.37,0,0,Math.PI*2);x.fill();
+    x.fillStyle='#fff';x.beginPath();x.ellipse(s*.6,s*.4,s*.1,s*.13,-.3,0,Math.PI*2);x.fill();x.beginPath();x.arc(s*.38,s*.72,s*.05,0,Math.PI*2);x.fill();
+    x.strokeStyle='#120a20';x.lineWidth=s*.06;x.lineCap='round';x.beginPath();x.moveTo(s*.1,s*.3);x.quadraticCurveTo(s*.5,s*.02,s*.92,s*.26);x.stroke()}),
+  angryBrow:sprite('angryBrow',256,(x,s)=>{x.fillStyle='#16121a';x.save();x.translate(s/2,s/2);x.rotate(.35);x.beginPath();x.roundRect?x.roundRect(-s*.45,-s*.1,s*.9,s*.2,s*.1):x.rect(-s*.45,-s*.1,s*.9,s*.2);x.fill();x.restore()}),
+  fangs:sprite('fangs',256,(x,s)=>{x.fillStyle='#fff';x.strokeStyle='#ccc';x.lineWidth=3;for(const c of [.3,.7]){x.beginPath();x.moveTo(s*(c-.1),s*.1);x.lineTo(s*(c+.1),s*.1);x.lineTo(s*c,s*.75);x.closePath();x.fill();x.stroke()}x.fillStyle='rgba(200,0,30,.8)';x.beginPath();x.arc(s*.7,s*.85,s*.04,0,Math.PI*2);x.fill()}),
+  buckTeeth:sprite('buckTeeth',256,(x,s)=>{x.fillStyle='#fffdf5';x.strokeStyle='#bba';x.lineWidth=s*.02;for(const c of [.31,.69]){x.beginPath();x.roundRect?x.roundRect(s*(c-.18),s*.05,s*.36,s*.85,s*.08):x.rect(s*(c-.18),s*.05,s*.36,s*.85);x.fill();x.stroke()}}),
+  roundGlasses:sprite('roundGlasses',512,(x,s)=>{x.strokeStyle='#2a2230';x.lineWidth=s*.035;for(const c of [.27,.73]){x.fillStyle='rgba(200,230,255,.22)';x.beginPath();x.arc(s*c,s*.5,s*.19,0,Math.PI*2);x.fill();x.stroke()}x.beginPath();x.moveTo(s*.46,s*.48);x.quadraticCurveTo(s*.5,s*.43,s*.54,s*.48);x.stroke()}),
+  moustache:sprite('moustache',256,(x,s)=>{x.fillStyle='#2a1c12';for(const k of [-1,1]){x.save();x.translate(s/2,s/2);x.scale(k,1);x.beginPath();x.moveTo(0,-s*.06);x.bezierCurveTo(s*.16,-s*.22,s*.4,-s*.14,s*.46,s*.04);x.bezierCurveTo(s*.4,-s*.02,s*.3,s*.12,s*.16,s*.1);x.bezierCurveTo(s*.08,s*.1,s*.02,s*.06,0,s*.06);x.closePath();x.fill();x.restore()}}),
   tear:sprite('tear',64,(x,s)=>{x.fillStyle='rgba(110,180,255,.9)';x.beginPath();x.moveTo(s*.5,s*.05);x.quadraticCurveTo(s*.9,s*.6,s*.5,s*.95);x.quadraticCurveTo(s*.1,s*.6,s*.5,s*.05);x.fill()}),
 };
 const E=ch=>()=>tex['e'+ch]||(tex['e'+ch]=emojiTex(ch));
@@ -265,6 +281,25 @@ const MASKS=[
   {id:'wow',e:'🤩',n:'Вау',hint:'Подними брови',fx:{kind:'stars',from:'head',on:b=>b[B.browInnerUp]>.45||(b[B.browOuterUpLeft]+b[B.browOuterUpRight])>.9}},
   {id:'cry',e:'😭',n:'Слёзы',fx:{kind:'tears',from:'eyes',on:()=>true,rate:10}},
   {id:'money',e:'💸',n:'Деньги',fx:{kind:'money',from:'screen',on:()=>true,rate:8}},
+  /* ---- face changers: the cartoon parts move with your blinks and your mouth ---- */
+  {id:'toon',e:'🤪',n:'Мультяшка',hint:'Моргни и открой рот',
+    paint(x){for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.04,()=>{x.beginPath();x.arc(a,b,PS*.05,0,Math.PI*2)},'rgba(255,90,120,.45)')}},
+    props:[{t:SP.toonEye,lm:R.eyeR,s:.34,sy:b=>Math.max(.08,1-b[B.eyeBlinkLeft]*1.05)},{t:SP.toonEye,lm:R.eyeL,s:.34,flip:true,sy:b=>Math.max(.08,1-b[B.eyeBlinkRight]*1.05)},
+      {t:SP.toonMouthOpen,lm:[13,14],s:.56,dy:.01,sy:b=>.35+b[B.jawOpen]*1.3,show:b=>b[B.jawOpen]>.12},{t:SP.toonMouth,lm:[13,14],s:.56,show:b=>b[B.jawOpen]<=.12}]},
+  {id:'anime',e:'🌸',n:'Аниме',beauty:true,hint:'Моргни',
+    paint(x){for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.04,()=>{x.beginPath();x.ellipse(a,b,PS*.06,PS*.03,0,0,Math.PI*2)},'rgba(255,110,150,.5)')}},
+    props:[{t:SP.animeEye,lm:R.eyeR,s:.3,ar:1.2,dy:-.02,sy:b=>Math.max(.06,1-b[B.eyeBlinkLeft]*1.05)},{t:SP.animeEye,lm:R.eyeL,s:.3,ar:1.2,dy:-.02,flip:true,sy:b=>Math.max(.06,1-b[B.eyeBlinkRight]*1.05)}],
+    fx:{kind:'sparkle',from:'head',on:()=>true,rate:3}},
+  {id:'upside',e:'🙃',n:'Вверх ногами',warp:'flip'},
+  {id:'longface',e:'🥒',n:'Длинное лицо',warp:'long'},
+  {id:'wideface',e:'🍔',n:'Толстячок',warp:'wide'},
+  {id:'angry',e:'😡',n:'Злюка',paint(x){ovalFill(x,'rgba(255,40,40,.32)',PS*.06);holes(x)},
+    props:[{t:SP.angryBrow,lm:R.browR,s:.32,ar:.5,dy:-.01,flip:true},{t:SP.angryBrow,lm:R.browL,s:.32,ar:.5,dy:-.01}],fx:{kind:'angry',from:'head',on:()=>true,rate:3}},
+  {id:'vampire',e:'🧛',n:'Вампир',hint:'Приоткрой рот',paint(x){ovalFill(x,'rgba(235,235,250,.55)',PS*.05);for(const e of [R.eyeR,R.eyeL])soft(x,PS*.03,()=>polyP(x,grow(e,1.6)),'rgba(90,20,60,.45)');x.fillStyle='rgba(120,0,30,.75)';polyP(x,grow(R.lipsO,1.02));x.fill();holes(x)},
+    props:[{t:SP.fangs,lm:13,s:.26,dy:.04,show:b=>b[B.jawOpen]>.06}]},
+  {id:'nerd',e:'🤓',n:'Ботан',props:[{t:SP.roundGlasses,at:[0,2.6,6.2],w:14,h:14},{t:SP.buckTeeth,lm:13,s:.16,dy:.045,ar:1.1}],
+    paint(x){let seed=11;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};for(const c of [205,425]){const [a,b]=up(c);for(let i=0;i<30;i++){const r=rnd()*PS*.08,t=rnd()*Math.PI*2;x.fillStyle='rgba(140,80,50,.45)';x.beginPath();x.arc(a+Math.cos(t)*r,b+Math.sin(t)*r*.6,PS*.004,0,Math.PI*2);x.fill()}}}},
+  {id:'moustache',e:'🥸',n:'Усач',props:[{t:SP.moustache,lm:[2,0],s:.6,ar:.5,dy:.005}]},
   /* ---- face distortion ---- */
   {id:'bigeyes',e:'👀',n:'Глазки',warp:'bigeyes'},
   {id:'baby',e:'👶',n:'Малыш',warp:'baby',beauty:true},
@@ -405,6 +440,9 @@ function warpPoints(kind,P){ /* P: pixel coordinates, changed in place */
   else if(kind==='hamster'){for(const i of [205,425]){const c=pt(i);bulge(P,NV,c[0],c[1],fw*.3,.55)}}
   else if(kind==='bignose'){const n=pt(4);bulge(P,NV,n[0],n[1],fw*.26,1.1)}
   else if(kind==='smile'){const m=avg(R.lipsO),r=fw*.3;for(let i=0;i<NV;i++){const dx=P[i*2]-m[0],dy=P[i*2+1]-m[1],d=Math.hypot(dx,dy);if(d<r){const f=.55*Math.pow(1-d/r,2);P[i*2]+=dx*f;P[i*2+1]-=Math.abs(dx)/r*fw*.05*(1-d/r)}}}
+  else if(kind==='flip'){const o=avg(R.oval);for(let i=0;i<NV;i++)P[i*2+1]=2*o[1]-P[i*2+1]}
+  else if(kind==='long'){const ey=avg(R.eyeR.concat(R.eyeL)),ch=pt(152),h=Math.max(1,ch[1]-ey[1]);for(let i=0;i<NV;i++){const d=P[i*2+1]-ey[1];if(d>0){const k=d/h;P[i*2+1]+=d*.55*k;P[i*2]=ey[0]+(P[i*2]-ey[0])*(1-.12*k)}}}
+  else if(kind==='wide'){const o=avg(R.oval),fh=Math.hypot(P[10*2]-P[152*2],P[10*2+1]-P[152*2+1]);for(let i=0;i<NV;i++){const k=Math.max(0,1-Math.abs(P[i*2+1]-o[1]-fh*.12)/(fh*.6));P[i*2]=o[0]+(P[i*2]-o[0])*(1+.38*k*k)}const c=pt(205),c2=pt(425);bulge(P,NV,c[0],c[1],fw*.3,.3);bulge(P,NV,c2[0],c2[1],fw*.3,.3)}
   else if(kind==='alien'){eyes(.7);const ey=avg(R.eyeR.concat(R.eyeL)),ch=pt(152);
     for(let i=0;i<NV;i++){const y=P[i*2+1],x=P[i*2];if(y<ey[1]){const k=(ey[1]-y)/fw;P[i*2+1]-=k*fw*.45;P[i*2]=ey[0]+(x-ey[0])*(1+k*.35)}else{const k=Math.min(1,(y-ey[1])/Math.max(1,ch[1]-ey[1]));P[i*2]=ey[0]+(x-ey[0])*(1-k*.32)}}}
 }
@@ -420,6 +458,7 @@ const PK={
   tears:{t:SP.tear,life:1,size:.05,speed:.5,spread:.05,fall:true},
   confetti:{t:SP.band,life:2.2,size:.035,speed:.35,spread:2,fall:true,spin:true,colors:[[1,.31,.55],[1,.85,.29],[.17,.83,.49],[.18,.55,1]]},
   snow:{t:SP.dot,life:4,size:.035,speed:.25,fall:true,screen:true},
+  angry:{t:()=>E('💢')(),life:.8,size:.16,speed:.15,spread:2.4,up:true,grow:.4},
   money:{t:()=>E('💸')(),life:3,size:.1,speed:.35,fall:true,screen:true,spin:true}
 };
 class Particles{
@@ -543,7 +582,7 @@ class FX{
       if(this.beauty||m.beauty)r.mesh('beauty',tc,tc,mir,null,beautyMask());
       const pc=paintOf(m);if(pc)r.mesh('paint',tc,tc,mir,pc);
       const spr=[];
-      if(m.props)for(const p of m.props){if(p.show&&!(f.bs&&p.show(f.bs)))continue;const v=p.lm!=null?this.flat(p,P,fw,W,H,mir):f.mat?this.prop3d(p,f.mat,W,H,mir):null;if(v)spr.push({src:p.t(),v,z:v.z||0})}
+      if(m.props)for(const p of m.props){if(p.show&&!(f.bs&&p.show(f.bs)))continue;const v=p.lm!=null?this.flat(p,P,fw,W,H,mir,f.bs):f.mat?this.prop3d(p,f.mat,W,H,mir):null;if(v)spr.push({src:p.t(),v,z:v.z||0})}
       spr.sort((a,b)=>b.z-a.z);
       if(m.fx&&f.bs&&m.fx.on(f.bs))this.emit(m.fx,P,fw,W,H,dt);
       this.parts.step(dt,fw);
@@ -560,10 +599,14 @@ class FX{
     const v=new Float32Array([...a,u0,0,1,...b,u1,0,1,...d,u0,1,1,...b,u1,0,1,...e,u1,1,1,...d,u0,1,1]);v.z=(a[3]+e[3])/2;return v;
   }
   /* a picture stuck to one face point on screen, tilted with the head */
-  flat(p,P,fw,W,H,mir){
-    const ang=Math.atan2(P[263*2+1]-P[33*2+1],P[263*2]-P[33*2]),x=P[p.lm*2],y=P[p.lm*2+1]+(p.dy||0)*fw,s=(p.s||.2)*fw/2;
-    const pt=(dx,dy)=>{const X=x+dx*Math.cos(ang)-dy*Math.sin(ang),Y=y+dx*Math.sin(ang)+dy*Math.cos(ang);return [(X/W*2-1)*mir,1-Y/H*2,0,1]};
-    const a=pt(-s,-s),b=pt(s,-s),d=pt(-s,s),e=pt(s,s);return new Float32Array([...a,0,0,1,...b,1,0,1,...d,0,1,1,...b,1,0,1,...e,1,1,1,...d,0,1,1]);
+  flat(p,P,fw,W,H,mir,bs){
+    const ang=Math.atan2(P[263*2+1]-P[33*2+1],P[263*2]-P[33*2]),L=Array.isArray(p.lm)?p.lm:[p.lm];
+    let x=0,y=0;for(const i of L){x+=P[i*2];y+=P[i*2+1]}x/=L.length;y/=L.length;
+    const dy=(p.dy||0)*fw;x-=Math.sin(ang)*dy;y+=Math.cos(ang)*dy;
+    const sx=(p.s||.2)*fw/2,sy=sx*(p.ar||1)*(p.sy&&bs?p.sy(bs):1);
+    const pt=(ex,ey)=>{const X=x+ex*Math.cos(ang)-ey*Math.sin(ang),Y=y+ex*Math.sin(ang)+ey*Math.cos(ang);return [(X/W*2-1)*mir,1-Y/H*2,0,1]};
+    const u0=p.flip?1:0,u1=1-u0,a=pt(-sx,-sy),b=pt(sx,-sy),d=pt(-sx,sy),e=pt(sx,sy);
+    return new Float32Array([...a,u0,0,1,...b,u1,0,1,...d,u0,1,1,...b,u1,0,1,...e,u1,1,1,...d,u0,1,1]);
   }
   emit(fx,P,fw,W,H,dt){
     const avg=l=>{let a=0,b=0;l.forEach(i=>{a+=P[i*2];b+=P[i*2+1]});return [a/l.length,b/l.length]};

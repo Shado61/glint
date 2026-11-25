@@ -4,7 +4,7 @@
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
 const GZ=new Map();
 /* version of the app files; the browser compares it with its own copy and reloads when they differ */
-const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','fx.js','fxw.js','style.css','index.html','sw.js'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
+const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','pet.js','fx.js','fxw.js','style.css','index.html','sw.js'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
 const {WebSocketServer}=require('ws');
 
 /* ---------- config (.env for local runs, Environment in Render) ---------- */
@@ -74,9 +74,10 @@ const pubUser=u=>u&&({id:u.id,username:u.username,name:u.name,color:u.color,avat
 function chatFor(c,uid){
   const ms=DB.msgs[c.id]||[],last=ms[ms.length-1]||null;
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
-  const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||''};
+  const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||'',titles:c.titles||{}};
   if(c.server)o.server=c.server;
   const st=streakOut(c);if(st)o.streak=st;
+  if(c.pet)o.pet=c.pet;
   return o;
 }
 const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m;
@@ -90,7 +91,7 @@ function bumpStreak(c,uid,ts){
   const d=dayKey(ts),s=c.st=c.st||{n:0,last:0,d:0,u:[]};
   if(s.d!==d){s.d=d;s.u=[]}
   if(!s.u.includes(uid))s.u.push(uid);
-  if(s.last!==d&&c.members.every(m=>s.u.includes(m))){s.n=s.last===d-1?s.n+1:1;s.last=d;return s.n}
+  if(s.last!==d&&c.members.every(m=>s.u.includes(m))){s.n=s.last===d-1?s.n+1:1;s.last=d;c.pet=c.pet||{name:'Серийчик'};c.pet.best=Math.max(c.pet.best||0,s.n);return s.n}
   return 0;
 }
 function streakOut(c){
@@ -237,6 +238,36 @@ API['POST /api/chats/leave']=(req,res,b,u)=>{
   need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||c.type!=='group')throw E(404,'Группа не найдена');
   c.members=c.members.filter(i=>i!==u.id);mark('c:'+c.id);
   addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} вышел(а) из группы`});pushChat(c);return {ok:true};
+};
+/* groups: anyone in the group can add people; the creator can sign members (a title next to the name), rename and remove */
+function groupOf(id,u,admin){
+  const c=DB.chats[String(id||'')];if(!member(c,u.id)||c.type!=='group')throw E(404,'Группа не найдена');
+  if(admin&&c.admin!==u.id)throw E(403,'Это может только создатель группы');return c;
+}
+API['POST /api/chats/add']=(req,res,b,u)=>{
+  need(u);const c=groupOf(b.chat,u);if(!limit('gadd:'+u.id,30,600e3))throw E(429,'Слишком часто');
+  const ids=[...new Set((b.members||[]).map(String))].filter(i=>DB.users[i]&&!c.members.includes(i));
+  if(!ids.length)throw E(400,'Выбери, кого добавить');
+  if(c.members.length+ids.length>200)throw E(400,'В группе максимум 200 человек');
+  c.members.push(...ids);mark('c:'+c.id);
+  addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} добавил(а) ${ids.map(i=>DB.users[i].name).join(', ')}`});
+  pushChat(c);return {chat:chatFor(c,u.id),users:c.members.map(i=>pubUser(DB.users[i])).filter(Boolean)};
+};
+API['POST /api/chats/remove']=(req,res,b,u)=>{
+  need(u);const c=groupOf(b.chat,u,true);const id=String(b.userId||'');
+  if(id===u.id||!c.members.includes(id))throw E(400,'Нельзя');
+  const gone=DB.users[id];addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} удалил(а) ${gone?gone.name:'участника'}`});
+  c.members=c.members.filter(i=>i!==id);if(c.titles)delete c.titles[id];mark('c:'+c.id);
+  sendTo(id,{t:'chat',chat:Object.assign(chatFor(c,id),{members:c.members}),users:[]});pushChat(c);return {ok:true};
+};
+API['POST /api/chats/title']=(req,res,b,u)=>{
+  need(u);const c=groupOf(b.chat,u,true);const id=String(b.userId||'');if(!c.members.includes(id))throw E(404,'Нет такого участника');
+  const t=cleanName(b.title).slice(0,24);c.titles=c.titles||{};if(t)c.titles[id]=t;else delete c.titles[id];
+  mark('c:'+c.id);pushChat(c);return {chat:chatFor(c,u.id)};
+};
+API['POST /api/chats/rename']=(req,res,b,u)=>{
+  need(u);const c=groupOf(b.chat,u,true);const n=cleanName(b.name);if(!n)throw E(400,'Пустое название');
+  c.name=n;mark('c:'+c.id);addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:`${u.name} переименовал(а) группу в «${n}»`});pushChat(c);return {chat:chatFor(c,u.id)};
 };
 API['GET /api/messages']=(req,res,b,u,q)=>{
   need(u);const c=DB.chats[String(q.get('chat')||'')];if(!member(c,u.id))throw E(404,'Чат не найден');
@@ -529,6 +560,22 @@ function voiceLeave(uid,cid,quiet){
 function voiceChannelOf(uid){for(const [cid,room] of VOICE)if(room.has(uid))return cid;return null}
 function leaveVoiceOf(uid,g){g.channels.forEach(ch=>{if(ch.type==='voice'&&VOICE.get(ch.id)&&VOICE.get(ch.id).has(uid)){const r=VOICE.get(ch.id).get(uid);voiceLeave(uid,ch.id);if(r.ws&&r.ws.readyState===1)r.ws.send(JSON.stringify({t:'vkicked',channel:ch.id}))}})}
 function closeVoice(cid){const room=VOICE.get(cid);if(!room)return;room.forEach(v=>{if(v.ws&&v.ws.readyState===1)v.ws.send(JSON.stringify({t:'vkicked',channel:cid}))});VOICE.delete(cid)}
+/* ---------- the streak pet («Серийчик»): one per private chat; both people can name and dress it.
+   Some things open only after a long streak (the best one this pair ever had). ---------- */
+const PET_ITEMS={color:{ember:0,rose:0,sky:0,mint:0,grape:0,night:14,gold:30},hat:{none:0,cap:0,beanie:0,bow:0,flower:0,headphones:7,witch:7,tophat:14,crown:30},
+  eyes:{none:0,round:0,sun:0,hearts:0,star:7},neck:{none:0,scarf:0,bowtie:0,beads:0,bandana:7,medal:30}};
+API['POST /api/pet']=(req,res,b,u)=>{
+  need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||c.type!=='dm')throw E(404,'Чат не найден');
+  if(!c.pet)throw E(400,'Серийчик появится, когда вы напишете друг другу в один день');
+  if(!limit('pet:'+u.id,60,60e3))throw E(429,'Слишком часто');
+  const best=c.pet.best||0;
+  for(const k of Object.keys(PET_ITEMS))if(b[k]!==undefined){
+    const v=String(b[k]),need=PET_ITEMS[k][v];if(need===undefined)throw E(400,'Нет такой вещи');
+    if(need>best)throw E(403,`Откроется на ${need}-й день серии`);c.pet[k]=v;
+  }
+  if(b.name!==undefined){const n=cleanName(b.name).slice(0,20);c.pet.name=n||'Серийчик'}
+  mark('c:'+c.id);pushChat(c);return {chat:chatFor(c,u.id)};
+};
 /* ---------- messages ---------- */
 const FIRE_DAYS=[3,7,10,30,50,100,365];
 function sendMsgTo(c,u,msg){
@@ -641,6 +688,7 @@ function handle(ws,u,m){
       if(!list.length)delete msg.react[e];
       mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(msg)});return;
     }
+    case 'pat':if(member(c,u.id)&&c.type==='dm'&&c.pet&&limit('pat:'+u.id,20,10e3))toChat(c,{t:'pat',chat:c.id,user:u.id},u.id);return;
     case 'typing':if(member(c,u.id)&&limit('typ:'+u.id,8,3e3))toChat(c,{t:'typing',chat:c.id,user:u.id},u.id);return;
     case 'read':{
       if(!member(c,u.id))return;const ts=Math.min(+m.ts||0,now());

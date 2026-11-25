@@ -93,6 +93,36 @@ const peerOf=c=>S.users[c.members.find(m=>m!==S.me.id)]||{name:'Удалённы
 /* the name you saved a person under in contacts, otherwise their own name */
 const nm=u=>u?(S.contacts[u.id]||u.name||'?'):'?';
 const chatName=c=>c.type==='dm'?nm(peerOf(c)):c.type==='self'?'Избранное':c.type==='channel'?'# '+c.name:c.name;
+/* ---------- the streak pet («Серийчик») ---------- */
+const petDays=c=>Math.max((c.pet&&c.pet.best)||0,(c.streak&&c.streak.n)||0);
+function petMood(c){const s=c.streak;if(!s)return 'sleep';if(s.today)return 'happy';return s.me&&s.me.length?'wait':'sleep'}
+function petSvgOf(c,mood){const p=c.pet||{};return window.PET?PET.petSVG({days:petDays(c),color:p.color,hat:p.hat,eyes:p.eyes,neck:p.neck,mood:mood||petMood(c)}):''}
+function refreshPetBtn(){const c=S.chats[S.cur],b=document.querySelector('.pet-btn');if(b&&c)b.innerHTML=petSvgOf(c)}
+/* pat the pet: hearts float up (also when the other person pats it) */
+function petPat(mine){
+  const h=$('#petHearts'),btn=document.querySelector('.pet-btn');navigator.vibrate&&navigator.vibrate(8);
+  const host=h||btn;if(!host)return;
+  for(let i=0;i<(h?5:2);i++){const e=document.createElement('i');e.textContent=mine?'💕':'💗';e.style.left=(20+Math.random()*60)+'%';e.style.animationDelay=(i*.08)+'s';(h||btn).appendChild(e);setTimeout(()=>e.remove(),1400)}
+  const svg=(h?h.parentNode:btn).querySelector('svg');if(svg){svg.classList.remove('patted');void svg.offsetWidth;svg.classList.add('patted')}
+}
+function petSheet(tab){
+  const c=S.chats[S.cur];if(!c||!c.pet||!window.PET)return;
+  const P=PET,p=c.pet,days=petDays(c),st=P.stageOf(days),next=P.STAGES[st+1],mood=petMood(c),peer=peerOf(c);
+  S.petTab=tab||S.petTab||'color';
+  const moodText={happy:'Счастлив — вы оба написали сегодня 💕',wait:(c.streak&&c.streak.me&&c.streak.me.includes(S.me.id)?`Ждёт, когда напишет ${esc(nm(peer))}`:'Ждёт твоего сообщения'),sleep:c.streak?'Спит — сегодня ещё никто не написал':'Загрустил: серия прервалась. Напишите друг другу, чтобы он проснулся'}[mood];
+  const groups={color:['Цвет',P.COLORS],hat:['Шапка',P.HATS],eyes:['Очки',P.EYES],neck:['Шея',P.NECK]};
+  const [gn,T]=groups[S.petTab],cur=p[S.petTab]||(S.petTab==='color'?'ember':'none');
+  const items=Object.keys(T).map(k=>{const it=T[k],lock=(it.need||0)>(p.best||0),o={days:Math.max(days,3),color:p.color,hat:p.hat,eyes:p.eyes,neck:p.neck,mood:'wait'};o[S.petTab]=k;
+    return `<button class="pet-it ${cur===k?'on':''} ${lock?'lock':''}" data-act="petset" data-k="${S.petTab}" data-v="${k}" ${lock?`title="Откроется на ${it.need}-й день"`:''}>${P.petSVG(o)}<small>${esc(it.n)}</small>${lock?`<i class="pet-lock">🔒 ${it.need} дн.</i>`:''}</button>`}).join('');
+  sheet(`<div class="pet-hero ${mood}" data-act="petpat">${petSvgOf(c)}<span class="pet-hearts" id="petHearts"></span></div>
+    <div class="pet-name"><input class="input" id="petName" maxlength="20" value="${esc(p.name||'Серийчик')}" aria-label="Имя питомца"><button class="gbtn" data-act="petname">${ic('check')}</button></div>
+    <p class="pet-mood">${moodText}</p>
+    <div class="pet-stat"><span>${esc(P.STAGES[st].n)}</span><b>${fire(c,false)||'🔥 '+((c.streak&&c.streak.n)||0)}</b><span>Рекорд: ${p.best||0} дн.</span></div>
+    ${next?`<div class="pet-prog"><i style="width:${Math.min(100,Math.round(days/next.from*100))}%"></i></div><p class="pet-mood dim">Ещё ${next.from-days} дн. подряд — и станет «${esc(next.n)}»</p>`:'<p class="pet-mood dim">Максимальная стадия — Легенда ✨</p>'}
+    <div class="seg pet-tabs">${Object.entries(groups).map(([k,[n]])=>`<button class="${S.petTab===k?'on':''}" data-act="pettab" data-v="${k}">${n}</button>`).join('')}</div>
+    <div class="pet-grid">${items}</div>
+    <p class="pet-mood dim">Нажми на питомца, чтобы погладить. Наряд видите вы оба.</p>`);
+}
 /* fire streak: shown from 3 days in a row; dimmed with an hourglass if nobody wrote today yet */
 function fire(c,big){
   const s=c&&c.streak;if(!s||s.n<3)return '';
@@ -291,6 +321,7 @@ function renderMain(){
       <button class="gbtn ic back" data-act="back" aria-label="Назад">${ic('back')}</button>
       <button class="who" data-act="info">${chatAvatar(c,'s')}<span style="min-width:0"><b>${esc(chatName(c))}</b><small id="status"></small></span></button>
       ${c.type==='self'?`<button class="gbtn ic" data-act="starred" title="Важное" aria-label="Важное">${ic('star')}</button>`:''}
+      ${c.type==='dm'&&c.pet?`<button class="pet-btn ${petMood(c)}" data-act="pet" title="${esc(c.pet.name||'Серийчик')}" aria-label="Питомец">${petSvgOf(c)}</button>`:''}
       ${c.type==='dm'?`<button class="gbtn ic" data-act="call" data-k="audio" title="Аудиозвонок" aria-label="Аудиозвонок">${ic('phone')}</button><button class="gbtn ic" data-act="call" data-k="video" title="Видеозвонок" aria-label="Видеозвонок">${ic('video')}</button>`:''}
       <button class="gbtn ic" data-act="chatmenu" aria-label="Ещё">${ic('more')}</button></header>
     <div class="msgs" id="msgs"></div>
@@ -338,6 +369,16 @@ function mergeMsgs(loaded,live){
 }
 function closeChat(){if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;S.cur=null;history.replaceState(null,'',location.pathname);renderSide();renderMain()}
 
+/* who has read a message: everyone whose "read up to" time is at or after it */
+function readers(c,m){const r=c.read||{};return c.members.filter(u=>u!==S.me.id&&u!==m.from&&(r[u]||0)>=m.ts)}
+function readersSheet(cid,mid){
+  const c=S.chats[cid],m=(S.msgs[cid]||[]).find(x=>x.id===mid);if(!c||!m)return;
+  const yes=readers(c,m),no=c.members.filter(u=>u!==S.me.id&&u!==m.from&&!yes.includes(u));
+  const row=(id,ok)=>{const u=S.users[id]||{id,name:'?'};return `<div class="row">${avatar(u,'s',false)}<span class="mid"><span class="nm">${esc(nm(u))}</span><span class="sub"><span class="lm">${ok?'прочитал(а)'+(c.read[id]?' · '+shortWhen(c.read[id]):''):'ещё не прочитал(а)'}</span></span></span>${ok?`<span class="rd-ic">${TICK2}</span>`:''}</div>`};
+  sheet(`<h2>Кто прочитал</h2><p class="sub">${esc((m.text||(m.img?'📷 Фото':m.sticker?'Стикер':'')).slice(0,80))}</p>
+    <div class="section-t">Прочитали · ${yes.length}</div>${yes.map(i=>row(i,true)).join('')||'<div class="empty" style="padding:14px">Пока никто</div>'}
+    ${no.length?`<div class="section-t">Не прочитали · ${no.length}</div>${no.slice(0,100).map(i=>row(i,false)).join('')}`:''}`);
+}
 function isRead(c,m){
   const r=c.read||{};
   return c.members.some(u=>u!==S.me.id&&(r[u]||0)>=m.ts);
@@ -348,21 +389,22 @@ function msgHTML(c,m,prev,next){
   const tail=!next||next.from!==m.from||next.sys||next.ts-m.ts>300e3||new Date(next.ts).toDateString()!==new Date(m.ts).toDateString();
   const head=!prev||prev.from!==m.from||prev.sys||m.ts-prev.ts>300e3;
   const star=S.stars.has(c.id+':'+m.id)?'<span class="st-mark">★</span>':'';
-  const ticks=c.type==='self'?'':me&&!m.pending?`<span class="${isRead(c,m)?'rd':''}">${isRead(c,m)?TICK2:TICK1}</span>`:me?'<span>🕓</span>':'';
+  const rn=me&&grp&&!m.pending?readers(c,m).length:0;
+  const ticks=c.type==='self'?'':me&&!m.pending?`<span class="${isRead(c,m)?'rd':''}">${isRead(c,m)?TICK2:TICK1}${rn?`<b class="rn">${rn}</b>`:''}</span>`:me?'<span>🕓</span>':'';
   const meta=`<span class="meta">${star}${m.edited?'изм. ':''}${tm(m.ts)}${ticks}</span>`;
   const fwd=m.fwd?`<div class="fwd">${ic('fwd')}Переслано от <b>${esc(nm(S.users[m.fwd.from])!=='?'?nm(S.users[m.fwd.from]):m.fwd.name)}</b></div>`:'';
   let inner;
   if(m.del)inner=`<span class="del">Сообщение удалено</span>${meta}`;
   else if(m.sticker){
     const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${e}">${e} ${l.length>1?l.length:''}</button>`).join('')}</div>`:'';
-    return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:''}${fwd}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
+    return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:''}${fwd}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
   }
   else if(m.call){
     const miss=m.call.missed,out=m.from===S.me.id;
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}"><div class="bub callm ${miss?'miss':''}"><span class="ci">${ic(m.call.kind==='video'?'video':'phone')}</span>
       <span><b>${out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
   }else{
-    inner=(grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:'')+fwd+
+    inner=(grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:'')+fwd+
       (m.story?`<div class="story-ref"><img src="${esc(m.story.img)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
       (m.reply?`<button class="rq" data-act="jump" data-id="${esc(m.reply.id)}"><b>${esc(nm(S.users[m.reply.from]))}</b><span>${esc(m.reply.text)}</span></button>`:'')+
       (m.img?`<img class="pic" src="${esc(m.img)}" alt="Фото" data-act="zoom" loading="lazy" decoding="async">`:'')+
@@ -387,10 +429,19 @@ function renderMsgs(toBottom){
   if(!list.length)h+=`<div class="sys glass pill" style="margin-top:auto">${c.type==='channel'?'Это начало канала '+esc(chatName(c))+' 👋':c.type==='self'?'Сохраняй сюда заметки, ссылки и фото. Пересылай важное из других чатов ⭐':'Напиши первое сообщение 👋'}</div>`;
   let day='';
   const fresh=S.fresh;S.fresh=null;
-  shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');h+=x});
-  const prevH=box.scrollHeight,prevT=box.scrollTop;
+  /* groups and servers: small avatars under the latest of my messages each person has read */
+  const seenAt=new Map();
+  if(c.type==='group'||c.type==='channel'){const r=c.read||{},mine=shown.filter(m=>m.from===S.me.id&&!m.pending&&!m.sys&&!m.del);
+    c.members.forEach(u=>{if(u===S.me.id||!r[u])return;let last=null;for(const m of mine){if(m.ts<=r[u])last=m;else break}if(last){if(!seenAt.has(last.id))seenAt.set(last.id,[]);seenAt.get(last.id).push(u)}})}
+  shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');h+=x;
+    const sa=seenAt.get(m.id);if(sa)h+=`<button class="seen" data-act="readers" data-id="${m.id}" title="Кто прочитал">${sa.slice(0,5).map(u=>avatar(S.users[u],'xs',false)).join('')}${sa.length>5?`<small>+${sa.length-5}</small>`:''}</button>`});
+  const prevH=box.scrollHeight,prevT=box.scrollTop,fromBottom=prevH-prevT-box.clientHeight;
   box.innerHTML=h;
-  if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;
+  /* stay at the bottom after sending and when new messages come; otherwise keep the same place */
+  const place=()=>{if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;else box.scrollTop=box.scrollHeight-box.clientHeight-fromBottom};
+  place();requestAnimationFrame(place);
+  /* pictures that load later make the chat taller: keep the bottom in view */
+  if(toBottom||near)box.querySelectorAll('img').forEach(im=>{if(!im.complete)im.addEventListener('load',()=>{if(box.scrollHeight-box.scrollTop-box.clientHeight<400)box.scrollTop=box.scrollHeight},{once:true})});
 }
 async function loadOlder(){
   const c=S.cur,l=S.msgs[c];if(!l||!l.length)return;
@@ -455,6 +506,7 @@ function msgMenu(id,x,y){
     c&&c.type!=='self'?['saved','book','В Избранное']:null,
     m.sticker&&m.pack?['pack','smile','Набор стикеров']:null,
     m.sticker?['savestk','save','В мой набор']:null,
+    me&&c&&(c.type==='group'||c.type==='channel')?['readers','eye','Кто прочитал']:null,
     m.text?['copy','copy','Копировать']:null,me&&m.text&&!m.call?['edit','edit','Изменить']:null,me&&!m.call?['del','trash','Удалить','bad']:null].filter(Boolean);
   if(m.call)return;
   openMenu(`<div class="emo">${['❤️','👍','😂','😮','😢','🔥'].map(e=>`<button data-act="react" data-id="${m.id}" data-e="${e}">${e}</button>`).join('')}</div>`+
@@ -487,14 +539,23 @@ function closeLayer(){$('#layer').innerHTML=''}
 function sheet(html){$('#layer').innerHTML=`<div class="scrim" data-act="closemenu"></div><div class="sheet glass" role="dialog" aria-modal="true">${html}</div>`}
 
 /* ---------- new chat / new group / info / settings ---------- */
-function newChatSheet(group){
-  const sel=new Set();
-  sheet(`<h2>${group?'Новая группа':'Новый чат'}</h2><p class="sub">${group?'Назови группу и отметь участников':'Найди человека по логину или имени'}</p>
-    ${group?`<label class="field"><span>Название</span><input class="input" id="gname" maxlength="40" placeholder="Например, Семья"></label><div class="chips" id="chips"></div>`:''}
+/* addTo: a group id — then the same picker adds people to an existing group */
+function memberSheet(cid,uid){
+  const c=S.chats[cid],u=S.users[uid];if(!c||!u)return;const t=(c.titles||{})[uid]||'';
+  sheet(`<div class="row" style="padding:0 0 12px">${avatar(u)}<span class="mid"><span class="nm">${esc(nm(u))}</span><span class="sub"><span class="lm">@${esc(u.username||'')}</span></span></span></div>
+    <label class="field"><span>Подпись в группе</span><input class="input" id="mtitle" maxlength="24" value="${esc(t)}" placeholder="Например: Мама, Староста, Капитан"></label>
+    <p class="sub" style="margin-top:-4px">Подпись видят все участники — рядом с именем в сообщениях</p>
+    <div class="btns"><button class="gbtn danger" data-act="gkick" data-id="${uid}">Удалить из группы</button><button class="gbtn" data-act="info">Назад</button><button class="gbtn primary" data-act="gtitle" data-id="${uid}">Сохранить</button></div>`);
+}
+function newChatSheet(group,addTo){
+  const sel=new Set(),g=addTo&&S.chats[addTo];if(addTo)group=true;
+  sheet(`<h2>${g?'Добавить в «'+esc(g.name)+'»':group?'Новая группа':'Новый чат'}</h2><p class="sub">${g?'Отметь, кого добавить':group?'Назови группу и отметь участников':'Найди человека по логину или имени'}</p>
+    ${group&&!g?`<label class="field"><span>Название</span><input class="input" id="gname" maxlength="40" placeholder="Например, Семья"></label>`:''}${group?'<div class="chips" id="chips"></div>':''}
     <label class="search" style="margin:0 0 10px">${ic('search')}<input id="pq" placeholder="@логин или имя" autocomplete="off" spellcheck="false"></label>
     <div class="pick-list" id="pl"><div class="empty" style="padding:20px">Начни вводить — от 2 букв</div></div>
-    ${group?`<div class="btns"><button class="gbtn" data-act="closemenu">Отмена</button><button class="gbtn primary" id="gcreate">Создать</button></div>`:''}`);
-  const known=()=>{const s=new Map();Object.values(S.chats).forEach(c=>c.members.forEach(m=>{if(m!==S.me.id&&S.users[m])s.set(m,S.users[m])}));return [...s.values()]};
+    ${group?`<div class="btns"><button class="gbtn" data-act="closemenu">Отмена</button><button class="gbtn primary" id="gcreate">${g?'Добавить':'Создать'}</button></div>`:''}`);
+  const known=()=>{const s=new Map();Object.values(S.chats).forEach(c=>c.members.forEach(m=>{if(m!==S.me.id&&S.users[m])s.set(m,S.users[m])}));Object.keys(S.contacts).forEach(m=>{if(S.users[m])s.set(m,S.users[m])});
+    if(g)g.members.forEach(m=>s.delete(m));return [...s.values()]};
   const draw=list=>{
     $('#pl').innerHTML=list.length?list.map(u=>`<button class="row ${sel.has(u.id)?'sel':''}" data-pick="${u.id}">${avatar(u)}<span class="mid"><span class="top"><span class="nm">${esc(nm(u))}</span></span><span class="sub"><span class="lm">@${esc(u.username)}</span></span></span>${group?`<span class="check">${sel.has(u.id)?ic('check'):''}</span>`:''}</button>`).join(''):'<div class="empty" style="padding:20px">Никого не нашли</div>';
     if(group)$('#chips').innerHTML=[...sel].map(i=>`<span class="chip">${avatar(S.users[i],'xs',false)}${esc(nm(S.users[i]))}</span>`).join('');
@@ -503,17 +564,20 @@ function newChatSheet(group){
   const k=known();if(k.length){last=k;draw(k)}
   let t;$('#pq').addEventListener('input',e=>{clearTimeout(t);const q=e.target.value.trim();t=setTimeout(async()=>{
     if(q.replace(/^@/,'').length<2){last=k;draw(k);return}
-    try{const r=await api('/api/users/search?q='+encodeURIComponent(q));r.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));last=r.users;draw(r.users)}catch(err){}
+    try{const r=await api('/api/users/search?q='+encodeURIComponent(q));r.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));last=g?r.users.filter(u=>!g.members.includes(u.id)):r.users;draw(last)}catch(err){}
   },250)});
   $('#pl').addEventListener('click',async e=>{
     const b=e.target.closest('[data-pick]');if(!b)return;const id=b.dataset.pick;
     if(!group){closeLayer();startDM(id);return}
     sel.has(id)?sel.delete(id):sel.add(id);draw(last);
   });
-  if(group)$('#gcreate').onclick=async()=>{
+  if(g)$('#gcreate').onclick=async()=>{
+    try{const r=await api('/api/chats/add',{chat:g.id,members:[...sel]});r.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));S.chats[g.id]=Object.assign(S.chats[g.id],r.chat);closeLayer();toast('Добавлено');renderStatus()}catch(e){toast(e.message)}
+  };
+  else if(group)$('#gcreate').onclick=async()=>{
     try{const r=await api('/api/chats/group',{name:$('#gname').value,members:[...sel]});r.users.forEach(u=>S.users[u.id]=u);S.chats[r.chat.id]=r.chat;closeLayer();openChat(r.chat.id)}catch(e){toast(e.message)}
   };
-  setTimeout(()=>{const i=group?$('#gname'):$('#pq');if(i&&!touch)i.focus()},50);
+  setTimeout(()=>{const i=group&&!g?$('#gname'):$('#pq');if(i&&!touch)i.focus()},50);
 }
 async function startDM(uid){
   try{const r=await api('/api/chats/dm',{userId:uid});r.users.forEach(u=>S.users[u.id]=u);S.chats[r.chat.id]=Object.assign(S.chats[r.chat.id]||{},r.chat);S.q='';openChat(r.chat.id)}catch(e){toast(e.message)}
@@ -527,9 +591,12 @@ function infoSheet(){
       ${c.streak&&c.streak.n>=3?`<p class="fire-note">${fire(c,true)}<br>${c.streak.today?`Вы общаетесь ${c.streak.n} дн. подряд`:'Напишите друг другу сегодня, иначе огонёк погаснет'}</p>`:`<p class="fire-note dim">Общайтесь 3 дня подряд — и появится огонёк 🔥</p>`}</div>
       <div class="btns" style="justify-content:center"><button class="gbtn" data-act="call" data-k="audio">${ic('phone')}Звонок</button><button class="gbtn" data-act="call" data-k="video">${ic('video')}Видео</button>
       <button class="gbtn" data-act="editcontact" data-id="${u.id}">${ic(saved?'edit':'addUser')}${saved?'Имя':'В контакты'}</button></div>`);return}
-  sheet(`<div class="prof">${chatAvatar(c,'xl')}<h3>${esc(c.name)}</h3><small>${c.members.length} участников</small></div>
-    <div class="section-t">Участники</div>${c.members.map(i=>S.users[i]).filter(Boolean).map(u=>`<div class="row">${avatar(u,'s')}<span class="mid"><span class="top"><span class="nm">${esc(nm(u))}${u.id===c.admin?' <small style="color:var(--fg3)">админ</small>':''}</span></span><span class="sub"><span class="lm">${esc(seen(u))}</span></span></span></div>`).join('')}
-    <div class="btns"><button class="gbtn danger" data-act="leave">Выйти из группы</button></div>`);
+  const admin=c.admin===S.me.id,T=c.titles||{};
+  sheet(`<div class="prof">${chatAvatar(c,'xl')}${admin?`<label class="field" style="width:100%;margin:8px 0 0"><input class="input" id="grname" maxlength="40" value="${esc(c.name)}" style="text-align:center;font-weight:700"></label>`:`<h3>${esc(c.name)}</h3>`}<small>${c.members.length} участник(ов)</small></div>
+    <button class="row add-row" data-act="gadd"><span class="ava s add">${ic('addUser')}</span><span class="mid"><span class="nm">Добавить участников</span></span></button>
+    <div class="section-t">Участники${admin?' · нажми, чтобы подписать':''}</div>
+    ${c.members.map(i=>S.users[i]).filter(Boolean).sort((a,b)=>(b.id===c.admin)-(a.id===c.admin)).map(u=>`<${admin&&u.id!==S.me.id?'button':'div'} class="row" ${admin&&u.id!==S.me.id?`data-act="gmember" data-id="${u.id}"`:''}>${avatar(u,'s')}<span class="mid"><span class="top"><span class="nm">${esc(nm(u))}${T[u.id]?` <span class="mtitle">${esc(T[u.id])}</span>`:''}${u.id===c.admin?' <small style="color:var(--fg3)">создатель</small>':''}</span></span><span class="sub"><span class="lm">${esc(seen(u))}</span></span></span></${admin&&u.id!==S.me.id?'button':'div'}>`).join('')}
+    <div class="btns"><button class="gbtn danger" data-act="leave">Выйти из группы</button>${admin?'<button class="gbtn primary" data-act="grsave">Сохранить</button>':''}</div>`);
 }
 function settingsSheet(){
   const me=S.me,th=store.get('theme','auto'),w=store.get('wall','slate');
@@ -593,7 +660,7 @@ function onWS(m){
         if(!here){c.unread=(c.unread||0)+1;if(c.type!=='channel')beep([880,1320],.07,.03,.05)}
         if(c.type!=='channel'||(m.msg.text||'').includes('@'+S.me.username))notify(chatName(c),c.type!=='dm'?`${nm(S.users[m.msg.from])}: ${lastText(m.msg)}`:lastText(m.msg),m.chat);
       }
-      if(S.cur===m.chat){renderMsgs();renderStatus();markRead()}
+      if(S.cur===m.chat){renderMsgs(mine?true:undefined);renderStatus();markRead()}
       renderSide();updateTitle();
       if(S.tab==='calls'&&m.msg.call)S.calls=null;
       return;
@@ -611,7 +678,7 @@ function onWS(m){
       if(!m.chat.members.includes(S.me.id)){delete S.chats[m.chat.id];if(S.cur===m.chat.id)closeChat();else renderSide();return}
       const was=S.chats[m.chat.id];S.chats[m.chat.id]=Object.assign(was||{},m.chat);if(!m.chat.streak)delete S.chats[m.chat.id].streak;
       if(m.chat.streak&&m.chat.streak.n>=3&&was&&(!was.streak||was.streak.n<m.chat.streak.n)&&m.chat.streak.today&&S.cur===m.chat.id)navigator.vibrate&&navigator.vibrate([20,40,20]);
-      renderSide();if(S.cur===m.chat.id)renderStatus();return}
+      renderSide();if(S.cur===m.chat.id){renderStatus();if(m.chat.pet&&!document.querySelector('.pet-btn'))renderMain();else refreshPetBtn()}return}
     case 'error':{
       if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);renderMsgs()}}
       toast(m.error);if(CALL&&CALL.state==='calling'&&!CALL.id)hangup(true);return;
@@ -633,6 +700,7 @@ function onWS(m){
     case 'voice':{const g=S.servers[m.server];if(!g)return;const ch=g.channels.find(x=>x.id===m.channel);if(ch)ch.users=m.users;renderSide();return}
     case 'vjoined':case 'vrtc':case 'vpeer-left':case 'vkicked':return onVoiceMsg(m);
     case 'stars':S.stars=new Set(m.stars);if(S.cur)renderMsgs();return;
+    case 'pat':if(S.cur===m.chat){petPat(false);if(!$('#petHearts'))toast(`${nm(S.users[m.user])} погладил(а) ${(S.chats[m.chat].pet||{}).name||'Серийчика'} 💗`)}return;
     case 'fwd-ok':return;
     case 'pack':{const i=S.packs.findIndex(p=>p.id===m.pack.id);if(i>=0){S.packs[i]=m.pack;renderStickers()}return}
     case 'story':{S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(!S.stories.some(x=>x.id===m.story.id))S.stories.push(m.story);renderSide();return}
@@ -843,11 +911,25 @@ async function toggleCam(){
   }
   sendState();pushVideo();
 }
+/* front or back camera. Many phones cannot keep two cameras open, so the old one is released first (before());
+   if the phone does not understand "back camera", it is found in the list of cameras by name or order. */
+async function openCam(facing,size,before){
+  const md=navigator.mediaDevices,base=size||camC();delete base.facingMode;
+  if(before)before();
+  const tries=[()=>md.getUserMedia({video:Object.assign({},base,{facingMode:{exact:facing}})}),
+    async()=>{const ds=(await md.enumerateDevices()).filter(d=>d.kind==='videoinput');if(ds.length<2)throw new Error('one camera');
+      const back=/back|rear|environment|задн|тыл/i,pick=facing==='environment'?(ds.find(d=>back.test(d.label))||ds[ds.length-1]):(ds.find(d=>/front|user|фронт|передн/i.test(d.label))||ds[0]);
+      return md.getUserMedia({video:Object.assign({},base,{deviceId:{exact:pick.deviceId}})})},
+    ()=>md.getUserMedia({video:Object.assign({},base,{facingMode:facing})})];
+  let err;for(const t of tries){try{return await t()}catch(e){err=e}}
+  throw err;
+}
 async function flipCam(){
-  if(!CALL||!CALL.cam)return;CALL.facing=CALL.facing==='environment'?'user':'environment';
-  try{const s=await navigator.mediaDevices.getUserMedia({video:Object.assign(camC(),{facingMode:{exact:CALL.facing}})});const t=s.getVideoTracks()[0];
-    CALL.local.getVideoTracks().forEach(o=>{o.stop();CALL.local.removeTrack(o)});CALL.local.addTrack(t);await rebuildFx();pushVideo()}
-  catch(e){toast('Вторая камера недоступна')}
+  if(!CALL||!CALL.cam)return;const to=CALL.facing==='environment'?'user':'environment';
+  try{
+    const s=await openCam(to,camC(),()=>{CALL.local.getVideoTracks().forEach(o=>{o.stop();CALL.local.removeTrack(o)})});
+    const t=s.getVideoTracks()[0];if('contentHint' in t)t.contentHint='motion';CALL.facing=to;CALL.local.addTrack(t);await rebuildFx();pushVideo();renderCall();
+  }catch(e){toast('Не удалось переключить камеру');try{const s=await openCam(CALL.facing||'user');CALL.local.addTrack(s.getVideoTracks()[0]);await rebuildFx();pushVideo()}catch(e2){CALL.cam=false;sendState();pushVideo()}}
 }
 /* masks in calls: the camera goes through the effect canvas only while a mask or filter is on */
 /* ---------- camera effects (masks, filters, backgrounds) ----------
@@ -977,7 +1059,7 @@ function renderCall(){
   const rv=$('#rv');rv.style.display=remoteVid?'':'none';rv.classList.toggle('cover',!CALL.rs.screen);
   attachRemote();
   const lv=$('#lv'),showLocal=(CALL.cam||CALL.screen)&&CALL.local;
-  lv.style.display=showLocal?'':'none';lv.classList.toggle('screen',CALL.screen);lv.classList.toggle('wide',CALL.screen);
+  lv.style.display=showLocal?'':'none';lv.classList.toggle('screen',CALL.screen);lv.classList.toggle('back',CALL.facing==='environment');lv.classList.toggle('wide',CALL.screen);
   const lvv=lv.querySelector('video'),src=CALL.screen?CALL.screenStream:CALL.fx&&CALL.fx.out?CALL.fx.out:CALL.local;
   if(showLocal&&lvv.srcObject!==src){lvv.srcObject=src;lvv.play().catch(()=>{})}
   const bg=$('#cbg');if(p.avatar){bg.className='bg';bg.style.backgroundImage=`url("${p.avatar}")`}
@@ -1267,16 +1349,17 @@ async function storyCamera(){
   el.addEventListener('click',scClick);
   let M;try{M=await loadFxLib()}catch(e){toast(e.message)}
   if(!SC)return;SC.M=M;fxNoteFor={st:SC.st,fx:()=>SC&&SC.fx};scFxRow();
+  if(M)M.loadTracker().catch(()=>{}); /* start loading face tracking right away, so masks are ready when chosen */
   await scStart();
 }
 async function scStart(){
   if(!SC)return;
-  if(SC.fx){SC.fx.stop();SC.fx=null}if(SC.stream)SC.stream.getTracks().forEach(t=>t.stop());
+  if(SC.fx){SC.fx.stop();SC.fx=null}if(SC.stream)SC.stream.getTracks().forEach(t=>t.stop());SC.stream=null;
   const view=$('#scview');
   try{
     const lite=isLite();
-    SC.stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:SC.facing,width:{ideal:lite?960:1280},height:{ideal:lite?540:720}},audio:false});
-  }catch(e){view.innerHTML=`<div class="scam-msg">Камера недоступна${e.name==='NotAllowedError'?' — разреши её в настройках браузера':''}.<br><br><button class="gbtn primary" data-sc="gallery">${ic('image')}Выбрать из галереи</button></div>`;return}
+    SC.stream=await openCam(SC.facing,{width:{ideal:lite?960:1280},height:{ideal:lite?540:720}});
+  }catch(e){SC.stream=null;view.innerHTML=`<div class="scam-msg">Камера недоступна${e.name==='NotAllowedError'?' — разреши её в настройках браузера':''}.<br><br><button class="gbtn primary" data-sc="gallery">${ic('image')}Выбрать из галереи</button></div>`;return}
   if(!SC){SC&&0;return}
   const t=SC.stream.getVideoTracks()[0];
   if(SC.M){
@@ -1294,7 +1377,7 @@ async function scClick(e){
   if(a==='close')scClose();
   else if(a==='tab'){SC.st.tab=b.dataset.v;scFxRow()}
   else if(a==='fx'){const ph=fxTap(SC.st,b);if(ph){const img=await ph;if(!img||!SC)return;SC.bgImg=img}scApply();scFxRow()}
-  else if(a==='flip'){SC.facing=SC.facing==='user'?'environment':'user';scStart()}
+  else if(a==='flip'){const was=SC.facing;SC.facing=was==='user'?'environment':'user';await scStart();if(SC&&!SC.stream){toast('Не удалось переключить камеру');SC.facing=was;scStart()}}
   else if(a==='shot'){
     let cv;
     if(SC.fx)cv=SC.fx.snap();
@@ -1732,6 +1815,18 @@ document.addEventListener('click',async e=>{
     case 'appwalldel':await IDB.del('wall:app');await applyAppWall();settingsSheet();break;
     case 'avadel':try{const r=await api('/api/profile',{avatar:''});S.me=S.users[S.me.id]=Object.assign(S.users[S.me.id],r.me);settingsSheet();renderSide()}catch(err){toast(err.message)}break;
     case 'pklinkmsg':e.preventDefault();packPreview(id);break;
+    case 'pet':petSheet();break;
+    case 'pettab':petSheet(el.dataset.v);break;
+    case 'petset':{if(el.classList.contains('lock')){toast('Откроется на '+el.title.replace(/\D+/g,'')+'-й день серии 🔥');break}const b={chat:S.cur};b[el.dataset.k]=el.dataset.v;try{const r=await api('/api/pet',b);Object.assign(S.chats[S.cur],r.chat);petSheet();refreshPetBtn()}catch(err){toast(err.message)}break}
+    case 'petname':try{const r=await api('/api/pet',{chat:S.cur,name:$('#petName').value});Object.assign(S.chats[S.cur],r.chat);toast('Имя сохранено');refreshPetBtn()}catch(err){toast(err.message)}break;
+    case 'petpat':petPat(true);wsSend({t:'pat',chat:S.cur});break;
+    case 'gadd':newChatSheet(true,S.cur);break;
+    case 'gmember':memberSheet(S.cur,id);break;
+    case 'gtitle':try{const r=await api('/api/chats/title',{chat:S.cur,userId:id,title:$('#mtitle').value});Object.assign(S.chats[S.cur],r.chat);infoSheet();renderMsgs();toast('Подписано')}catch(err){toast(err.message)}break;
+    case 'gkick':{if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно удалить?';return}try{await api('/api/chats/remove',{chat:S.cur,userId:id});closeLayer()}catch(err){toast(err.message)}break}
+    case 'grsave':try{const n=$('#grname').value.trim();if(n&&n!==S.chats[S.cur].name){const r=await api('/api/chats/rename',{chat:S.cur,name:n});Object.assign(S.chats[S.cur],r.chat);renderMain();renderSide()}closeLayer()}catch(err){toast(err.message)}break;
+    case 'readers':readersSheet(el.dataset.chat||S.cur,id);break;
+    case 'mm-readers':readersSheet(S.cur,id);break;
     case 'mm-star':wsSend({t:'star',chat:S.cur,id});closeLayer();break;
     case 'mm-fwd':forwardSheet(id);break;
     case 'mm-saved':{const to=selfId();closeLayer();if(to&&wsSend({t:'fwd',chat:S.cur,id,to}))toast('Сохранено в Избранное ⭐');break}
