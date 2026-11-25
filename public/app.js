@@ -655,19 +655,27 @@ function ttClose(){const el=$('#ttview');if(el)el.remove()}
 /* the whole TikTok: in the computer app a separate window, on phones over Manasenger (or in the TikTok app) */
 function ttOpen(u){u=u||'https://www.tiktok.com/foryou';if(window.mnDesktop&&window.mnDesktop.tiktok){window.mnDesktop.tiktok(u);return}window.open(u,'_blank','noopener')}
 /* «ИИ» tab: chat with a free assistant (Gemini when the server has a key) */
-let AI=null,AIbusy=false;
+let AI=null,AIbusy=false,AIimg=null;
 function aiList(){if(!AI){AI=store.get('ai',[]);if(!Array.isArray(AI))AI=[]}return AI}
 function aiMsgs(){const l=aiList();
-  return l.length?l.map(m=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.r==='a'?linkify(m.t):esc(m.t)}</div>`).join('')+(AIbusy?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
+  return l.length?l.map(m=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?linkify(m.t):esc(m.t)}</div>`).join('')+(AIbusy?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
     :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, идеями — бесплатно, прямо в Manasenger</small></div>`}
 function aiHTML(){return `<div class="ai-box"><div class="ai-msgs" id="aimsgs">${aiMsgs()}</div>
-  <div class="ai-in glass"><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="Отправить">${ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
+  ${AIimg?`<div class="ai-att"><img src="${AIimg}" alt=""><button class="x" data-act="aiunpic" aria-label="Убрать фото">${ic('x')}</button></div>`:''}<div class="ai-in glass"><button class="x" data-act="aipic" title="Фото" aria-label="Прикрепить фото">${ic('image')}</button><input type="file" id="aifile" accept="image/*" hidden><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="Отправить">${ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
+/* shrinks a picture so it is quick to send (and small to keep on the phone) */
+function picScale(src,max,q){return new Promise(ok=>{const im=new Image();im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');
+  c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',q))};im.onerror=()=>ok(null);im.src=src})}
+function aiFile(f){if(!f||!/^image\//.test(f.type))return;const u=URL.createObjectURL(f);
+  picScale(u,1280,.82).then(d=>{URL.revokeObjectURL(u);if(!d)return toast('Не получилось открыть фото');AIimg=d;aiRe();const q=$('#aiq');q&&q.focus()})}
+function aiRe(){const o=$('#aiq'),v=o?o.value:'';renderSide();const q=$('#aiq');if(q&&v)q.value=v;aiDraw()}
 function aiDraw(){const b=$('#aimsgs');if(!b)return;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight}
 async function aiSend(){
-  const q=$('#aiq'),t=q&&q.value.trim();if(!t||AIbusy)return;
-  const l=aiList();l.push({r:'u',t});q.value='';AIbusy=true;aiDraw();
-  try{const r=await api('/api/ai',{msgs:l});l.push({r:'a',t:r.t})}catch(e){toast(e.message||'ИИ не ответил')}
-  AIbusy=false;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l);
+  const q=$('#aiq'),t=q?q.value.trim():'';if((!t&&!AIimg)||AIbusy)return;
+  const l=aiList(),m={r:'u',t};if(AIimg){m.img=AIimg;m.th=await picScale(AIimg,160,.6)}
+  l.push(m);AIimg=null;if(q)q.value='';AIbusy=true;renderSide();aiDraw();
+  const send=l.map((x,i)=>i===l.length-1?{r:x.r,t:x.t,img:x.img}:{r:x.r,t:x.t||(x.th?'[фото]':'')});
+  try{const r=await api('/api/ai',{msgs:send});l.push({r:'a',t:r.t})}catch(e){toast(e.message||'ИИ не ответил')}
+  AIbusy=false;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l.map(x=>({r:x.r,t:x.t,th:x.th})));
   if(S.tab==='ai'){if(!$('.ai-in .x'))renderSide();aiDraw()}
 }
 function tiktokHTML(){
@@ -2645,6 +2653,8 @@ document.addEventListener('click',async e=>{
     case 'pushon':await pushEnable();break;
     case 'notifretry':closeLayer();await pushEnable();break;
     case 'aisend':aiSend();break;
+    case 'aipic':$('#aifile').click();break;
+    case 'aiunpic':AIimg=null;aiRe();break;
     case 'aiclear':AI=[];store.set('ai',[]);renderSide();break;
     case 'pushno':store.set('pushNo',Date.now());$('#pushask')&&$('#pushask').remove();break;
     case 'bubbles':S.bdraft=null;bubbleSheet();break;
@@ -2702,6 +2712,7 @@ document.addEventListener('keydown',e=>{
   if(e.target.id==='txt'&&e.key==='ArrowUp'&&!e.target.value){const l=S.msgs[S.cur]||[];const m=[...l].reverse().find(x=>x.from===S.me.id&&x.text&&!x.del&&!x.pending);if(m){e.preventDefault();S.edit={m};e.target.value=m.text;renderCtx()}}
 });
 document.addEventListener('change',async e=>{
+  if(e.target.id==='aifile'){aiFile(e.target.files[0]);e.target.value='';return}
   if(e.target.id==='file'&&e.target.files[0]){const f=e.target.files[0];e.target.value='';if(/^video\//.test(f.type)){sendVideoFile(f);return}try{const d=await shrink(f);sendMsg(d)}catch(err){toast(err.message)}}
 });
 /* paste a picture straight into the message box */
