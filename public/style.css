@@ -887,3 +887,10 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .vw-top .gbtn{width:32px;height:32px;color:#fff}
 .vw-wait{display:none;position:absolute;inset:40px 0 0;place-items:center;color:#fff;opacity:.7;font-size:14px}.vwatch.waiting .vw-wait{display:grid}
 @media (max-width:760px){.vwatch{inset:auto 8px calc(90px + var(--safe-b)) 8px;width:auto}}
+
+/* "turn on notifications": bottom left on computers, under the header on phones — never over buttons */
+@media (min-width:761px){.pushask{left:96px;top:auto;bottom:16px;transform:none;width:380px}}
+@media (max-width:760px){.pushask{top:calc(70px + var(--safe-t))}}
+
+.rnd.novid{background:linear-gradient(135deg,#5b6b84,#2f3746)}.rnd.novid video{opacity:0!important}
+.rnd.novid::after{content:"🎤";position:absolute;inset:0;display:grid;place-items:center;font-size:54px;pointer-events:none}

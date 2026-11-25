@@ -599,7 +599,7 @@ VP.a.onpause=VP.a.onplay=()=>{const b=document.querySelector(`[data-vm="${VP.id}
 /* video circles: play silently in a loop while visible; a tap plays from the start with sound */
 let RND=null;
 const rndIO='IntersectionObserver' in window?new IntersectionObserver(es=>es.forEach(e=>{const v=e.target;if(v.dataset.snd)return;if(e.isIntersecting&&!isLite())v.play().catch(()=>{});else v.pause()}),{threshold:.6}):null;
-function watchRounds(){document.querySelectorAll('.rnd video').forEach(v=>{if(!v.dataset.w){v.dataset.w=1;v.addEventListener('playing',()=>v.classList.add('on'));v.addEventListener('loadeddata',()=>{if(!v.previousElementSibling)v.classList.add('on')});if(rndIO)rndIO.observe(v)}})}
+function watchRounds(){document.querySelectorAll('.rnd video').forEach(v=>{if(!v.dataset.w){v.dataset.w=1;v.addEventListener('playing',()=>v.classList.add('on'));v.addEventListener('loadeddata',()=>{if(!v.previousElementSibling)v.classList.add('on');if(!v.videoWidth)v.closest('.rnd').classList.add('novid')});if(rndIO)rndIO.observe(v)}})}
 function roundTap(el){
   const v=el.querySelector('video');if(!v)return;
   if(v.dataset.snd){v.pause();v.muted=true;v.loop=true;delete v.dataset.snd;el.classList.remove('snd');return}
@@ -752,10 +752,21 @@ async function sendVideoFile(f){
     sendMedia(f,{k:'video',dur:v.duration&&isFinite(v.duration)?v.duration:0,w,h,poster,posterLocal:poster},text.trim());
   }catch(e){toast(e.message)}finally{setTimeout(()=>URL.revokeObjectURL(url),60000)}
 }
+function hasVideo(blob){
+  return new Promise(ok=>{
+    const v=document.createElement('video'),u=URL.createObjectURL(blob);v.muted=true;v.playsInline=true;v.preload='metadata';
+    const done=r=>{clearTimeout(t);URL.revokeObjectURL(u);ok(r)};
+    v.onloadedmetadata=()=>done(v.videoWidth>0);v.onerror=()=>done(true); /* can't check here: send it as a circle */
+    const t=setTimeout(()=>done(true),4000);v.src=u;
+  });
+}
 const REC={
   on:false,
   mime(kind){
-    const c=kind==='round'?['video/mp4;codecs=avc1,mp4a','video/mp4','video/webm;codecs=vp8,opus','video/webm']:['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
+    /* WebM first: some phones say they can record MP4 video but write only the sound.
+       Safari (iPhone, Mac) records only MP4, so it keeps MP4. */
+    const safari=/^((?!chrome|android|crios|fxios|edg).)*safari/i.test(navigator.userAgent);
+    const c=kind==='round'?(safari?['video/mp4;codecs=avc1,mp4a','video/mp4']:['video/webm;codecs=vp8,opus','video/webm;codecs=vp9,opus','video/webm','video/mp4;codecs=avc1,mp4a','video/mp4']):['audio/mp4','audio/webm;codecs=opus','audio/webm','audio/ogg;codecs=opus'];
     return c.find(t=>window.MediaRecorder&&MediaRecorder.isTypeSupported&&MediaRecorder.isTypeSupported(t))||'';
   },
   async start(kind){
@@ -801,7 +812,13 @@ const REC={
     const type=(this.mr&&this.mr.mimeType||this.mime(this.kind)||'').split(';')[0]||(this.kind==='round'?'video/webm':'audio/webm');
     const blob=new Blob(this.chunks,{type});this.chunks=[];
     const w=this.wave,N=40,wave=Array.from({length:N},(_,i)=>{const a=Math.floor(i*w.length/N),b=Math.max(a+1,Math.floor((i+1)*w.length/N));let m=0;for(let k=a;k<b&&k<w.length;k++)m=Math.max(m,w[k]);return m});
-    sendMedia(blob,this.kind==='round'?{k:'round',dur,mirror:1,poster:this.poster||'',posterLocal:this.poster||''}:{k:'voice',dur,wave});
+    if(this.kind!=='round'){sendMedia(blob,{k:'voice',dur,wave});return}
+    /* make sure the circle really has a picture; if the phone recorded only sound, send it as a voice message */
+    const poster=this.poster||'';
+    hasVideo(blob).then(ok=>{
+      if(ok)sendMedia(blob,{k:'round',dur,mirror:1,poster,posterLocal:poster});
+      else{toast('Камера на этом устройстве не записала видео — отправили как голосовое',5000);sendMedia(new Blob([blob],{type:(blob.type||'').replace('video','audio')||'audio/webm'}),{k:'voice',dur,wave})}
+    });
   }
 };
 /* the round button: hold to record, short tap switches voice / video circle */
