@@ -588,7 +588,8 @@ function infoSheet(){
   if(c.type==='self'){starredSheet();return}
   if(c.type==='dm'){const u=peerOf(c),saved=!!S.contacts[u.id];
     sheet(`<div class="prof">${avatar(u,'xl')}<h3>${esc(nm(u))}</h3><small>${saved&&nm(u)!==u.name?esc(u.name)+' · ':''}@${esc(u.username)} · ${esc(seen(u))}</small>${u.bio?`<p style="margin:8px 0 0">${esc(u.bio)}</p>`:''}
-      ${c.streak&&c.streak.n>=3?`<p class="fire-note">${fire(c,true)}<br>${c.streak.today?`Вы общаетесь ${c.streak.n} дн. подряд`:'Напишите друг другу сегодня, иначе огонёк погаснет'}</p>`:`<p class="fire-note dim">Общайтесь 3 дня подряд — и появится огонёк 🔥</p>`}</div>
+      ${c.streak&&c.streak.n>=3?`<p class="fire-note">${fire(c,true)}<br>${c.streak.today?`Вы общаетесь ${c.streak.n} дн. подряд`:'Напишите друг другу сегодня, иначе огонёк погаснет'}</p>`:`<p class="fire-note dim">Общайтесь 3 дня подряд — и появится огонёк 🔥</p>`}
+      ${c.pet?`<button class="gbtn" style="margin-top:10px" data-act="pet">🥚 ${esc(c.pet.name||'Серийчик')} — открыть питомца</button>`:`<p class="fire-note dim">Напишите друг другу сегодня — появится ваш питомец Серийчик 🥚</p>`}</div>
       <div class="btns" style="justify-content:center"><button class="gbtn" data-act="call" data-k="audio">${ic('phone')}Звонок</button><button class="gbtn" data-act="call" data-k="video">${ic('video')}Видео</button>
       <button class="gbtn" data-act="editcontact" data-id="${u.id}">${ic(saved?'edit':'addUser')}${saved?'Имя':'В контакты'}</button></div>`);return}
   const admin=c.admin===S.me.id,T=c.titles||{};

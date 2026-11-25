@@ -77,6 +77,8 @@ function chatFor(c,uid){
   const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||'',titles:c.titles||{}};
   if(c.server)o.server=c.server;
   const st=streakOut(c);if(st)o.streak=st;
+  /* chats that already had a streak before the pet existed get one right away */
+  if(!c.pet&&c.type==='dm'&&c.st&&c.st.n>=1){c.pet={name:'Серийчик',best:c.st.n};mark('c:'+c.id)}
   if(c.pet)o.pet=c.pet;
   return o;
 }
