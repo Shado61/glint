@@ -70,7 +70,7 @@ jobs:
   desktop:
     if: github.event_name != 'schedule'
     strategy:
-      matrix: { os: [windows-latest, macos-latest, ubuntu-latest] }
+      matrix: { os: [windows-latest, ubuntu-latest] }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -105,3 +105,22 @@ jobs:
             **Windows:** `Manasenger-Setup.exe` · **Mac:** `Manasenger-mac.dmg` · **Linux:** `Manasenger-linux.AppImage`
             Приложения открывают ваш Manasenger — аккаунт, чаты и звонки те же.
           files: out/*
+  # Mac builds wait a long time for a free machine, so they publish on their own and never hold up Windows/Android
+  mac:
+    if: github.event_name != 'schedule'
+    needs: [release]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - name: Build
+        working-directory: desktop
+        env: { CSC_IDENTITY_AUTO_DISCOVERY: 'false' }
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version --allow-same-version && npm install && npm run dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apps
+          files: |
+            desktop/dist/Manasenger-*
+            desktop/dist/latest-mac.yml
