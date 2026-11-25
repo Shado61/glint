@@ -331,18 +331,19 @@ function renderSideNow(){
   if(S.view!=='home'&&S.servers[S.view]){el.innerHTML=serverSideHTML(S.servers[S.view])+voicePanelHTML();return}
   S.view='home';
   const keep=document.activeElement&&document.activeElement.id==='q';
-  const head={calls:'Звонки',contacts:'Контакты',tiktok:'TikTok'}[S.tab]||'Чаты';
-  const btns=S.tab==='contacts'?`<button class="gbtn ic" data-act="addcontact" title="Добавить контакт" aria-label="Добавить контакт">${ic('addUser')}</button>`
+  const head={calls:'Звонки',contacts:'Контакты',tiktok:'TikTok',ai:'ИИ-помощник'}[S.tab]||'Чаты';
+  const btns=S.tab==='ai'?'':S.tab==='contacts'?`<button class="gbtn ic" data-act="addcontact" title="Добавить контакт" aria-label="Добавить контакт">${ic('addUser')}</button>`
     :`<button class="gbtn ic" data-act="newgroup" title="Новая группа" aria-label="Новая группа">${ic('users')}</button>
       <button class="gbtn ic" data-act="newchat" title="Новый чат" aria-label="Новый чат">${ic('edit')}</button>`;
   el.innerHTML=`<div class="side-h"><h1>${head}</h1>${btns}</div>
-    ${S.tab!=='calls'&&S.tab!=='tiktok'?`<label class="search">${ic('search')}<input id="q" placeholder="${S.tab==='contacts'?'Поиск по контактам':'Поиск или @логин'}" value="${esc(S.q)}" autocomplete="off" spellcheck="false"></label>`:''}
-    <div class="list" id="list">${S.tab==='chats'?storiesRowHTML()+chatListHTML():S.tab==='contacts'?contactsHTML():S.tab==='tiktok'?tiktokHTML():callsHTML()}</div>
+    ${S.tab!=='calls'&&S.tab!=='tiktok'&&S.tab!=='ai'?`<label class="search">${ic('search')}<input id="q" placeholder="${S.tab==='contacts'?'Поиск по контактам':'Поиск или @логин'}" value="${esc(S.q)}" autocomplete="off" spellcheck="false"></label>`:''}
+    <div class="list" id="list">${S.tab==='chats'?storiesRowHTML()+chatListHTML():S.tab==='contacts'?contactsHTML():S.tab==='tiktok'?tiktokHTML():S.tab==='ai'?aiHTML():callsHTML()}</div>
     <nav class="tabbar glass pill">
       <button class="${S.tab==='chats'?'on':''}" data-act="tab" data-t="chats">${ic('chats')}<span>Чаты</span></button>
       <button class="${S.tab==='contacts'?'on':''}" data-act="tab" data-t="contacts">${ic('contact')}<span>Контакты</span></button>
       <button class="${S.tab==='calls'?'on':''}" data-act="tab" data-t="calls">${ic('calls')}<span>Звонки</span></button>
       <button class="${S.tab==='tiktok'?'on':''}" data-act="tab" data-t="tiktok"><span class="tt-ic">♪</span><span>TikTok</span></button>
+      <button class="${S.tab==='ai'?'on':''}" data-act="tab" data-t="ai"><span class="tt-ic">✦</span><span>ИИ</span></button>
       <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Настройки</span></button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 }
@@ -653,6 +654,22 @@ async function ttPlay(u){
 function ttClose(){const el=$('#ttview');if(el)el.remove()}
 /* the whole TikTok: in the computer app a separate window, on phones over Manasenger (or in the TikTok app) */
 function ttOpen(u){u=u||'https://www.tiktok.com/foryou';if(window.mnDesktop&&window.mnDesktop.tiktok){window.mnDesktop.tiktok(u);return}window.open(u,'_blank','noopener')}
+/* «ИИ» tab: chat with a free assistant (Gemini when the server has a key) */
+let AI=null,AIbusy=false;
+function aiList(){if(!AI){AI=store.get('ai',[]);if(!Array.isArray(AI))AI=[]}return AI}
+function aiMsgs(){const l=aiList();
+  return l.length?l.map(m=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.r==='a'?linkify(m.t):esc(m.t)}</div>`).join('')+(AIbusy?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
+    :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, идеями — бесплатно, прямо в Manasenger</small></div>`}
+function aiHTML(){return `<div class="ai-box"><div class="ai-msgs" id="aimsgs">${aiMsgs()}</div>
+  <div class="ai-in glass"><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="Отправить">${ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
+function aiDraw(){const b=$('#aimsgs');if(!b)return;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight}
+async function aiSend(){
+  const q=$('#aiq'),t=q&&q.value.trim();if(!t||AIbusy)return;
+  const l=aiList();l.push({r:'u',t});q.value='';AIbusy=true;aiDraw();
+  try{const r=await api('/api/ai',{msgs:l});l.push({r:'a',t:r.t})}catch(e){toast(e.message||'ИИ не ответил')}
+  AIbusy=false;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l);
+  if(S.tab==='ai'){if(!$('.ai-in .x'))renderSide();aiDraw()}
+}
 function tiktokHTML(){
   const seen=[];Object.values(S.msgs).forEach(l=>(l||[]).forEach(m=>{const x=m.text&&TT_RE.exec(m.text);if(x&&!seen.some(s=>s.u===x[0]))seen.push({u:x[0],from:m.from,ts:m.ts})}));
   seen.sort((a,b)=>b.ts-a.ts);
@@ -2466,7 +2483,7 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
       }
     }
     else if(mode==='tabs'&&Math.abs(dx)>80&&Math.abs(dx)>Math.abs(dy)*2){
-      const tabs=['chats','contacts','calls'],i=tabs.indexOf(S.tab),j=i+(dx<0?1:-1);
+      const tabs=['chats','contacts','calls','tiktok','ai'],i=tabs.indexOf(S.tab),j=i+(dx<0?1:-1);
       if(i>=0&&j>=0&&j<tabs.length){S.tab=tabs[j];S.q='';if(S.tab==='calls')S.calls=null;renderSide();navigator.vibrate&&navigator.vibrate(5)}
     }
     mode=null;el=null;bub=null;
@@ -2627,7 +2644,9 @@ document.addEventListener('click',async e=>{
     case 'notif':if(Notification.permission==='granted')await pushTest();else await pushEnable();settingsSheet();break;
     case 'pushon':await pushEnable();break;
     case 'notifretry':closeLayer();await pushEnable();break;
-    case 'pushno':store.set('pushNo',1);renderPushAsk();break;
+    case 'aisend':aiSend();break;
+    case 'aiclear':AI=[];store.set('ai',[]);renderSide();break;
+    case 'pushno':store.set('pushNo',Date.now());$('#pushask')&&$('#pushask').remove();break;
     case 'bubbles':S.bdraft=null;bubbleSheet();break;
     case 'bstyle':S.bdraft.s=el.dataset.v;bubbleSheet();break;
     case 'bframe':S.bdraft.f=el.dataset.v;bubbleSheet();break;
@@ -2677,6 +2696,7 @@ document.addEventListener('input',e=>{
 });
 document.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.matches('.sheet input:not([type=checkbox])')&&!e.isComposing){const b=e.target.closest('.sheet').querySelector('.gbtn.primary');if(b){e.preventDefault();b.click()}return}
+  if(e.target.id==='aiq'&&e.key==='Enter'&&!e.shiftKey&&!e.isComposing){e.preventDefault();aiSend();return}
   if(e.target.id==='txt'&&e.key==='Enter'&&!e.shiftKey&&!touch&&!e.isComposing){e.preventDefault();sendMsg()}
   if(e.key==='Escape'&&!SV){if($('#layer').innerHTML)closeLayer();else if(S.reply||S.edit){S.reply=S.edit=null;renderCtx()}else if(SE||SC)goBack()}
   if(e.target.id==='txt'&&e.key==='ArrowUp'&&!e.target.value){const l=S.msgs[S.cur]||[];const m=[...l].reverse().find(x=>x.from===S.me.id&&x.text&&!x.del&&!x.pending);if(m){e.preventDefault();S.edit={m};e.target.value=m.text;renderCtx()}}

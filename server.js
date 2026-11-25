@@ -947,6 +947,29 @@ function groomJoin(ws,u,c,kind,m){
   }
 }
 /* "Проверить" in settings: a test notification to every device of this account, with the answer of each push service */
+/* «ИИ» tab: free assistant. With GEMINI_API_KEY (free key from aistudio.google.com) it asks Google Gemini, otherwise a free public model */
+const AI_SYS='Ты — дружелюбный помощник внутри мессенджера Manasenger. Отвечай по-русски (или на языке вопроса), коротко и по делу.';
+API['POST /api/ai']=async(req,res,b,u)=>{
+  need(u);if(!limit('ai:'+u.id,20,60e3))throw E(429,'Слишком много вопросов, подождите минуту');
+  const msgs=(Array.isArray(b.msgs)?b.msgs:[]).slice(-12).map(m=>({r:m.r==='a'?'a':'u',t:String(m.t||'').slice(0,4000)})).filter(m=>m.t);
+  if(!msgs.length||msgs[msgs.length-1].r!=='u')throw E(400,'Пустой вопрос');
+  const key=process.env.GEMINI_API_KEY;
+  if(key){
+    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(process.env.GEMINI_MODEL||'gemini-2.5-flash')+':generateContent',{method:'POST',
+      headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(40000),
+      body:JSON.stringify({systemInstruction:{parts:[{text:AI_SYS}]},contents:msgs.map(m=>({role:m.r==='a'?'model':'user',parts:[{text:m.t}]}))})}).catch(()=>null);
+    const j=r&&await r.json().catch(()=>null);
+    const t=j&&j.candidates&&j.candidates[0]&&j.candidates[0].content&&(j.candidates[0].content.parts||[]).map(x=>x.text||'').join('');
+    if(t)return {t,by:'Gemini'};
+    if(!r||r.status!==429)console.log('Gemini:',r&&r.status,j&&j.error&&j.error.message);
+  }
+  const r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(40000),
+    body:JSON.stringify({model:'openai',messages:[{role:'system',content:AI_SYS}].concat(msgs.map(m=>({role:m.r==='a'?'assistant':'user',content:m.t})))})}).catch(()=>null);
+  const j=r&&await r.json().catch(()=>null);
+  const t=j&&j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content;
+  if(t)return {t:String(t),by:'free'};
+  throw E(503,'ИИ сейчас не отвечает. Попробуйте ещё раз через минуту');
+};
 API['POST /api/push/test']=async(req,res,b,u)=>{
   need(u);if(!webpush)return {sent:0,error:'на сервере нет модуля уведомлений'};
   const subs=u.push||[];

@@ -927,3 +927,23 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .emo-cats button{flex:none;width:38px;height:34px;border-radius:10px;font-size:19px;opacity:.6}.emo-cats button.on{opacity:1;background:rgba(255,255,255,.14)}
 .emo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(40px,1fr));gap:2px;max-height:230px;overflow-y:auto;padding:2px 4px;overscroll-behavior:contain}
 .emo-grid button{height:42px;font-size:27px;border-radius:10px;line-height:1}.emo-grid button:hover{background:rgba(255,255,255,.1)}
+/* ИИ tab */
+.ai-box{display:flex;flex-direction:column;min-height:100%;padding-bottom:calc(150px + var(--safe-b))}
+.ai-msgs{display:flex;flex-direction:column;gap:8px;padding:8px 4px;margin-top:auto}
+.ai-m{max-width:88%;padding:9px 13px;border-radius:18px;font-size:14.5px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word;user-select:text}
+.ai-m.u{align-self:flex-end;background:var(--acc,#5b8cff);color:#fff;border-bottom-right-radius:6px}
+.ai-m.a{align-self:flex-start;background:rgba(255,255,255,.09);border-bottom-left-radius:6px}
+:root.light .ai-m.a{background:rgba(0,0,0,.06)}
+.ai-m.dots{display:flex;gap:4px}.ai-m.dots i{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.4;animation:aid 1s infinite}.ai-m.dots i:nth-child(2){animation-delay:.15s}.ai-m.dots i:nth-child(3){animation-delay:.3s}
+@keyframes aid{50%{opacity:1;transform:translateY(-3px)}}
+.ai-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:40px 20px;color:var(--fg2)}.ai-empty small{color:var(--fg3)}
+.ai-in{position:absolute;left:10px;right:10px;max-width:520px;margin:0 auto;bottom:calc(84px + var(--safe-b));display:flex;align-items:flex-end;gap:6px;padding:6px 6px 6px 14px;border-radius:24px;z-index:6}
+.ai-in textarea{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--fg);font:inherit;font-size:15px;resize:none;max-height:120px;padding:8px 0}
+.ai-in .x{width:36px;height:36px;display:grid;place-items:center;color:var(--fg3)}.ai-in .x svg{width:16px;height:16px}
+/* phone: everything sits at the bottom, within thumb reach */
+.msgs>:first-child{margin-top:auto}
+@media (max-width:760px){
+  .sheet{top:auto;bottom:0;left:0;right:0;transform:none;width:100%;max-height:calc(var(--app-h,100vh) - 30px - var(--safe-t));border-radius:28px 28px 0 0;padding-bottom:calc(22px + var(--safe-b));animation:sheetup .3s cubic-bezier(.2,1,.4,1)}
+  .pushask{top:auto!important;bottom:calc(96px + var(--safe-b))}
+}
+@keyframes sheetup{from{transform:translateY(100%)}}
