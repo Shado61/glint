@@ -1040,7 +1040,9 @@ function onWS(m){
       if(S.view===m.server)S.view='home';
       if(S.cur&&!S.chats[S.cur])closeChat();else renderSide();return;
     }
-    case 'voice':{const g=S.servers[m.server];if(!g)return;const ch=g.channels.find(x=>x.id===m.channel);if(ch)ch.users=m.users;renderSide();return}
+    case 'voice':{const g=S.servers[m.server];if(!g)return;const ch=g.channels.find(x=>x.id===m.channel);if(ch)ch.users=m.users;
+      if(VW&&VC&&m.channel===VC.cid&&!m.users.some(x=>x.id===VW.uid&&x.screen)){voiceWatch(null);toast('Демонстрация экрана закончилась')}
+      renderSide();return}
     case 'vjoined':case 'vrtc':case 'vpeer-left':case 'vkicked':return onVoiceMsg(m);
     case 'stars':S.stars=new Set(m.stars);if(S.cur)renderMsgs();return;
     case 'pat':if(S.cur===m.chat){petPat(false);if(!$('#petHearts'))toast(`${nm(S.users[m.user])} погладил(а) ${(S.chats[m.chat].pet||{}).name||'Серийчика'} 💗`)}return;
@@ -1357,13 +1359,37 @@ async function callFxSheet(){
   const draw=()=>{const el=$('#cfxp');if(!CALL||!el){return}fxRedraw(el,fxStripHTML(M,CALL.fxs,'data-act="cfx" data-x'))};
   S.fxDraw=draw;draw();
 }
-const canShare=()=>!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!touch;
+/* ---------- screen sharing (any call): the whole screen or one app ----------
+   In the computer app: our own list of screens and windows with previews.
+   In a browser: the browser's own choice of tab / window / whole screen. */
+const canShare=()=>!!(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia)&&!/iP(hone|ad|od)/.test(navigator.userAgent);
+function pickSource(){
+  return new Promise(async(ok)=>{
+    let list=[];try{list=await window.mnDesktop.sources()}catch(e){}
+    if(!list.length){ok(null);return}
+    const card=x=>`<button class="src" data-act="srcpick" data-id="${esc(x.id)}">${x.thumb?`<img src="${x.thumb}" alt="">`:'<span class="nothumb"></span>'}<span class="srcn">${x.icon?`<img class="srci" src="${x.icon}" alt="">`:''}${esc(x.screen?(x.name.replace(/^Screen\s*/i,'Экран ')||'Весь экран'):x.name)}</span></button>`;
+    S.srcPick=id=>{S.srcPick=null;closeLayer();ok(id)};
+    sheet(`<h2>Что показать?</h2>
+      <div class="section-t">Весь экран</div><div class="srcs">${list.filter(x=>x.screen).map(card).join('')}</div>
+      ${list.some(x=>!x.screen)?`<div class="section-t">Окно приложения</div><div class="srcs">${list.filter(x=>!x.screen).map(card).join('')}</div>`:''}
+      <div class="btns"><button class="gbtn" data-act="srccancel">Отмена</button></div>`);
+  });
+}
+async function captureScreen(){
+  if(!canShare()){toast('На этом устройстве браузер не умеет показывать экран. Попробуйте с компьютера');return null}
+  try{
+    if(window.mnDesktop&&window.mnDesktop.sources){const id=await pickSource();if(!id)return null;window.mnDesktop.choose(id)}
+    const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:20,max:30},width:{max:1920},height:{max:1080}},audio:false,selfBrowserSurface:'exclude',surfaceSwitching:'include',preferCurrentTab:false});
+    const t=s.getVideoTracks()[0];if(t&&'contentHint' in t)t.contentHint='detail';
+    return s;
+  }catch(e){if(e.name!=='NotAllowedError'&&e.name!=='AbortError')toast('Демонстрация экрана недоступна');return null}
+}
 async function toggleScreen(){
   if(!CALL||!CALL.vv)return;
   if(CALL.screen){stopScreen();return}
   try{
-    const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:20,max:30},width:{max:1920},height:{max:1080}},audio:false});
-    const t=s.getVideoTracks()[0];if('contentHint' in t)t.contentHint='detail';
+    const s=await captureScreen();if(!s||!CALL)return;
+    const t=s.getVideoTracks()[0];
     CALL.screenStream=s;CALL.screenTrack=t;CALL.screen=true;
     await CALL.vv.sender.replaceTrack(t);tuneSenders();
     t.onended=()=>stopScreen();
@@ -1462,7 +1488,7 @@ function serverSideHTML(g){
       ${text.map(ch=>{const c=S.chats[ch.id]||{};return `<button class="ch ${S.cur===ch.id?'on':''} ${c.unread?'unread':''}" data-act="open" data-id="${ch.id}"><span class="hash">#</span><span class="nm">${esc(ch.name)}</span>${c.pet?fire(c):''}${c.unread?`<span class="badge">${c.unread>99?'99+':c.unread}</span>`:''}</button>`}).join('')}
       <div class="ch-group"><span>Голосовые каналы</span>${own?`<button data-act="newch" data-k="voice" title="Создать голосовой канал" aria-label="Создать голосовой канал">${ic('plus')}</button>`:''}</div>
       ${voice.map(ch=>`<button class="ch ${VC&&VC.cid===ch.id?'on':''}" data-act="vjoin" data-id="${ch.id}" data-s="${g.id}">${ic('vol')}<span class="nm">${esc(ch.name)}</span>${ch.users&&ch.users.length?`<small style="color:var(--fg3)">${ch.users.length}</small>`:''}</button>
-        ${ch.users&&ch.users.length?`<div class="vusers">${ch.users.map(v=>{const u=S.users[v.id]||{name:'?'};return `<div class="vu ${VC&&VC.speaking&&VC.speaking.has(v.id)?'speaking':''}" data-vu="${v.id}">${avatar(u,'xs',false)}<span>${esc(nm(u))}</span><span class="st">${v.mute?ic('micOff'):''}${v.deaf?ic('deafOff'):''}</span></div>`}).join('')}</div>`:''}`).join('')}
+        ${ch.users&&ch.users.length?`<div class="vusers">${ch.users.map(v=>{const u=S.users[v.id]||{name:'?'};return `<div class="vu ${VC&&VC.speaking&&VC.speaking.has(v.id)?'speaking':''}" data-vu="${v.id}">${avatar(u,'xs',false)}<span>${esc(nm(u))}</span><span class="st">${v.screen?`<button class="live" data-act="vwatch" data-id="${v.id}" title="Смотреть экран">${v.id===S.me.id?'ЭКРАН':'СМОТРЕТЬ'}</button>`:''}${v.mute?ic('micOff'):''}${v.deaf?ic('deafOff'):''}</span></div>`}).join('')}</div>`:''}`).join('')}
     </div>`;
 }
 function voicePanelHTML(){
@@ -1471,6 +1497,7 @@ function voicePanelHTML(){
   return `<div class="vpanel glass"><span class="mid"><b>${VC.state==='on'?'Голосовая связь':'Подключение…'}</b><small>${esc(ch?ch.name:'')} · ${esc(g?g.name:'')}</small></span>
     <button class="gbtn ic ${VC.mute?'off':''}" data-act="vmute" title="${VC.mute?'Включить микрофон':'Выключить микрофон'}" aria-label="Микрофон">${ic(VC.mute?'micOff':'mic')}</button>
     <button class="gbtn ic ${VC.deaf?'off':''}" data-act="vdeaf" title="${VC.deaf?'Включить звук':'Выключить звук'}" aria-label="Звук">${ic(VC.deaf?'deafOff':'deaf')}</button>
+    ${canShare()?`<button class="gbtn ic ${VC.screen?'on':''}" data-act="vscreen" title="${VC.screen?'Остановить демонстрацию':'Показать экран'}" aria-label="Демонстрация экрана">${ic('screen')}</button>`:''}
     <button class="gbtn ic danger" data-act="vleave" title="Отключиться" aria-label="Отключиться">${ic('end')}</button></div>`;
 }
 function addServerSheet(){
@@ -1608,7 +1635,7 @@ async function gcFlip(){
 async function gcScreen(){
   if(!GC)return;
   if(GC.screen){GC.screenStream.getTracks().forEach(t=>t.stop());GC.screen=false;GC.screenStream=GC.screenTrack=null;gcPush();return}
-  try{const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:15,max:30}},audio:false});GC.screenStream=s;GC.screenTrack=s.getVideoTracks()[0];GC.screen=true;GC.screenTrack.onended=()=>{if(GC&&GC.screen)gcScreen()};gcPush()}
+  try{const s=await captureScreen();if(!s||!GC)return;GC.screenStream=s;GC.screenTrack=s.getVideoTracks()[0];GC.screen=true;GC.screenTrack.onended=()=>{if(GC&&GC.screen)gcScreen()};gcPush()}
   catch(e){if(e.name!=='NotAllowedError')toast('Демонстрация экрана недоступна')}
 }
 function gcTile(uid){
@@ -1640,7 +1667,7 @@ function gcRender(){
   });
   [...grid.children].slice(ids.length).forEach(x=>x.remove());
   GC.tiles.forEach((t,uid)=>{if(!ids.includes(uid))GC.tiles.delete(uid)});
-  const canScreen=!touch&&navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia;
+  const canScreen=canShare();
   el.querySelector('.gc-bar').innerHTML=`<button class="cbtn ${GC.mic?'':'off'}" data-act="gc-mic" aria-label="Микрофон">${ic(GC.mic?'mic':'micOff')}</button>
     <button class="cbtn ${GC.cam?'':'off'}" data-act="gc-cam" aria-label="Камера">${ic(GC.cam?'video':'videoOff')}</button>
     ${GC.cam&&touch?`<button class="cbtn" data-act="gc-flip" aria-label="Другая камера">${ic('flip')}</button>`:''}
@@ -1690,7 +1717,7 @@ function voiceLeave(silent){
   if(!VC)return;
   if(!silent)wsSend({t:'vleave'});
   VC.peers.forEach(p=>closePeer(p));
-  VC.local&&VC.local.getTracks().forEach(t=>t.stop());
+  VC.local&&VC.local.getTracks().forEach(t=>t.stop());VC.screenStream&&VC.screenStream.getTracks().forEach(t=>t.stop());voiceWatch(null);
   clearInterval(VC.levelT);
   VC=null;beep([784,523],.09,.02,.05);renderSide();
 }
@@ -1699,8 +1726,10 @@ async function voicePeer(uid,offer){
   const pc=new RTCPeerConnection({iceServers:await iceServers()});
   const p={pc,uid,pending:[],audio:null};VC.peers.set(uid,p);
   VC.local.getTracks().forEach(t=>pc.addTrack(t,VC.local));
+  if(VC.screen&&VC.screenTrack&&offer)p.ss=pc.addTrack(VC.screenTrack,VC.screenStream);
   pc.onicecandidate=e=>{if(e.candidate)wsSend({t:'vrtc',to:uid,data:{cand:e.candidate.toJSON()}})};
   pc.ontrack=e=>{
+    if(e.track.kind==='video'){p.video=new MediaStream([e.track]);e.track.onended=e.track.onmute=()=>voiceWatchRefresh();e.track.onunmute=()=>voiceWatchRefresh();voiceWatchRefresh();return}
     if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}
     const st=e.streams[0]||new MediaStream([e.track]);p.audio.srcObject=st;p.audio.muted=VC.deaf;p.audio.play().catch(()=>{});
     watchLevel(uid,st);
@@ -1720,7 +1749,9 @@ async function onVoiceMsg(m){
       if(d.sdp){
         if(!p)p=await voicePeer(m.from,false);
         await p.pc.setRemoteDescription(d.sdp);
-        if(d.sdp.type==='offer'){const a=await p.pc.createAnswer();await setLocal(p.pc,a,48);wsSend({t:'vrtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}})}
+        if(d.sdp.type==='offer'){const a=await p.pc.createAnswer();await setLocal(p.pc,a,48);wsSend({t:'vrtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
+          /* I'm showing my screen and this person joined later: send it to them too */
+          if(VC.screen&&VC.screenTrack&&!p.ss)setTimeout(()=>{if(VC&&VC.screen&&!p.ss){p.ss=p.pc.addTrack(VC.screenTrack,VC.screenStream);voiceRenego(p)}},300)}
         for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
       }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}
     }catch(e){console.error(e)}
@@ -1745,8 +1776,42 @@ function watchLevel(uid,stream){
     if(changed)document.querySelectorAll('[data-vu]').forEach(e=>e.classList.toggle('speaking',VC.speaking.has(e.dataset.vu)));
   },150);
 }
-function voiceMute(){if(!VC)return;VC.mute=!VC.mute;if(VC.local)VC.local.getAudioTracks().forEach(t=>t.enabled=!VC.mute);wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf});renderSide()}
-function voiceDeaf(){if(!VC)return;VC.deaf=!VC.deaf;VC.peers.forEach(p=>{if(p.audio)p.audio.muted=VC.deaf});if(VC.deaf&&!VC.mute)voiceMute();else{wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf});renderSide()}}
+/* screen sharing in a voice channel */
+async function voiceRenego(p){try{const o=await p.pc.createOffer();await setLocal(p.pc,o,48);wsSend({t:'vrtc',to:p.uid,data:{sdp:p.pc.localDescription.toJSON()}})}catch(e){console.error(e)}}
+async function voiceScreen(){
+  if(!VC)return;
+  if(VC.screen){
+    VC.screen=false;VC.screenStream&&VC.screenStream.getTracks().forEach(t=>t.stop());VC.screenStream=VC.screenTrack=null;
+    VC.peers.forEach(p=>{if(p.ss){try{p.pc.removeTrack(p.ss)}catch(e){}p.ss=null;voiceRenego(p)}});
+    if(VW&&VW.uid===S.me.id)voiceWatch(null);
+  }else{
+    const s=await captureScreen();if(!s||!VC){s&&s.getTracks().forEach(t=>t.stop());return}
+    VC.screenStream=s;VC.screenTrack=s.getVideoTracks()[0];VC.screen=true;
+    VC.screenTrack.onended=()=>{if(VC&&VC.screen)voiceScreen()};
+    VC.peers.forEach(p=>{p.ss=p.pc.addTrack(VC.screenTrack,VC.screenStream);voiceRenego(p)});
+  }
+  wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf,screen:!!VC.screen});renderSide();
+}
+/* watching someone's screen: a big window that can be made full screen */
+let VW=null;
+function voiceWatch(uid){
+  let el=$('#vwatch');
+  if(!uid){VW=null;if(el)el.remove();return}
+  VW={uid};
+  if(!el){el=document.createElement('div');el.id='vwatch';el.className='vwatch';document.body.appendChild(el)}
+  const u=S.users[uid]||{name:'?'};
+  el.innerHTML=`<div class="vw-top"><span class="live">В ЭФИРЕ</span><b>${esc(uid===S.me.id?'Ваш экран':nm(u))}</b><span class="mid"></span><button class="gbtn ic" data-act="vwfull" aria-label="Во весь экран">${ic('min')}</button><button class="gbtn ic" data-act="vwclose" aria-label="Закрыть">${ic('x')}</button></div><video autoplay playsinline muted></video><div class="vw-wait">Ждём картинку…</div>`;
+  voiceWatchRefresh();
+}
+function voiceWatchRefresh(){
+  if(!VW)return;const el=$('#vwatch');if(!el)return;const v=el.querySelector('video');
+  const src=VW.uid===S.me.id?(VC&&VC.screenStream):(VC&&VC.peers.get(VW.uid)&&VC.peers.get(VW.uid).video);
+  const live=!!src&&src.getVideoTracks().some(t=>t.readyState==='live'&&!t.muted);
+  if(src&&v.srcObject!==src){v.srcObject=src;v.play().catch(()=>{})}
+  el.classList.toggle('waiting',!live);
+}
+function voiceMute(){if(!VC)return;VC.mute=!VC.mute;if(VC.local)VC.local.getAudioTracks().forEach(t=>t.enabled=!VC.mute);wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf,screen:!!VC.screen});renderSide()}
+function voiceDeaf(){if(!VC)return;VC.deaf=!VC.deaf;VC.peers.forEach(p=>{if(p.audio)p.audio.muted=VC.deaf});if(VC.deaf&&!VC.mute)voiceMute();else{wsSend({t:'vstate',mute:VC.mute,deaf:VC.deaf,screen:!!VC.screen});renderSide()}}
 addEventListener('pagehide',()=>{if(VC)wsSend({t:'vleave'})});
 
 /* =================================================================== STORIES
@@ -2395,6 +2460,12 @@ document.addEventListener('click',async e=>{
     case 'once':S.once=!S.once;renderOnceBtn();toast(S.once?'🔥 Следующее фото, видео, голосовое или кружок можно будет посмотреть только 1 раз':'Обычная отправка',S.once?4500:1500);break;
     case 'onceopen':onceOpen(el.dataset.id);break;
     case 'onceclose':onceClose();break;
+    case 'srcpick':if(S.srcPick)S.srcPick(el.dataset.id);break;
+    case 'srccancel':if(S.srcPick)S.srcPick(null);else closeLayer();break;
+    case 'vscreen':voiceScreen();break;
+    case 'vwatch':voiceWatch(el.dataset.id);break;
+    case 'vwclose':voiceWatch(null);break;
+    case 'vwfull':{const v=document.querySelector('#vwatch video');if(v){if(document.fullscreenElement)document.exitFullscreen();else (v.requestFullscreen||v.webkitEnterFullscreen||(()=>{})).call(v)}break}
     case 'mute':{const c=S.chats[S.cur];if(!c)break;const r=await api('/api/chats/mute',{chat:c.id,on:!c.muted});S.chats[c.id]=r.chat;toast(r.chat.muted?'Уведомления чата выключены 🔕':'Уведомления чата включены 🔔');closeLayer();renderSide();break}
     case 'install':installSheet();break;
     case 'doinstall':if(deferredInstall){deferredInstall.prompt();deferredInstall=null}closeLayer();break;

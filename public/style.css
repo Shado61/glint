@@ -872,3 +872,18 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .ov-voice{display:flex;flex-direction:column;align-items:center;gap:22px;width:min(80vw,380px)}
 .ov-ic{width:110px;height:110px;border-radius:50%;display:grid;place-items:center;font-size:48px;background:linear-gradient(135deg,#ff9a4c,#e8457c);animation:pulse 1.6s infinite}
 .ov-bar{width:100%;height:6px;border-radius:9px;background:rgba(255,255,255,.2);overflow:hidden}.ov-bar i{display:block;height:100%;width:0;background:#fff;transition:width .25s linear}
+
+/* ---------- screen sharing: picker and voice-channel viewer ---------- */
+.srcs{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-bottom:6px}
+.src{display:flex;flex-direction:column;gap:6px;padding:6px;border-radius:14px;background:rgba(255,255,255,.05);border:1.5px solid transparent;text-align:left}
+.src:hover{border-color:var(--acc);background:rgba(125,156,196,.14)}
+.src>img,.src .nothumb{width:100%;aspect-ratio:16/9;object-fit:contain;border-radius:9px;background:#000}
+.srcn{display:flex;align-items:center;gap:6px;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.srci{width:16px;height:16px;flex:none}
+.vu .live,.vw-top .live{font-size:9.5px;font-weight:800;letter-spacing:.04em;padding:2px 6px;border-radius:5px;background:#ff3b4f;color:#fff}
+.vu .live{cursor:pointer;margin-right:4px}
+.vwatch{position:fixed;z-index:44;right:16px;bottom:16px;width:min(720px,calc(100vw - 32px));aspect-ratio:16/10;background:#000;border-radius:18px;overflow:hidden;box-shadow:0 20px 60px -10px rgba(0,0,0,.7);border:1px solid rgba(255,255,255,.12);display:flex;flex-direction:column}
+.vwatch video{flex:1;min-height:0;width:100%;object-fit:contain;background:#000}
+.vw-top{display:flex;align-items:center;gap:8px;padding:6px 8px 6px 12px;color:#fff;background:rgba(30,31,35,.9);font-size:13px}.vw-top .mid{flex:1}
+.vw-top .gbtn{width:32px;height:32px;color:#fff}
+.vw-wait{display:none;position:absolute;inset:40px 0 0;place-items:center;color:#fff;opacity:.7;font-size:14px}.vwatch.waiting .vw-wait{display:grid}
+@media (max-width:760px){.vwatch{inset:auto 8px calc(90px + var(--safe-b)) 8px;width:auto}}

@@ -618,7 +618,7 @@ function serverOut(g,uid){
   return {id:g.id,name:g.name,color:g.color,owner:g.owner,members:g.members,invite:g.owner===uid?g.invite:'',
     channels:g.channels.map(ch=>ch.type==='voice'?{id:ch.id,type:'voice',name:ch.name,users:voiceUsers(ch.id)}:{id:ch.id,type:'text',name:ch.name})};
 }
-const voiceUsers=cid=>[...(VOICE.get(cid)||new Map()).entries()].map(([id,v])=>({id,mute:!!v.mute,deaf:!!v.deaf}));
+const voiceUsers=cid=>[...(VOICE.get(cid)||new Map()).entries()].map(([id,v])=>({id,mute:!!v.mute,deaf:!!v.deaf,screen:!!v.screen}));
 function pushServer(g,extra){
   g.members.forEach(m=>sendTo(m,Object.assign({t:'server',server:serverOut(g,m),users:g.members.map(i=>pubUser(DB.users[i])).filter(Boolean)},extra||{})));
 }
@@ -1003,7 +1003,7 @@ function handle(ws,u,m){
       voiceBroadcast(cid);return;
     }
     case 'vleave':{const cid=voiceChannelOf(u.id);if(cid&&VOICE.get(cid).get(u.id).ws===ws)voiceLeave(u.id,cid);return}
-    case 'vstate':{const cid=voiceChannelOf(u.id);if(!cid)return;const r=VOICE.get(cid).get(u.id);r.mute=!!m.mute;r.deaf=!!m.deaf;voiceBroadcast(cid);return}
+    case 'vstate':{const cid=voiceChannelOf(u.id);if(!cid)return;const r=VOICE.get(cid).get(u.id);r.mute=!!m.mute;r.deaf=!!m.deaf;r.screen=!!m.screen;voiceBroadcast(cid);return}
     case 'vrtc':{
       const cid=voiceChannelOf(u.id),to=String(m.to||'');if(!cid)return;
       const room=VOICE.get(cid),peer=room&&room.get(to);if(!peer||!peer.ws||peer.ws.readyState!==1)return;
