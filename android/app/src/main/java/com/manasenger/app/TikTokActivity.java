@@ -41,6 +41,32 @@ public class TikTokActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Color.rgb(24, 25, 28));
 
+        // top bar: close TikTok and go back to the chats
+        LinearLayout top = new LinearLayout(this);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.CENTER_VERTICAL);
+        top.setPadding(dp(10), dp(6), dp(10), dp(6));
+        TextView close = new TextView(this);
+        close.setText("✕");
+        close.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        close.setTextColor(Color.WHITE);
+        close.setGravity(Gravity.CENTER);
+        GradientDrawable cb = new GradientDrawable();
+        cb.setColor(Color.argb(45, 255, 255, 255));
+        cb.setCornerRadius(dp(20));
+        close.setBackground(cb);
+        close.setContentDescription("Закрыть TikTok");
+        close.setOnClickListener(v -> goTab("chats"));
+        top.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        TextView title = new TextView(this);
+        title.setText("TikTok");
+        title.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        title.setTextColor(Color.WHITE);
+        title.setPadding(dp(14), 0, 0, 0);
+        title.setTypeface(null, android.graphics.Typeface.BOLD);
+        top.addView(title);
+        root.addView(top, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+
         web = new WebView(this);
         web.setBackgroundColor(Color.BLACK);
         WebSettings ws = web.getSettings();

@@ -333,7 +333,7 @@ function renderSideNow(){
   S.view='home';
   const keep=document.activeElement&&document.activeElement.id==='q';
   const head={calls:'Звонки',contacts:'Контакты',tiktok:'TikTok',ai:'ИИ-помощник'}[S.tab]||'Чаты';
-  const btns=S.tab==='ai'?'':S.tab==='contacts'?`<button class="gbtn ic" data-act="addcontact" title="Добавить контакт" aria-label="Добавить контакт">${ic('addUser')}</button>`
+  const btns=S.tab==='ai'?'':S.tab==='tiktok'?`<button class="gbtn ic" data-act="tab" data-t="chats" title="Закрыть TikTok" aria-label="Закрыть TikTok">${ic('x')}</button>`:S.tab==='contacts'?`<button class="gbtn ic" data-act="addcontact" title="Добавить контакт" aria-label="Добавить контакт">${ic('addUser')}</button>`
     :`<button class="gbtn ic" data-act="newgroup" title="Новая группа" aria-label="Новая группа">${ic('users')}</button>
       <button class="gbtn ic" data-act="newchat" title="Новый чат" aria-label="Новый чат">${ic('edit')}</button>`;
   el.innerHTML=`<div class="side-h"><h1>${head}</h1>${btns}</div>
@@ -2553,7 +2553,7 @@ document.addEventListener('click',async e=>{
     case 'ttopen':ttOpen();break;
     case 'ttext':ttClose();ttOpen(el.dataset.u);break;
     case 'ttgo':{const v=($('#ttu')||{}).value||'';if(!TT_RE.test(v)){toast('Вставьте ссылку вида tiktok.com/…');break}ttPlay(TT_RE.exec(v)[0]);break}
-    case 'tab':S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
+    case 'tab':if(el.dataset.t==='tiktok'&&IN_APK()&&store.get('apk',0)>=4){ttOpen();break}S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;
     case 'back':closeChat();break;
     case 'dm':closeLayer();startDM(id);break;
