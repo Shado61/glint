@@ -4,7 +4,7 @@
 const http=require('http'),fs=require('fs'),path=require('path'),crypto=require('crypto'),zlib=require('zlib');
 const GZ=new Map();
 /* version of the app files; the browser compares it with its own copy and reloads when they differ */
-const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','style.css','index.html'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
+const APP_VERSION=(()=>{try{return require('crypto').createHash('sha1').update(['app.js','fx.js','style.css','index.html'].map(f=>fs.readFileSync(path.join(__dirname,'public',f))).join('')).digest('hex').slice(0,10)}catch(e){return 'dev'}})();
 const {WebSocketServer}=require('ws');
 
 /* ---------- config (.env for local runs, Environment in Render) ---------- */
@@ -25,7 +25,9 @@ const MAX_TEXT=4000,MAX_IMG=1.2e6,PAGE=60,KEEP_MSGS=3000;
 /* ---------- storage ----------
    Everything lives in memory and is written back in the background:
    one row per user (u:), per chat (c:) and per chat history (m:), plus sessions. */
-let DB={users:{},chats:{},msgs:{},sessions:{},servers:{}};
+let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{}};
+/* one letter per table in the key-value store */
+const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories'};
 let pool=null;const DIRTY=new Set();
 const DATA_FILE=path.join(__dirname,'data','db.json');
 async function load(){
@@ -36,12 +38,12 @@ async function load(){
     const r=await pool.query('SELECT k,v FROM glint_kv');
     for(const {k,v} of r.rows){
       const o=JSON.parse(v),id=k.slice(2);
-      if(k[0]==='u')DB.users[id]=o;else if(k[0]==='c')DB.chats[id]=o;else if(k[0]==='m')DB.msgs[id]=o;else if(k[0]==='g')DB.servers[id]=o;else if(k==='s:all')DB.sessions=o;
+      if(k==='s:all')DB.sessions=o;else if(TB[k[0]])DB[TB[k[0]]][id]=o;
     }
     return 'Postgres';
   }
   try{DB=Object.assign(DB,JSON.parse(fs.readFileSync(DATA_FILE,'utf8')))}catch(e){}
-  DB.servers=DB.servers||{};
+  for(const t of Object.values(TB))DB[t]=DB[t]||{};
   return 'файл data/db.json';
 }
 const mark=k=>{DIRTY.add(k)};
@@ -51,7 +53,7 @@ async function flushNow(){
   const keys=[...DIRTY];DIRTY.clear();
   if(!pool){fs.mkdirSync(path.dirname(DATA_FILE),{recursive:true});fs.writeFileSync(DATA_FILE+'.tmp',JSON.stringify(DB));fs.renameSync(DATA_FILE+'.tmp',DATA_FILE);return}
   for(const k of keys){
-    const id=k.slice(2),v=k[0]==='u'?DB.users[id]:k[0]==='c'?DB.chats[id]:k[0]==='m'?DB.msgs[id]:k[0]==='g'?DB.servers[id]:DB.sessions;
+    const id=k.slice(2),v=k==='s:all'?DB.sessions:DB[TB[k[0]]][id];
     if(v===undefined)await pool.query('DELETE FROM glint_kv WHERE k=$1',[k]);
     else await pool.query('INSERT INTO glint_kv(k,v) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET v=EXCLUDED.v',[k,JSON.stringify(v)]);
   }
@@ -74,10 +76,28 @@ function chatFor(c,uid){
   const unread=ms.reduce((n,m)=>n+(m.from!==uid&&!m.del&&m.ts>((c.read||{})[uid]||0)?1:0),0);
   const o={id:c.id,type:c.type,name:c.name||'',members:c.members,admin:c.admin||'',created:c.created,last:last&&msgOut(last),unread,read:c.read||{},color:c.color||''};
   if(c.server)o.server=c.server;
+  const st=streakOut(c);if(st)o.streak=st;
   return o;
 }
 const msgOut=m=>m.del?{id:m.id,from:m.from,ts:m.ts,del:true}:m;
 const member=(c,uid)=>c&&c.members.includes(uid);
+
+/* ---------- fire streaks: both people write in a private chat every day; from 3 days in a row a fire appears ---------- */
+const TZ=+(process.env.STREAK_TZ||5); /* days are counted by this time zone (Almaty by default) */
+const dayKey=ts=>Math.floor((ts+TZ*3600e3)/864e5);
+function bumpStreak(c,uid,ts){
+  if(c.type!=='dm')return 0;
+  const d=dayKey(ts),s=c.st=c.st||{n:0,last:0,d:0,u:[]};
+  if(s.d!==d){s.d=d;s.u=[]}
+  if(!s.u.includes(uid))s.u.push(uid);
+  if(s.last!==d&&c.members.every(m=>s.u.includes(m))){s.n=s.last===d-1?s.n+1:1;s.last=d;return s.n}
+  return 0;
+}
+function streakOut(c){
+  const s=c.st;if(!s||!s.n)return null;const d=dayKey(now());
+  if(s.last<d-1)return null; /* a day was missed: the streak is gone */
+  return {n:s.n,today:s.last===d,me:s.d===d?s.u:[]};
+}
 
 /* ---------- rate limits ---------- */
 const HITS=new Map();
@@ -110,6 +130,43 @@ function cleanImg(v){
   return s;
 }
 
+/* ---------- pictures: kept once, sent by link ----------
+   Photos, stickers, avatars and stories are stored separately and messages carry only a short /img/… link.
+   The phone downloads each picture once and keeps it, so chats open fast even on weak phones. */
+const IMGBUF=new Map();
+function putImg(dataUrl){
+  const m=/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl||''));if(!m)return '';
+  const h=sha(m[2]).slice(0,24);
+  if(!DB.imgs[h]){DB.imgs[h]={t:m[1],d:m[2]};mark('i:'+h)}
+  return '/img/'+h;
+}
+function dropImg(url){const h=String(url||'').slice(5);if(DB.imgs[h]){delete DB.imgs[h];IMGBUF.delete(h);mark('i:'+h)}}
+function imgBuf(h){
+  let b=IMGBUF.get(h);if(b)return b;const r=DB.imgs[h];if(!r)return null;
+  b={t:r.t,b:Buffer.from(r.d,'base64')};IMGBUF.set(h,b);if(IMGBUF.size>400)IMGBUF.delete(IMGBUF.keys().next().value);return b;
+}
+/* older data kept pictures inside messages; move them out once */
+function migrate(){
+  let n=0;
+  for(const u of Object.values(DB.users)){
+    if(u.avatar&&u.avatar.startsWith('data:')){u.avatar=putImg(u.avatar);mark('u:'+u.id);n++}
+    if(u.stickers&&u.stickers.length){ /* personal stickers become the first sticker pack */
+      const p={id:'p'+rid(6),name:'Мои стикеры',owner:u.id,created:now(),stickers:u.stickers.map(x=>({id:x.id,img:x.img.startsWith('data:')?putImg(x.img):x.img}))};
+      DB.packs[p.id]=p;mark('p:'+p.id);u.packs=[p.id].concat(u.packs||[]);n++;
+    }
+    if(u.stickers){delete u.stickers;mark('u:'+u.id)}
+  }
+  for(const [cid,ms] of Object.entries(DB.msgs)){
+    let ch=false;
+    for(const m of ms){
+      if(m.img&&m.img.startsWith('data:')){m.img=putImg(m.img);ch=true}
+      if(m.sticker&&m.sticker.startsWith('data:')){m.sticker=putImg(m.sticker);ch=true}
+    }
+    if(ch){mark('m:'+cid);n++}
+  }
+  if(n)console.log('  Картинки перенесены в отдельное хранилище:',n);
+}
+
 /* ---------- REST API ---------- */
 const API={};
 API['POST /api/register']=(req,res,b)=>{
@@ -136,17 +193,20 @@ API['POST /api/logout']=(req,res)=>{
 API['GET /api/version']=()=>({v:APP_VERSION});
 API['GET /api/me']=(req,res,b,u)=>{
   if(!u)return {me:null};
+  selfChat(u);
   const chats=Object.values(DB.chats).filter(c=>member(c,u.id)).map(c=>chatFor(c,u.id));
   const ids=new Set();chats.forEach(c=>c.members.forEach(m=>ids.add(m)));
   const servers=Object.values(DB.servers).filter(g=>g.members.includes(u.id));
   servers.forEach(g=>g.members.forEach(m=>ids.add(m)));
-  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),stickers:u.stickers||[],users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+  Object.keys(u.contacts||{}).forEach(i=>ids.add(i));
+  return {me:pubUser(u),chats,servers:servers.map(g=>serverOut(g,u.id)),packs:userPacks(u),contacts:u.contacts||{},stars:u.stars||[],tz:TZ,
+    users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 API['POST /api/profile']=(req,res,b,u)=>{
   need(u);
   if(b.name!==undefined)u.name=cleanName(b.name)||u.username;
   if(b.bio!==undefined)u.bio=String(b.bio||'').slice(0,140);
-  if(b.avatar!==undefined){const a=cleanImg(b.avatar);if(a.length>300e3)throw E(413,'Аватар слишком большой');u.avatar=a}
+  if(b.avatar!==undefined){const a=cleanImg(b.avatar);if(a.length>300e3)throw E(413,'Аватар слишком большой');u.avatar=a?putImg(a):''}
   if(b.newPassword){
     if(!checkPass(String(b.password||''),u.pass))throw E(401,'Текущий пароль неверный');
     if(String(b.newPassword).length<6)throw E(400,'Новый пароль — минимум 6 символов');
@@ -196,30 +256,157 @@ API['GET /api/calls']=(req,res,b,u)=>{
   return {calls:list,users:[...new Set(list.map(x=>x.user))].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 
-/* ---------- stickers: each user keeps a personal pack made from their photos ---------- */
-const MAX_STICKERS=60,MAX_STICKER=260e3;
+/* ---------- sticker packs: anyone can make packs from photos and share them; friends add a pack with one tap ---------- */
+const MAX_STICKER=260e3,PACK_MAX=120,OWN_PACKS=30,HAVE_PACKS=60;
 function cleanSticker(v){
   const s=String(v||'');
   if(s.length>MAX_STICKER*1.37)throw E(413,'Стикер слишком большой');
   if(!/^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$/.test(s))throw E(400,'Это не картинка');
   return s;
 }
-API['POST /api/stickers']=(req,res,b,u)=>{
-  need(u);if(!limit('stk:'+u.id,30,600e3))throw E(429,'Слишком много стикеров подряд');
-  u.stickers=u.stickers||[];
-  if(u.stickers.length>=MAX_STICKERS)throw E(400,`Не больше ${MAX_STICKERS} стикеров. Удали ненужные.`);
+const packOut=(p,uid)=>({id:p.id,name:p.name,owner:p.owner,ownerName:(DB.users[p.owner]||{}).name||'',stickers:p.stickers,mine:p.owner===uid});
+function userPacks(u){
+  const l=(u.packs||[]).filter(id=>DB.packs[id]);
+  if(u.packs&&l.length!==u.packs.length){u.packs=l;mark('u:'+u.id)}
+  return l.map(id=>packOut(DB.packs[id],u.id));
+}
+function packOf(id,u,own){
+  const p=DB.packs[String(id||'')];if(!p)throw E(404,'Набор не найден');
+  if(own&&p.owner!==u.id)throw E(403,'Менять набор может только его автор');
+  return p;
+}
+function pushPack(p){for(const x of Object.values(DB.users))if((x.packs||[]).includes(p.id))sendTo(x.id,{t:'pack',pack:packOut(p,x.id)})}
+API['POST /api/packs']=(req,res,b,u)=>{
+  need(u);if(!limit('pk:'+u.id,20,3600e3))throw E(429,'Слишком много наборов за час');
+  const name=cleanName(b.name);if(!name)throw E(400,'Назови набор');
+  if(Object.values(DB.packs).filter(p=>p.owner===u.id).length>=OWN_PACKS)throw E(400,`Не больше ${OWN_PACKS} своих наборов`);
+  const p={id:'p'+rid(6),name,owner:u.id,stickers:[],created:now()};DB.packs[p.id]=p;mark('p:'+p.id);
+  u.packs=[p.id].concat(u.packs||[]);mark('u:'+u.id);
+  return {pack:packOut(p,u.id),packs:userPacks(u)};
+};
+API['GET /api/packs/get']=(req,res,b,u,q)=>{need(u);const p=packOf(q.get('id'),u);return {pack:packOut(p,u.id),have:(u.packs||[]).includes(p.id)}};
+API['POST /api/packs/install']=(req,res,b,u)=>{
+  need(u);const p=packOf(b.pack,u);u.packs=u.packs||[];
+  if(!u.packs.includes(p.id)){if(u.packs.length>=HAVE_PACKS)throw E(400,`Не больше ${HAVE_PACKS} наборов`);u.packs.push(p.id);mark('u:'+u.id)}
+  return {packs:userPacks(u)};
+};
+API['POST /api/packs/remove']=(req,res,b,u)=>{
+  need(u);const p=packOf(b.pack,u);
+  if(p.owner===u.id&&b.everywhere){delete DB.packs[p.id];mark('p:'+p.id)} /* the author deletes it for everyone */
+  u.packs=(u.packs||[]).filter(i=>i!==p.id);mark('u:'+u.id);return {packs:userPacks(u)};
+};
+API['POST /api/packs/rename']=(req,res,b,u)=>{
+  need(u);const p=packOf(b.pack,u,true);const n=cleanName(b.name);if(!n)throw E(400,'Пустое название');
+  p.name=n;mark('p:'+p.id);pushPack(p);return {packs:userPacks(u)};
+};
+API['POST /api/packs/add']=(req,res,b,u)=>{
+  need(u);if(!limit('stk:'+u.id,60,600e3))throw E(429,'Слишком много стикеров подряд');
+  const p=packOf(b.pack,u,true);
+  if(p.stickers.length>=PACK_MAX)throw E(400,`В наборе максимум ${PACK_MAX} стикеров`);
   let img;
   if(b.fromMsg){ /* save a sticker someone sent into your own pack */
     const c=DB.chats[String(b.chat||'')];if(!member(c,u.id))throw E(404,'Чат не найден');
-    const m=(DB.msgs[c.id]||[]).find(x=>x.id===String(b.fromMsg));if(!m||!m.sticker)throw E(404,'Стикер не найден');
-    img=m.sticker;if(u.stickers.some(x=>x.img===img))throw E(409,'Этот стикер уже есть у тебя');
-  }else img=cleanSticker(b.img);
-  const st={id:'s'+rid(6),img};u.stickers.unshift(st);mark('u:'+u.id);
-  return {stickers:u.stickers};
+    const m=(DB.msgs[c.id]||[]).find(x=>x.id===String(b.fromMsg));if(!m||!(m.sticker||m.img))throw E(404,'Стикер не найден');
+    img=m.sticker||m.img;
+  }else img=putImg(cleanSticker(b.img));
+  if(p.stickers.some(x=>x.img===img))throw E(409,'Этот стикер уже есть в наборе');
+  p.stickers.push({id:'s'+rid(6),img});mark('p:'+p.id);pushPack(p);
+  return {packs:userPacks(u)};
 };
-API['POST /api/stickers/delete']=(req,res,b,u)=>{
-  need(u);u.stickers=(u.stickers||[]).filter(x=>x.id!==String(b.id||''));mark('u:'+u.id);return {stickers:u.stickers};
+API['POST /api/packs/del']=(req,res,b,u)=>{
+  need(u);const p=packOf(b.pack,u,true);p.stickers=p.stickers.filter(x=>x.id!==String(b.id||''));mark('p:'+p.id);pushPack(p);return {packs:userPacks(u)};
 };
+
+/* ---------- contacts: save people under your own names ---------- */
+API['POST /api/contacts']=(req,res,b,u)=>{
+  need(u);const o=DB.users[String(b.userId||'')];if(!o||o.id===u.id)throw E(404,'Пользователь не найден');
+  u.contacts=u.contacts||{};
+  if(!u.contacts[o.id]&&Object.keys(u.contacts).length>=1000)throw E(400,'Слишком много контактов');
+  u.contacts[o.id]=cleanName(b.name)||o.name;mark('u:'+u.id);
+  return {contacts:u.contacts,user:pubUser(o)};
+};
+API['POST /api/contacts/delete']=(req,res,b,u)=>{need(u);if(u.contacts){delete u.contacts[String(b.userId||'')];mark('u:'+u.id)}return {contacts:u.contacts||{}}};
+API['GET /api/users/find']=(req,res,b,u,q)=>{ /* exact login, for "add contact" */
+  need(u);const s=String(q.get('u')||'').toLowerCase().replace(/^@/,'').trim();
+  const o=Object.values(DB.users).find(x=>x.username===s);if(!o)throw E(404,'Нет пользователя с логином @'+s);return {user:pubUser(o)};
+};
+
+/* ---------- Saved Messages: a chat with yourself; stars mark important messages in any chat ---------- */
+function selfChat(u){
+  let c=Object.values(DB.chats).find(x=>x.type==='self'&&x.members[0]===u.id);
+  if(!c){c={id:'c'+rid(6),type:'self',members:[u.id],created:now(),read:{}};DB.chats[c.id]=c;DB.msgs[c.id]=[];mark('c:'+c.id);mark('m:'+c.id)}
+  return c;
+}
+API['GET /api/starred']=(req,res,b,u)=>{
+  need(u);const out=[],ids=new Set();
+  for(const k of (u.stars||[]).slice().reverse()){
+    const [cid,mid]=k.split(':'),c=DB.chats[cid];if(!member(c,u.id))continue;
+    const m=(DB.msgs[cid]||[]).find(x=>x.id===mid);if(!m||m.del)continue;
+    out.push({chat:cid,msg:m});ids.add(m.from);
+  }
+  return {items:out,users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+};
+
+/* ---------- stories: a photo for 24 hours, seen by the people you chat with and your contacts ---------- */
+const STORY_TTL=24*3600e3;
+function partners(uid){ /* people in private chats and groups with this user, and anyone who saved them as a contact */
+  const s=new Set();
+  for(const c of Object.values(DB.chats))if((c.type==='dm'||c.type==='group')&&member(c,uid))c.members.forEach(m=>s.add(m));
+  const u=DB.users[uid];if(u&&u.contacts)Object.keys(u.contacts).forEach(i=>s.add(i));
+  s.delete(uid);return s;
+}
+const canSeeStory=(s,uid)=>s.user===uid||partners(s.user).has(uid);
+const storyOut=(s,uid)=>({id:s.id,user:s.user,img:s.img,ts:s.ts,exp:s.exp,seen:!!(s.views||{})[uid],views:s.user===uid?Object.keys(s.views||{}).length:undefined});
+API['GET /api/stories']=(req,res,b,u)=>{
+  need(u);const t=now(),list=[],ids=new Set();
+  const P=new Map(); /* author -> can this person see their stories */
+  for(const s of Object.values(DB.stories)){
+    if(s.exp<t)continue;
+    if(s.user!==u.id){if(!P.has(s.user))P.set(s.user,partners(s.user).has(u.id));if(!P.get(s.user))continue}
+    list.push(storyOut(s,u.id));ids.add(s.user);
+  }
+  list.sort((a,b)=>a.ts-b.ts);
+  return {stories:list,users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
+};
+API['POST /api/stories']=(req,res,b,u)=>{
+  need(u);if(!limit('story:'+u.id,30,864e5))throw E(429,'Слишком много историй за день');
+  const d=cleanImg(b.img);if(!d)throw E(400,'Нет картинки');
+  const s={id:'t'+rid(7),user:u.id,img:putImg(d),ts:now(),exp:now()+STORY_TTL,views:{}};
+  DB.stories[s.id]=s;mark('t:'+s.id);
+  const out=storyOut(s,null);
+  partners(u.id).forEach(i=>sendTo(i,{t:'story',story:out,user:pubUser(u)}));
+  sendTo(u.id,{t:'story',story:storyOut(s,u.id),user:pubUser(u)});
+  return {story:storyOut(s,u.id)};
+};
+API['POST /api/stories/view']=(req,res,b,u)=>{
+  need(u);const s=DB.stories[String(b.id||'')];if(!s||!canSeeStory(s,u.id))throw E(404,'История недоступна');
+  if(s.user!==u.id&&!(s.views||{})[u.id]){s.views=s.views||{};s.views[u.id]=now();mark('t:'+s.id);sendTo(s.user,{t:'story-views',id:s.id,views:Object.keys(s.views).length})}
+  return {ok:true};
+};
+API['GET /api/stories/viewers']=(req,res,b,u,q)=>{
+  need(u);const s=DB.stories[String(q.get('id')||'')];if(!s||s.user!==u.id)throw E(404,'История недоступна');
+  const l=Object.entries(s.views||{}).sort((a,b)=>b[1]-a[1]);
+  return {viewers:l.map(([id,ts])=>({id,ts})),users:l.map(([id])=>pubUser(DB.users[id])).filter(Boolean)};
+};
+API['POST /api/stories/delete']=(req,res,b,u)=>{
+  need(u);const s=DB.stories[String(b.id||'')];if(!s||s.user!==u.id)throw E(404,'История не найдена');
+  dropStory(s);return {ok:true};
+};
+API['POST /api/stories/reply']=(req,res,b,u)=>{ /* answer a story: the message goes to the author's private chat with a small picture of the story */
+  need(u);if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
+  const s=DB.stories[String(b.id||'')];if(!s||s.exp<now()||!canSeeStory(s,u.id)||s.user===u.id)throw E(404,'История недоступна');
+  const text=String(b.text||'').slice(0,MAX_TEXT).trim();if(!text)throw E(400,'Пустое сообщение');
+  const o=DB.users[s.user];let c=Object.values(DB.chats).find(x=>x.type==='dm'&&member(x,u.id)&&member(x,o.id));
+  if(!c){c={id:'c'+rid(6),type:'dm',members:[u.id,o.id],created:now(),read:{}};DB.chats[c.id]=c;DB.msgs[c.id]=[];mark('c:'+c.id);mark('m:'+c.id);pushChat(c)}
+  const msg={id:'m'+rid(8),from:u.id,ts:now(),text,story:{id:s.id,img:s.img}};
+  if(!s.replied){s.replied=true;mark('t:'+s.id)}
+  sendMsgTo(c,u,msg);return {chat:c.id};
+};
+function dropStory(s){delete DB.stories[s.id];mark('t:'+s.id);
+  if(!s.replied)dropImg(s.img); /* keep the picture if a reply in a chat still shows it */
+  sendTo(s.user,{t:'story-gone',id:s.id});partners(s.user).forEach(i=>sendTo(i,{t:'story-gone',id:s.id}))}
+setInterval(()=>{const t=now();for(const s of Object.values(DB.stories))if(s.exp<t)dropStory(s)},60e3).unref();
+
 /* STUN finds the public address; TURN relays the call when two networks cannot connect directly */
 API['GET /api/ice']=(req,res,b,u)=>{
   need(u);const s=[{urls:['stun:stun.l.google.com:19302','stun:stun1.l.google.com:19302']}];
@@ -343,6 +530,17 @@ function voiceChannelOf(uid){for(const [cid,room] of VOICE)if(room.has(uid))retu
 function leaveVoiceOf(uid,g){g.channels.forEach(ch=>{if(ch.type==='voice'&&VOICE.get(ch.id)&&VOICE.get(ch.id).has(uid)){const r=VOICE.get(ch.id).get(uid);voiceLeave(uid,ch.id);if(r.ws&&r.ws.readyState===1)r.ws.send(JSON.stringify({t:'vkicked',channel:ch.id}))}})}
 function closeVoice(cid){const room=VOICE.get(cid);if(!room)return;room.forEach(v=>{if(v.ws&&v.ws.readyState===1)v.ws.send(JSON.stringify({t:'vkicked',channel:cid}))});VOICE.delete(cid)}
 /* ---------- messages ---------- */
+const FIRE_DAYS=[3,7,10,30,50,100,365];
+function sendMsgTo(c,u,msg){
+  c.read=c.read||{};c.read[u.id]=msg.ts;
+  addMsg(c,msg);
+  const n=bumpStreak(c,u.id,msg.ts);
+  if(n){
+    if(FIRE_DAYS.includes(n))addMsg(c,{id:'m'+rid(8),from:u.id,ts:now(),sys:n===3?'🔥 Огонёк! Вы общаетесь 3 дня подряд':`🔥 ${n} дней подряд!`});
+    mark('c:'+c.id);pushChat(c);
+  }else if(c.type==='dm'&&c.st&&c.st.u.length===1&&c.st.d===dayKey(msg.ts))pushChat(c);
+  return msg;
+}
 function addMsg(c,m){
   const ms=DB.msgs[c.id]=DB.msgs[c.id]||[];ms.push(m);
   if(ms.length>KEEP_MSGS)ms.splice(0,ms.length-KEEP_MSGS);
@@ -396,15 +594,35 @@ function handle(ws,u,m){
       if(!member(c,u.id))throw E(404,'Чат не найден');
       if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
       const text=String(m.text||'').slice(0,MAX_TEXT).trim(),img=cleanImg(m.img);
-      const stk=m.sticker?(u.stickers||[]).find(x=>x.id===String(m.sticker)):null;
-      if(m.sticker&&!stk)throw E(404,'Стикер не найден');
+      let stk=null,pk=null;
+      if(m.sticker&&typeof m.sticker==='object'){
+        pk=DB.packs[String(m.sticker.pack||'')];
+        if(pk&&(u.packs||[]).includes(pk.id))stk=pk.stickers.find(x=>x.id===String(m.sticker.id||''));
+        if(!stk)throw E(404,'Стикер не найден');
+      }
       if(!text&&!img&&!stk)return;
       const msg={id:'m'+rid(8),from:u.id,ts:now(),text:stk?'':text};
-      if(stk)msg.sticker=stk.img;else if(img)msg.img=img;
+      if(stk){msg.sticker=stk.img;msg.pack=pk.id}else if(img)msg.img=putImg(img);
       if(m.reply){const r=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.reply));if(r&&!r.del)msg.reply={id:r.id,from:r.from,text:(r.text||(r.img?'📷 Фото':r.sticker?'Стикер':'')).slice(0,120)}}
-      c.read=c.read||{};c.read[u.id]=msg.ts;
-      addMsg(c,msg);ws.send(JSON.stringify({t:'ack',cid:m.cid,id:msg.id}));
+      sendMsgTo(c,u,msg);ws.send(JSON.stringify({t:'ack',cid:m.cid,id:msg.id}));
       return;
+    }
+    case 'fwd':{ /* forward a message to another chat (or to Saved Messages) */
+      if(!member(c,u.id))throw E(404,'Чат не найден');
+      if(!limit('msg:'+u.id,30,10e3))throw E(429,'Слишком быстро');
+      const to=DB.chats[String(m.to||'')];if(!member(to,u.id))throw E(404,'Чат не найден');
+      const src=(DB.msgs[c.id]||[]).find(x=>x.id===String(m.id));if(!src||src.del||src.sys||src.call)throw E(404,'Сообщение не найдено');
+      const msg={id:'m'+rid(8),from:u.id,ts:now(),text:src.text||''};
+      if(src.img)msg.img=src.img;if(src.sticker){msg.sticker=src.sticker;if(src.pack)msg.pack=src.pack}
+      if(src.from!==u.id||src.fwd)msg.fwd=src.fwd||{from:src.from,name:(DB.users[src.from]||{}).name||''};
+      sendMsgTo(to,u,msg);ws.send(JSON.stringify({t:'fwd-ok',to:to.id}));return;
+    }
+    case 'star':{
+      if(!member(c,u.id))return;const k=c.id+':'+String(m.id||'');
+      if(!(DB.msgs[c.id]||[]).some(x=>x.id===String(m.id)))return;
+      u.stars=u.stars||[];const i=u.stars.indexOf(k);
+      if(i>=0)u.stars.splice(i,1);else{u.stars.push(k);if(u.stars.length>1000)u.stars.shift()}
+      mark('u:'+u.id);sendTo(u.id,{t:'stars',stars:u.stars});return;
     }
     case 'edit':case 'del':{
       if(!member(c,u.id))return;
@@ -481,7 +699,7 @@ function handle(ws,u,m){
 }
 
 /* ---------- HTTP ---------- */
-const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg'};
+const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.txt':'text/plain; charset=utf-8'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
   'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
   'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ws: wss:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:; frame-ancestors 'none'"};
@@ -499,13 +717,20 @@ const server=http.createServer(async(req,res)=>{
       return send(res,200,await fn(req,res,b,userOf(req),url.searchParams));
     }
     if(p==='/healthz')return send(res,200,{ok:true});
+    if(p.startsWith('/img/')){ /* pictures: only for signed-in people; a link never changes, so the phone keeps it */
+      const h=p.slice(5);if(!/^[0-9a-f]{24}$/.test(h)||!userOf(req))return send(res,404,{error:'нет'});
+      const im=imgBuf(h);if(!im)return send(res,404,{error:'картинка удалена'});
+      const etag='"'+h+'"';
+      if(req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag});return res.end()}
+      res.writeHead(200,Object.assign({'Content-Type':im.t,'Content-Length':im.b.length,'Cache-Control':'private, max-age=31536000, immutable',ETag:etag},SEC));return res.end(im.b);
+    }
     let f=path.normalize(path.join(PUB,p==='/'?'index.html':p));
     if(!f.startsWith(PUB))return send(res,403,{error:'нет'});
     fs.stat(f,(e,st)=>{
       if(e||!st.isFile()){f=path.join(PUB,'index.html');try{st=fs.statSync(f)}catch(x){st=null}}
       const ext=path.extname(f),etag='"'+APP_VERSION+'-'+Math.round(st?st.mtimeMs:0).toString(36)+'-'+(st?st.size:0)+'"';
       if(st&&req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag,'Cache-Control':'no-cache'});return res.end()}
-      const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
+      const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':f.includes(path.sep+'vendor'+path.sep)?'public, max-age=2592000':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
       /* text files are sent compressed (about 4x smaller), compressed once and kept in memory */
       const isIndex=f.endsWith('index.html');
       const body=()=>{const b=fs.readFileSync(f);return isIndex?Buffer.from(b.toString('utf8').replace(/\?v=[\w-]+/g,'?v='+APP_VERSION)):b};
@@ -528,7 +753,7 @@ server.on('upgrade',(req,sock,head)=>{
 });
 setInterval(()=>{wss.clients.forEach(ws=>{if(!ws.isAlive)return ws.terminate();ws.isAlive=false;ws.ping()})},25e3).unref();
 
-load().then(where=>server.listen(PORT,()=>{
+load().then(where=>{migrate();return where}).then(where=>server.listen(PORT,()=>{
   console.log(`\n  Manasenger работает: ${BASE}  (порт ${PORT})`);
   console.log(`  Данные: ${where} · пользователей ${Object.keys(DB.users).length}`);
   console.log(`  Звонки: ${process.env.TURN_URL?'STUN + TURN':'только STUN (TURN не задан)'}\n`);
