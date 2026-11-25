@@ -1,5 +1,5 @@
 /* Manasenger service worker: makes the site installable and opens instantly from the home screen */
-const V='manasenger-v2',SHELL=['/','/style.css','/app.js','/icon.svg','/icon-192.png','/manifest.webmanifest'];
+const V='manasenger-v3',SHELL=['/','/style.css?v=3','/app.js?v=3','/icon.svg','/icon-192.png','/manifest.webmanifest'];
 self.addEventListener('install',e=>{e.waitUntil(caches.open(V).then(c=>c.addAll(SHELL)).then(()=>self.skipWaiting()))});
 self.addEventListener('activate',e=>{e.waitUntil(caches.keys().then(ks=>Promise.all(ks.filter(k=>k!==V).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 self.addEventListener('fetch',e=>{

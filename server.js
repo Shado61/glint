@@ -499,8 +499,10 @@ const server=http.createServer(async(req,res)=>{
     let f=path.normalize(path.join(PUB,p==='/'?'index.html':p));
     if(!f.startsWith(PUB))return send(res,403,{error:'нет'});
     fs.stat(f,(e,st)=>{
-      if(e||!st.isFile())f=path.join(PUB,'index.html');
-      const ext=path.extname(f),h=Object.assign({'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':ext==='.html'||f.endsWith('sw.js')?'no-cache':'public, max-age=3600','Vary':'Accept-Encoding'},SEC);
+      if(e||!st.isFile()){f=path.join(PUB,'index.html');try{st=fs.statSync(f)}catch(x){st=null}}
+      const ext=path.extname(f),etag='"'+Math.round(st?st.mtimeMs:0).toString(36)+'-'+(st?st.size:0)+'"';
+      if(st&&req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag,'Cache-Control':'no-cache'});return res.end()}
+      const h=Object.assign({ETag:etag,'Content-Type':MIME[ext]||'application/octet-stream','Cache-Control':/\.(html|js|css|webmanifest)$/.test(ext)?'no-cache':'public, max-age=86400','Vary':'Accept-Encoding'},SEC);
       /* text files are sent compressed (about 4x smaller), compressed once and kept in memory */
       if(/\.(js|css|html|svg|webmanifest|json)$/.test(f)&&/\bgzip\b/.test(req.headers['accept-encoding']||'')){
         const key=f+':'+(st&&st.mtimeMs);let gz=GZ.get(key);
