@@ -950,3 +950,6 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 .ai-pic{display:block;max-width:100%;max-height:260px;border-radius:12px;margin:-2px -6px 6px;object-fit:cover}
 .ai-att{position:absolute;left:16px;bottom:calc(146px + var(--safe-b));z-index:6;width:74px;height:74px;border-radius:14px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,.4)}
 .ai-att img{width:100%;height:100%;object-fit:cover}.ai-att .x{position:absolute;top:3px;right:3px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;display:grid;place-items:center}.ai-att .x svg{width:12px;height:12px}
+/* PC app: TikTok inside the tab, above the tab bar */
+.tt-slot{position:absolute;left:8px;right:8px;top:calc(70px + var(--safe-t));bottom:calc(84px + var(--safe-b));border-radius:18px;overflow:hidden;background:#000;display:grid;place-items:center}
+.tt-load{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--fg3)}

@@ -12,7 +12,7 @@
   <application android:label="Manasenger" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="true" android:supportsRtl="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
     <meta-data android:name="asset_statements" android:resource="@string/asset_statements"/>
     <activity android:name=".MainActivity" android:exported="true" android:label="Manasenger" android:launchMode="singleTask">
-      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/?apk=3"/>
+      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/?apk=4"/>
       <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR" android:resource="@color/bg"/>
@@ -34,6 +34,13 @@
       <intent-filter>
         <action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="manasenger-once"/>
+      </intent-filter>
+    </activity>
+    <!-- TikTok inside the app, with Manasenger's tab bar under it -->
+    <activity android:name=".TikTokActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="manasenger-tiktok"/>
       </intent-filter>
     </activity>
     <!-- updates: the downloaded new version -->

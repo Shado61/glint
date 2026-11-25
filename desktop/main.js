@@ -66,6 +66,25 @@ ipcMain.on('mn-tiktok',(e,u)=>{
   ttWin.webContents.setWindowOpenHandler(({url})=>{if(/tiktok\.com/.test(url))ttWin.loadURL(url);else shell.openExternal(url);return {action:'deny'}});
   ttWin.loadURL(u);ttWin.on('closed',()=>{ttWin=null});
 });
+/* TikTok right inside the TikTok tab: the page tells where its box is, the app draws TikTok there */
+let ttView=null;
+ipcMain.on('mn-ttembed',(e,b)=>{
+  if(!win||win.isDestroyed())return;
+  if(!b){if(ttView)ttView.setVisible(false);return}
+  if(!ttView){
+    const {WebContentsView}=require('electron');
+    ttView=new WebContentsView({webPreferences:{partition:'persist:tiktok',contextIsolation:true}});
+    ttView.setBackgroundColor('#000000');
+    ttView.webContents.setUserAgent(ttView.webContents.getUserAgent().replace(/ (Electron|manasenger-desktop)\/[\d.]+/g,''));
+    ttView.webContents.setWindowOpenHandler(({url})=>{if(/tiktok\.com/.test(url))ttView.webContents.loadURL(url);else shell.openExternal(url);return {action:'deny'}});
+    win.contentView.addChildView(ttView);
+    ttView.webContents.loadURL('https://www.tiktok.com/foryou');
+  }
+  const z=win.webContents.getZoomFactor()||1;
+  ttView.setBounds({x:Math.round(b.x*z),y:Math.round(b.y*z),width:Math.round(b.w*z),height:Math.round(b.h*z)});
+  ttView.setVisible(true);
+});
+ipcMain.on('mn-ttgo',(e,u)=>{if(ttView&&/^https:\/\/([\w-]+\.)?tiktok\.com\//.test(String(u||'')))ttView.webContents.loadURL(String(u))});
 /* view-once messages: the window becomes invisible to screenshots and screen recording while one is open */
 ipcMain.on('mn-protect',(e,on)=>{if(win)win.setContentProtection(!!on)});
 let chosenSource=null;

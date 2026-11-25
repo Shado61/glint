@@ -231,6 +231,7 @@ async function boot(){
   S.servers={};(r.servers||[]).forEach(g=>S.servers[g.id]=g);setMe(r);loadStories();
   $('#app').className='app';applyAppWall();
   renderShell();connect();updateTitle();
+  if(hashTab())return;
   const h=location.hash.slice(1),jm=/^join\/([\w-]{4,20})$/.exec(h);
   if(jm){history.replaceState(null,'',location.pathname);joinSheet(jm[1]);return}
   const pm=/^pack\/(p[\w-]{4,20})$/.exec(h);if(pm){history.replaceState(null,'',location.pathname);packPreview(pm[1]);return}
@@ -653,7 +654,11 @@ async function ttPlay(u){
 }
 function ttClose(){const el=$('#ttview');if(el)el.remove()}
 /* the whole TikTok: in the computer app a separate window, on phones over Manasenger (or in the TikTok app) */
-function ttOpen(u){u=u||'https://www.tiktok.com/foryou';if(window.mnDesktop&&window.mnDesktop.tiktok){window.mnDesktop.tiktok(u);return}window.open(u,'_blank','noopener')}
+/* coming back from the TikTok screen of the phone app: #tab/chats etc. */
+function hashTab(){const m=/^#tab\/(chats|contacts|calls|tiktok|ai|settings)$/.exec(location.hash);if(!m||!S.me)return false;
+  history.replaceState(null,'',location.pathname);if(m[1]==='settings'){if(S.cur)closeChat();settingsSheet();return true}
+  if(S.cur&&mobile())closeChat();S.tab=m[1];S.q='';if(S.tab==='calls')S.calls=null;renderSide();return true}
+function ttOpen(u){u=u||'https://www.tiktok.com/foryou';if(TT_EMB){if(S.cur&&mobile())closeChat();S.tab='tiktok';renderSide();window.mnDesktop.ttGo(u);return}if(IN_APK()&&store.get('apk',0)>=4){location.href=`intent://open?u=${encodeURIComponent(u)}#Intent;scheme=manasenger-tiktok;package=com.manasenger.app;end`;return}if(window.mnDesktop&&window.mnDesktop.tiktok){window.mnDesktop.tiktok(u);return}window.open(u,'_blank','noopener')}
 /* «ИИ» tab: chat with a free assistant (Gemini when the server has a key) */
 let AI=null,AIbusy=false,AIimg=null;
 function aiList(){if(!AI){AI=store.get('ai',[]);if(!Array.isArray(AI))AI=[]}return AI}
@@ -678,7 +683,14 @@ async function aiSend(){
   AIbusy=false;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l.map(x=>({r:x.r,t:x.t,th:x.th})));
   if(S.tab==='ai'){if(!$('.ai-in .x'))renderSide();aiDraw()}
 }
+/* PC app: TikTok is drawn by the app itself inside the tab (a website can't be put in a page) */
+const TT_EMB=!!(window.mnDesktop&&window.mnDesktop.ttEmbed);let ttRO=null,ttLast='';
+function ttSync(){if(!TT_EMB)return;const el=$('#ttslot');let b=null;
+  if(el&&S.tab==='tiktok'&&!document.hidden&&!$('#layer').children.length){const r=el.getBoundingClientRect();if(r.width>40&&r.height>40)b={x:Math.round(r.left),y:Math.round(r.top),w:Math.round(r.width),h:Math.round(r.height)}}
+  const k=JSON.stringify(b);if(k!==ttLast){ttLast=k;window.mnDesktop.ttEmbed(b)}}
+if(TT_EMB){addEventListener('resize',ttSync);setInterval(ttSync,400);document.addEventListener('visibilitychange',ttSync)}
 function tiktokHTML(){
+  if(TT_EMB)return `<div class="tt-slot" id="ttslot"><div class="tt-load"><span class="tt-logo big">♪</span>Загружаем TikTok…</div></div>`;
   const seen=[];Object.values(S.msgs).forEach(l=>(l||[]).forEach(m=>{const x=m.text&&TT_RE.exec(m.text);if(x&&!seen.some(s=>s.u===x[0]))seen.push({u:x[0],from:m.from,ts:m.ts})}));
   seen.sort((a,b)=>b.ts-a.ts);
   return `<div class="tt-home">
@@ -2728,7 +2740,7 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"],[data-act="ttplay"]'))e.stopImmediatePropagation()},true);
 document.addEventListener('input',e=>{if(e.target.id==='admq'){const q=e.target.value.toLowerCase();document.querySelectorAll('.adm-row').forEach(x=>x.style.display=x.dataset.q.includes(q)?'':'none')}});
-addEventListener('hashchange',()=>{const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
+addEventListener('hashchange',()=>{if(hashTab())return;const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
   const pm=/^#pack\/(p[\w-]{4,20})$/.exec(location.hash);if(pm&&S.me){history.replaceState(null,'',location.pathname);packPreview(pm[1])}});
 addEventListener('resize',()=>{if(S.me)$('#app').classList.toggle('open',!!S.cur)});
 setInterval(()=>{if(S.cur)renderStatus()},60e3);
