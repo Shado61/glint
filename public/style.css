@@ -1271,3 +1271,30 @@ textarea#admann{width:100%;resize:vertical;min-height:56px;font:inherit}
   .list>.row,.list .row.chat{content-visibility:auto;contain-intrinsic-size:auto 68px}
 }
 .ai-m{contain:content}
+
+/* ================= MAXIMUM SMOOTHNESS =================
+   1) the background never moves: a moving picture under frosted glass makes the graphics chip
+      re-blur every panel on every frame, even when nothing happens on screen;
+   2) phones: no blend modes, lighter shadows, no blur behind dialogs and photos;
+   3) iPhone: Safari is slowest of all at frosted glass, so on iPhone the bars are solid-tinted (no blur at all);
+   4) taps react instantly (no double-tap zoom wait). */
+.wall i{animation:none!important;will-change:auto!important}
+button,a,[data-act],.row,.gbtn,.cbtn{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+@media (max-width:760px),(pointer:coarse){
+  .glass::before{mix-blend-mode:normal;opacity:.55}
+  .bub{box-shadow:inset 0 1px 0 rgba(255,255,255,.1)!important}
+  :root.light .bub{box-shadow:0 1px 2px rgba(30,34,45,.12)!important}
+  .gbtn{box-shadow:none}
+  .scrim{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:rgba(5,8,14,.5)}
+  .lightbox,.gring{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:rgba(0,0,0,.9)}
+  :root:not(.lite) .day,:root:not(.lite) .toast,:root:not(.lite) .menu{-webkit-backdrop-filter:none!important;backdrop-filter:none!important;background:rgba(44,46,52,.94)}
+  :root.light:not(.lite) .day,:root.light:not(.lite) .menu{background:rgba(250,250,252,.96)}
+  .msgs,.list,.ai-box{-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+  .m.new{animation-duration:.18s}
+}
+:root.ios *,:root.ios *::before,:root.ios *::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}
+:root.ios .glass::before{display:none}
+:root.ios:not(.lite) .chat-h,:root.ios:not(.lite) .comp-in,:root.ios:not(.lite) .tabbar,:root.ios:not(.lite) .sheet,:root.ios:not(.lite) .ctx-bar{background:rgba(36,38,44,.96)}
+:root.ios.light:not(.lite) .chat-h,:root.ios.light:not(.lite) .comp-in,:root.ios.light:not(.lite) .tabbar,:root.ios.light:not(.lite) .sheet,:root.ios.light:not(.lite) .ctx-bar{background:rgba(248,248,250,.97)}
+:root.ios .bub,:root.ios .glass,:root.ios .gbtn,:root.ios .ava{box-shadow:none!important}
+.scrolling .pet-svg *,.scrolling .pet-fx *,.scrolling .gdot,.scrolling .fm .pulse{animation-play-state:paused!important}

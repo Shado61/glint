@@ -1031,8 +1031,6 @@ function aiMsgsOf(b){
   if(!msgs.length||msgs[msgs.length-1].r!=='u')throw E(400,'Пустой вопрос');
   return {msgs,pic};
 }
-/* stops a request after a minute, or earlier when the person pressed «stop» (works on older Node too) */
-function aiSig(sig){const t=AbortSignal.timeout(60000);if(!sig)return t;if(AbortSignal.any)return AbortSignal.any([sig,t]);const c=new AbortController(),f=()=>c.abort();sig.addEventListener('abort',f);t.addEventListener('abort',f);return c.signal}
 /* reads a "data: …" event stream line by line */
 async function* sseLines(body){
   const dec=new TextDecoder();let buf='';
@@ -1040,44 +1038,82 @@ async function* sseLines(body){
     while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i).trim();buf=buf.slice(i+1);if(l.startsWith('data:'))yield l.slice(5).trim()}}
   if(buf.trim().startsWith('data:'))yield buf.trim().slice(5).trim();
 }
-/* asks the models one after another; onText gets every new piece of the answer. Returns who answered */
+/* which services are resting after "too many requests": skipped for a short while, so the next answer starts at once */
+const AI_REST=new Map();
+const aiResting=k=>(AI_REST.get(k)||0)>Date.now();
+const aiRest=(k,ms)=>AI_REST.set(k,Date.now()+ms);
+/* fresh facts need Google Search; ordinary questions go without it (much faster) */
+const AI_FRESH=/сегодня|сейчас|вчера|завтра|новост|курс|погод|цен[аыу]|стоит|сколько стоит|расписан|счёт матча|счет матча|кто выиграл|последн|актуальн|202[4-9]|news|today|weather|price|latest|current/i;
+/* one streamed answer from any OpenAI-style service. Gives up quickly if the first words don't come */
+async function aiOpenAI(name,url,key,model,msgs,pic,sys,emit,signal){
+  if(aiResting(name))return false;
+  const ctl=new AbortController(),stop=()=>ctl.abort();if(signal)signal.addEventListener('abort',stop);
+  let first=setTimeout(stop,12000),got=false;const all=setTimeout(stop,90000);
+  try{
+    const h={'Content-Type':'application/json'};if(key)h.Authorization='Bearer '+key;
+    const r=await fetch(url,{method:'POST',headers:h,signal:ctl.signal,body:JSON.stringify({model,stream:true,temperature:.7,max_tokens:3000,
+      messages:[{role:'system',content:sys}].concat(msgs.map((m,i)=>({role:m.r==='a'?'assistant':'user',content:pic&&i===msgs.length-1?[{type:'text',text:m.t},{type:'image_url',image_url:{url:pic[0]}}]:m.t})))})});
+    if(!r.ok){if(r.status===429||r.status===402)aiRest(name,30000);else if(r.status>=500)aiRest(name,10000);console.log('AI',name,r.status);return false}
+    const ct=r.headers.get('content-type')||'';
+    if(!/event-stream/.test(ct)){const j=await r.json().catch(()=>null);const t=j&&j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content;if(t){clearTimeout(first);emit(String(t));return true}return false}
+    for await(const d of sseLines(r.body)){if(d==='[DONE]')break;let j;try{j=JSON.parse(d)}catch(e){continue}
+      const c=j.choices&&j.choices[0],t=c&&c.delta&&typeof c.delta.content==='string'?c.delta.content:'';
+      if(t){if(!got){got=true;clearTimeout(first)}emit(t)}}
+    return got;
+  }catch(e){if(!got&&!(signal&&signal.aborted))aiRest(name,5000);return got}
+  finally{clearTimeout(first);clearTimeout(all);if(signal)signal.removeEventListener('abort',stop)}
+}
+/* asks the services one after another until one answers; onText gets every new piece of the answer.
+   Order: Gemini (GEMINI_API_KEY) → Groq (GROQ_API_KEY, very fast) → LLM7 (free, no key) → Pollinations (free) */
 async function aiAsk(u,b,onText,signal){
   const {msgs,pic}=aiMsgsOf(b),sys=aiSys(u,b.tz);let got=false;
-  const emit=t=>{if(t){got=true;onText(t)}};
+  /* some free models think out loud in <think>…</think>: that part is not shown */
+  let think=false,buf='';
+  const emit=t=>{if(!t)return;buf+=t;let out='';
+    for(;;){if(think){const k=buf.indexOf('</think>');if(k<0){buf=buf.slice(-8);break}buf=buf.slice(k+8);think=false;continue}
+      const k=buf.indexOf('<think>');if(k<0){const keep=buf.lastIndexOf('<');if(keep>=0&&buf.length-keep<7&&'<think>'.startsWith(buf.slice(keep))){out+=buf.slice(0,keep);buf=buf.slice(keep)}else{out+=buf;buf=''}break}
+      out+=buf.slice(0,k);buf=buf.slice(k+7);think=true}
+    if(!got)out=out.replace(/^\s+/,'');if(out){got=true;onText(out)}};
+  const flush=()=>{if(buf&&!think){const t=buf;buf='';if(t.trim()){got=true;onText(t)}}};
+  const done=by=>{flush();return by};
+  const stopped=()=>signal&&signal.aborted;
+  const q=msgs[msgs.length-1].t;
   const key=process.env.GEMINI_API_KEY;
   if(key){
-    const models=[...new Set([process.env.GEMINI_MODEL||'gemini-2.5-flash','gemini-2.5-flash','gemini-2.0-flash','gemini-2.5-flash-lite'])];
-    const contents=msgs.map((m,i)=>({role:m.r==='a'?'model':'user',parts:(pic&&i===msgs.length-1?[{inlineData:{mimeType:pic[1],data:pic[2]}}]:[]).concat([{text:m.t}])}));
-    for(const model of models){
-      for(const search of [true,false]){
-        if(signal&&signal.aborted)return 'stop';
-        const body={systemInstruction:{parts:[{text:sys}]},contents,generationConfig:{temperature:.8,maxOutputTokens:4096}};
-        if(search)body.tools=[{google_search:{}}];
-        if(/2\.5/.test(model))body.generationConfig.thinkingConfig={thinkingBudget:/lite/.test(model)?0:512};
-        const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':streamGenerateContent?alt=sse',{method:'POST',
-          headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:aiSig(signal),body:JSON.stringify(body)}).catch(()=>null);
-        if(!r||!r.ok){const j=r&&await r.json().catch(()=>null);if(r&&r.status!==429)console.log('Gemini',model,search?'+search':'',r.status,j&&j.error&&j.error.message);
-          if(r&&r.status===400&&search)continue; /* this model can't search: ask it without search */
-          break} /* busy or no such model: the next one */
-        try{for await(const d of sseLines(r.body)){let j;try{j=JSON.parse(d)}catch(e){continue}
-          const c=j.candidates&&j.candidates[0];emit(c&&c.content&&(c.content.parts||[]).filter(x=>!x.thought).map(x=>x.text||'').join(''))}}catch(e){if(signal&&signal.aborted)return 'stop'}
-        if(got)return 'Gemini';
-        break;
-      }
+    const search=AI_FRESH.test(q);
+    for(const model of [...new Set([process.env.GEMINI_MODEL||'gemini-2.5-flash','gemini-2.0-flash','gemini-2.5-flash-lite'])]){
+      if(stopped())return 'stop';if(aiResting('g:'+model))continue;
+      const body={systemInstruction:{parts:[{text:sys}]},contents:msgs.map((m,i)=>({role:m.r==='a'?'model':'user',parts:(pic&&i===msgs.length-1?[{inlineData:{mimeType:pic[1],data:pic[2]}}]:[]).concat([{text:m.t}])})),
+        generationConfig:{temperature:.7,maxOutputTokens:4096}};
+      if(search)body.tools=[{google_search:{}}];
+      if(/2\.5/.test(model))body.generationConfig.thinkingConfig={thinkingBudget:0}; /* no long "thinking": the answer starts right away */
+      const ctl=new AbortController(),stop=()=>ctl.abort();if(signal)signal.addEventListener('abort',stop);
+      const first=setTimeout(stop,12000);let any=false;
+      try{
+        let r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':streamGenerateContent?alt=sse',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:ctl.signal,body:JSON.stringify(body)});
+        if(!r.ok&&search&&r.status===400){delete body.tools;r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':streamGenerateContent?alt=sse',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:ctl.signal,body:JSON.stringify(body)})}
+        if(!r.ok){if(r.status===429)aiRest('g:'+model,30000);else if(r.status===404)aiRest('g:'+model,36e5);console.log('Gemini',model,r.status)}
+        else for await(const d of sseLines(r.body)){let j;try{j=JSON.parse(d)}catch(e){continue}
+          const c=j.candidates&&j.candidates[0],t=c&&c.content&&(c.content.parts||[]).filter(x=>!x.thought).map(x=>x.text||'').join('');
+          if(t){if(!any){any=true;clearTimeout(first)}emit(t)}}
+      }catch(e){}
+      finally{clearTimeout(first);if(signal)signal.removeEventListener('abort',stop)}
+      if(got)return done('Gemini');
     }
   }
-  /* free model, no key needed */
-  const r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},signal:aiSig(signal),
-    body:JSON.stringify({model:'openai',stream:true,messages:[{role:'system',content:sys}].concat(msgs.map((m,i)=>({role:m.r==='a'?'assistant':'user',content:pic&&i===msgs.length-1?[{type:'text',text:m.t},{type:'image_url',image_url:{url:pic[0]}}]:m.t})))})}).catch(()=>null);
-  if(r&&r.ok){
-    if(/event-stream/.test(r.headers.get('content-type')||'')){
-      try{for await(const d of sseLines(r.body)){if(d==='[DONE]')break;let j;try{j=JSON.parse(d)}catch(e){continue}
-        const c=j.choices&&j.choices[0];emit(c&&c.delta&&typeof c.delta.content==='string'?c.delta.content:'')}}catch(e){if(signal&&signal.aborted)return 'stop'}
-    }else{const j=await r.json().catch(()=>null);emit(j&&j.choices&&j.choices[0]&&j.choices[0].message&&String(j.choices[0].message.content||''))}
-    if(got)return 'free';
-  }
-  if(signal&&signal.aborted)return 'stop';
-  throw E(503,'ИИ сейчас не отвечает. Попробуйте ещё раз через минуту');
+  if(stopped())return 'stop';
+  if(process.env.GROQ_API_KEY&&await aiOpenAI('groq','https://api.groq.com/openai/v1/chat/completions',process.env.GROQ_API_KEY,pic?'meta-llama/llama-4-scout-17b-16e-instruct':(process.env.GROQ_MODEL||'llama-3.3-70b-versatile'),msgs,pic,sys,emit,signal))return done('Groq');
+  if(stopped())return 'stop';
+  if(await aiOpenAI('llm7','https://api.llm7.io/v1/chat/completions',process.env.LLM7_TOKEN||'unused',process.env.LLM7_MODEL||'default',msgs,pic,sys,emit,signal))return done('LLM7');
+  if(stopped())return 'stop';
+  const pk=process.env.POLLINATIONS_KEY;
+  if(await aiOpenAI('poll',pk?'https://gen.pollinations.ai/v1/chat/completions':'https://text.pollinations.ai/openai',pk||'','openai',msgs,pic,sys,emit,signal))return done('Pollinations');
+  if(stopped())return 'stop';
+  /* everything was busy: one more try at the free ones that were resting the shortest */
+  AI_REST.delete('llm7');AI_REST.delete('poll');
+  if(await aiOpenAI('llm7','https://api.llm7.io/v1/chat/completions',process.env.LLM7_TOKEN||'unused',process.env.LLM7_MODEL||'default',msgs,pic,sys,emit,signal))return done('LLM7');
+  if(stopped())return 'stop';
+  throw E(503,'ИИ сейчас перегружен. Попробуйте ещё раз через полминуты');
 }
 API['POST /api/ai']=async(req,res,b,u)=>{
   need(u);if(!limit('ai:'+u.id,20,60e3))throw E(429,'Слишком много вопросов, подождите минуту');
@@ -1087,7 +1123,7 @@ API['POST /api/ai']=async(req,res,b,u)=>{
 async function aiStream(req,res,u){
   if(!u)return send(res,401,{error:'Войди в аккаунт'});
   if(!sameOrigin(req))return send(res,403,{error:'запрос с чужого сайта'});
-  if(!limit('ai:'+u.id,20,60e3))return send(res,429,{error:'Слишком много вопросов, подождите минуту'});
+  if(!limit('ai:'+u.id,30,60e3))return send(res,429,{error:'Слишком много вопросов, подождите минуту'});
   let b;try{b=await body(req);aiMsgsOf(b)}catch(e){return send(res,e.code||400,{error:e.message})}
   const ctl=new AbortController();res.on('close',()=>{if(!res.writableEnded)ctl.abort()});
   res.writeHead(200,Object.assign({'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'},SEC));

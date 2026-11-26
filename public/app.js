@@ -73,7 +73,7 @@ const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',fou
 const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=(/Android/.test(navigator.userAgent)?3:2))||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=2)||(navigator.connection&&navigator.connection.saveData);
 const isLite=()=>{const v=store.get('lite','auto');return v==='on'||(v==='auto'&&!!LITE_AUTO)};
 document.documentElement.classList.toggle('lite',isLite());
-const WIN=isLite()?60:120; /* messages kept on screen at once; older ones appear on demand */
+const WIN=isLite()?50:matchMedia('(pointer:coarse)').matches?80:120; /* messages kept on screen at once; older ones appear on demand */
 
 /* ---------- helpers ---------- */
 async function api(path,body){
@@ -1169,7 +1169,7 @@ let AI=null,AIbusy=false,AIimg=null,AIctl=null;
 function aiList(){if(!AI){AI=store.get('ai',[]);if(!Array.isArray(AI))AI=[]}return AI}
 /* the answer is written in Markdown: bold, lists, headings, code — shown nicely (everything is escaped first) */
 function aiMd(t){
-  const parts=String(t||'').split(/```/);
+  const parts=String(t||'').replace(/<think>[\s\S]*?(<\/think>|$)/g,'').replace(/^\s+/,'').split(/```/);
   return parts.map((p,i)=>{
     if(i%2){const nl=p.indexOf('\n'),lang=nl>=0?p.slice(0,nl).trim():'',code=nl>=0?p.slice(nl+1):p;
       return `<pre class="ai-code">${lang&&/^[\w+#.-]{1,20}$/.test(lang)?`<small>${esc(lang)}</small>`:''}<code>${esc(code.replace(/\n$/,''))}</code></pre>`}
@@ -1184,7 +1184,7 @@ function aiMd(t){
   }).join('');
 }
 function aiMsgs(){const l=aiList();
-  return l.length?l.map((m,i)=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?aiMd(m.t)+(m.live?'<i class="ai-cur"></i>':''):esc(m.t)}</div>${m.r==='a'&&!m.live&&m.t?`<div class="ai-tools"><button data-act="aicopy" data-i="${i}">Копировать</button>${i===l.length-1&&!AIbusy?`<button data-act="airegen">Ответить заново</button>`:''}</div>`:''}`).join('')+(AIbusy&&!(l[l.length-1]||{}).live?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
+  return l.length?l.map((m,i)=>`<div class="ai-m ${m.r==='a'?'a':'u'}"${m.live?' id="ailive"':''}>${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?aiMd(m.t)+(m.live?'<i class="ai-cur"></i>':''):esc(m.t)}</div>${m.r==='a'&&!m.live&&m.t?`<div class="ai-tools"><button data-act="aicopy" data-i="${i}">Копировать</button>${i===l.length-1&&!AIbusy?`<button data-act="airegen">Ответить заново</button>`:''}</div>`:''}`).join('')+(AIbusy&&!(l[l.length-1]||{}).live?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
     :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, кодом, идеями, свежими новостями — бесплатно, прямо в Manasenger. Можно прикрепить фото.</small>
       <div class="ai-sug">${['Объясни тему по физике простыми словами','Придумай подпись к фото','Переведи текст на английский','Составь план на неделю'].map(x=>`<button class="gbtn" data-act="aisug">${x}</button>`).join('')}</div></div>`}
 function aiHTML(){return `<div class="ai-box"><div class="ai-msgs" id="aimsgs">${aiMsgs()}</div>
@@ -1195,7 +1195,10 @@ function picScale(src,max,q){return new Promise(ok=>{const im=new Image();im.onl
 function aiFile(f){if(!f||!/^image\//.test(f.type))return;const u=URL.createObjectURL(f);
   picScale(u,1280,.82).then(d=>{URL.revokeObjectURL(u);if(!d)return toast('Не получилось открыть фото');AIimg=d;aiRe();const q=$('#aiq');q&&q.focus()})}
 function aiRe(){const o=$('#aiq'),v=o?o.value:'';renderSide();const q=$('#aiq');if(q&&v)q.value=v;aiDraw()}
-function aiDraw(live){const b=$('#aimsgs');if(!b)return;const sc=$('#list'),near=!live||!sc||sc.scrollHeight-sc.scrollTop-sc.clientHeight<140;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight;if(near&&sc)sc.scrollTop=sc.scrollHeight}
+function aiDraw(live){const b=$('#aimsgs');if(!b)return;
+  /* while the answer is being written only that one bubble is redrawn, not the whole conversation */
+  const lv=live&&$('#ailive'),am=aiList()[aiList().length-1];if(lv&&am&&am.live){const sc=$('#list'),near=!sc||sc.scrollHeight-sc.scrollTop-sc.clientHeight<140;lv.innerHTML=aiMd(am.t)+'<i class="ai-cur"></i>';if(near&&sc)sc.scrollTop=sc.scrollHeight;return}
+ const sc=$('#list'),near=!live||!sc||sc.scrollHeight-sc.scrollTop-sc.clientHeight<140;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight;if(near&&sc)sc.scrollTop=sc.scrollHeight}
 async function aiSend(again){
   const q=$('#aiq'),t=q?q.value.trim():'';if(AIbusy)return;
   const l=aiList();
@@ -1206,16 +1209,26 @@ async function aiSend(again){
   const body={msgs:send,tz:(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){return ''}})()};
   const a={r:'a',t:'',live:true};let raf=0;const paint=()=>{raf=0;aiDraw(true)};
   AIctl=window.AbortController?new AbortController():null;
-  try{
-    const r=await fetch('/api/ai/stream',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AIctl&&AIctl.signal});
-    if(!r.ok||!r.body){let j=null;try{j=await r.json()}catch(e){}
-      if(r.status===404||!r.body){const j2=await api('/api/ai',body);a.t=j2.t;l.push(a)}else throw new Error((j&&j.error)||'ИИ не ответил')}
-    else{l.push(a);const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
-      for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
-        while((i=buf.indexOf('\n'))>=0){const ln=buf.slice(0,i);buf=buf.slice(i+1);if(!ln)continue;let o;try{o=JSON.parse(ln)}catch(e){continue}
-          if(o.d){a.t+=o.d;if(!raf)raf=requestAnimationFrame(paint)}if(o.error)throw new Error(o.error)}}
-      if(!a.t)throw new Error('ИИ не ответил')}
-  }catch(e){if(e.name!=='AbortError'){toast(e.message||'ИИ не ответил');if(!a.t){const k=l.indexOf(a);if(k>=0)l.splice(k,1)}}}
+  /* one quiet retry when the answer didn't come (busy free service, bad connection) — the person just sees the answer */
+  for(let attempt=0;attempt<2;attempt++){
+    try{
+      const r=await fetch('/api/ai/stream',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AIctl&&AIctl.signal});
+      if(!r.ok||!r.body){let j=null;try{j=await r.json()}catch(e){}
+        if(r.status===404||!r.body){const j2=await api('/api/ai',body);a.t=j2.t;if(!l.includes(a))l.push(a)}else{const er=new Error((j&&j.error)||'ИИ не ответил');er.hard=r.status===429||r.status===401;throw er}}
+      else{if(!l.includes(a))l.push(a);const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+        for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+          while((i=buf.indexOf('\n'))>=0){const ln=buf.slice(0,i);buf=buf.slice(i+1);if(!ln)continue;let o;try{o=JSON.parse(ln)}catch(e){continue}
+            if(o.d){a.t+=o.d;if(!raf)raf=requestAnimationFrame(paint)}if(o.error)throw new Error(o.error)}}
+        if(!a.t)throw new Error('ИИ не ответил')}
+      break;
+    }catch(e){
+      if(e.name==='AbortError')break;
+      if(a.t)break; /* part of the answer came: keep it */
+      if(attempt===0&&!e.hard){await new Promise(k=>setTimeout(k,1200));continue}
+      toast(e.message||'ИИ не ответил');const k=l.indexOf(a);if(k>=0)l.splice(k,1);
+    }
+  }
+  if(!a.t){const k=l.indexOf(a);if(k>=0)l.splice(k,1)}
   delete a.live;AIbusy=false;AIctl=null;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l.map(x=>({r:x.r,t:x.t,th:x.th})));
   if(S.tab==='ai'){renderSide();aiDraw()}
 }
@@ -1236,24 +1249,36 @@ function patchHTML(box,h){
   }
   while(cur){const nx=cur.nextSibling;cur.remove();cur=nx}
 }
+/* like patchHTML, but takes the pieces one by one: a message that did not change is not even parsed again,
+   so a new message in a long chat costs one message of work, not a hundred */
+const TPL=document.createElement('template');
+function patchList(box,arr){
+  const olds=new Map();for(const o of box.children){const k=o._h;if(k!==undefined){let p=olds.get(k);if(!p)olds.set(k,p=[]);p.push(o)}}
+  let cur=box.firstChild;
+  for(const s of arr){if(!s)continue;const pool=olds.get(s),reuse=pool&&pool.shift();
+    if(reuse){if(reuse===cur)cur=cur.nextSibling;else box.insertBefore(reuse,cur);continue}
+    TPL.innerHTML=s;const kids=[...TPL.content.children];if(kids.length===1)kids[0]._h=s;
+    for(const n of kids)box.insertBefore(n,cur)}
+  while(cur){const nx=cur.nextSibling;cur.remove();cur=nx}
+}
 function renderMsgs(toBottom){
   const box=$('#msgs'),c=S.chats[S.cur];if(!box||!c)return;
   const list=S.msgs[c.id];
   if(!list){box.innerHTML='<div class="sys">Загружаем…</div>';return}
   const near=box.scrollHeight-box.scrollTop-box.clientHeight<140;
   const win=S.win[c.id]||WIN,from=Math.max(0,list.length-win),shown=list.slice(from);
-  let h=(from>0||S.more[c.id])?`<button class="gbtn more" data-act="older">Показать раньше</button>`:'';
-  if(!list.length)h+=`<div class="sys glass pill" style="margin-top:auto">${c.type==='channel'?'Это начало канала '+esc(chatName(c))+' 👋':c.type==='self'?'Сохраняй сюда заметки, ссылки и фото. Пересылай важное из других чатов ⭐':'Напиши первое сообщение 👋'}</div>`;
+  const H=[];H.push((from>0||S.more[c.id])?`<button class="gbtn more" data-act="older">Показать раньше</button>`:'');
+  if(!list.length)H.push(`<div class="sys glass pill" style="margin-top:auto">${c.type==='channel'?'Это начало канала '+esc(chatName(c))+' 👋':c.type==='self'?'Сохраняй сюда заметки, ссылки и фото. Пересылай важное из других чатов ⭐':'Напиши первое сообщение 👋'}</div>`);
   let day='';
   const fresh=S.fresh;S.fresh=null;
   /* groups and servers: small avatars under the latest of my messages each person has read */
   const seenAt=new Map();
   if(c.type==='group'||c.type==='channel'){const r=c.read||{},mine=shown.filter(m=>m.from===S.me.id&&!m.pending&&!m.sys&&!m.del);
     c.members.forEach(u=>{if(u===S.me.id||!r[u])return;let last=null;for(const m of mine){if(m.ts<=r[u])last=m;else break}if(last){if(!seenAt.has(last.id))seenAt.set(last.id,[]);seenAt.get(last.id).push(u)}})}
-  shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;h+=`<div class="day glass pill">${dayLabel(m.ts)}</div>`}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');h+=x;
-    const sa=seenAt.get(m.id);if(sa)h+=`<button class="seen" data-act="readers" data-id="${m.id}" title="Кто прочитал">${sa.slice(0,5).map(u=>avatar(S.users[u],'xs',false)).join('')}${sa.length>5?`<small>+${sa.length-5}</small>`:''}</button>`});
+  shown.forEach((m,i)=>{const d=new Date(m.ts).toDateString();if(d!==day){day=d;H.push(`<div class="day glass pill">${dayLabel(m.ts)}</div>`)}let x=msgHTML(c,m,shown[i-1],shown[i+1]);if(fresh===m.id)x=x.replace('class="m ','class="m new ');H.push(x);
+    const sa=seenAt.get(m.id);if(sa)H.push(`<button class="seen" data-act="readers" data-id="${m.id}" title="Кто прочитал">${sa.slice(0,5).map(u=>avatar(S.users[u],'xs',false)).join('')}${sa.length>5?`<small>+${sa.length-5}</small>`:''}</button>`)});
   const prevH=box.scrollHeight,prevT=box.scrollTop,fromBottom=prevH-prevT-box.clientHeight;
-  patchHTML(box,h);
+  patchList(box,H);
   /* stay at the bottom after sending and when new messages come; otherwise keep the same place */
   const place=()=>{if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;else box.scrollTop=box.scrollHeight-box.clientHeight-fromBottom};
   place();requestAnimationFrame(place);watchRounds();
@@ -3470,3 +3495,8 @@ async function updateNow(){
 }
 checkVersion();setInterval(checkVersion,5*60e3);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkVersion()});
 boot();
+/* while a list is scrolling, decorative animations rest so every frame goes to the scroll itself */
+(function(){let t=0;const root=document.documentElement;
+  document.addEventListener('scroll',()=>{if(!t)root.classList.add('scrolling');clearTimeout(t);t=setTimeout(()=>{t=0;root.classList.remove('scrolling')},140)},{capture:true,passive:true});
+})();
+
