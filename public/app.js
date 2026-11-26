@@ -69,7 +69,7 @@ const TICK2='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-w
 const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{},servers:{},view:'home',win:{},
   packs:[],pk:null,stk:false,contacts:{},stars:new Set(),stories:[],tz:5};
 /* weak phones: lighter mode — no animations or glass, smaller camera picture, fewer messages on screen */
-const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=2)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=4)||(navigator.connection&&navigator.connection.saveData);
+const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=2)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=2)||(navigator.connection&&navigator.connection.saveData);
 const isLite=()=>{const v=store.get('lite','auto');return v==='on'||(v==='auto'&&!!LITE_AUTO)};
 document.documentElement.classList.toggle('lite',isLite());
 const WIN=isLite()?60:120; /* messages kept on screen at once; older ones appear on demand */
@@ -352,7 +352,12 @@ function renderSideNow(){
       <button class="${S.tab==='ai'?'on':''}" data-act="tab" data-t="ai"><span class="tt-ic">✦</span><span>ИИ</span></button>
       <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Профиль</span></button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
+  const l=$('#list');
+  if(LAST_TAB!==S.tab){const order=['chats','contacts','calls','ai'],a=order.indexOf(LAST_TAB),b=order.indexOf(S.tab);
+    TAB_ANIM=a>=0&&b>=0?{c:b>a?'tab-in-r':'tab-in-l',t:Date.now()}:null;LAST_TAB=S.tab}
+  if(l&&TAB_ANIM&&Date.now()-TAB_ANIM.t<120)l.classList.add(TAB_ANIM.c);
 }
+let LAST_TAB='chats',TAB_ANIM=null;
 function chatListHTML(){
   const q=S.q.trim().toLowerCase().replace(/^@/,'');
   let list=sortedChats();
@@ -479,7 +484,11 @@ function mergeMsgs(loaded,live){
   live.forEach(m=>{if(!ids.has(m.id)&&!(m.pending&&loaded.some(x=>x.from===m.from&&x.text===m.text&&Math.abs(x.ts-m.ts)<15e3)))out.push(m)});
   return out.sort((a,b)=>a.ts-b.ts);
 }
-function closeChat(){if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;S.cur=null;history.replaceState(null,'',location.pathname);renderSide();renderMain()}
+function closeChat(anim){if(anim===true&&mobile()&&!isLite()&&$('#main')&&!$('#app').classList.contains('peek')){
+    const m=$('#main');$('#app').classList.add('peek');m.style.transition='transform .22s cubic-bezier(.3,.7,.4,1)';m.style.transform='translate3d(100%,0,0)';
+    const sd=$('#side');if(sd){sd.style.transform='translate3d(-28%,0,0)';sd.style.transition='none';requestAnimationFrame(()=>{sd.style.transition='transform .22s cubic-bezier(.3,.7,.4,1)';sd.style.transform=''})}
+    setTimeout(()=>{m.style.transition='';m.style.transform='';if(sd){sd.style.transition='';sd.style.transform=''}$('#app').classList.remove('peek');closeChat(false)},220);return}
+  if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;S.cur=null;history.replaceState(null,'',location.pathname);renderSide();renderMain()}
 
 /* who has read a message: everyone whose "read up to" time is at or after it */
 function readers(c,m){const r=c.read||{};return c.members.filter(u=>u!==S.me.id&&u!==m.from&&(r[u]||0)>=m.ts)}
@@ -1198,7 +1207,10 @@ function openMenu(html,x,y){
   const left=Math.max(10,Math.min(x-w/2,innerWidth-w-10)),top=y+h+20>innerHeight?Math.max(10,y-h-10):y+10;
   mn.style.left=left+'px';mn.style.top=top+'px';mn.style.setProperty('--ox',(x-left)+'px');mn.style.setProperty('--oy',(y<top?0:h)+'px');
 }
-function closeLayer(){$('#layer').innerHTML=''}
+function closeLayer(){const L=$('#layer');if(!L||!L.innerHTML)return;
+  if(isLite()||matchMedia('(prefers-reduced-motion:reduce)').matches){L.innerHTML='';return}
+  const g=document.createElement('div');g.className='layer-out';g.setAttribute('aria-hidden','true');
+  while(L.firstChild)g.appendChild(L.firstChild);document.body.appendChild(g);setTimeout(()=>g.remove(),200)}
 function sheet(html){$('#layer').innerHTML=`<div class="scrim" data-act="closemenu"></div><div class="sheet glass" role="dialog" aria-modal="true">${html}</div>`}
 
 /* ---------- new chat / new group / info / settings ---------- */
@@ -2820,7 +2832,7 @@ document.addEventListener('click',async e=>{
     case 'map3d':{if(!MAP)break;const up=MAP.getPitch()<20;MAP.easeTo({pitch:up?60:0,bearing:up?-20:0,zoom:up?Math.max(MAP.getZoom(),16):MAP.getZoom(),duration:700});el.classList.toggle('on',up);break}
     case 'tab':S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;
-    case 'back':closeChat();break;
+    case 'back':closeChat(true);break;
     case 'dm':closeLayer();startDM(id);break;
     case 'newchat':newChatSheet(false);break;
     case 'newgroup':newChatSheet(true);break;

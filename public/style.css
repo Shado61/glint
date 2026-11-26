@@ -1088,3 +1088,43 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 /* unread counter on the Chats button above the servers: fully visible, never cut */
 .rbtn .badge{right:-7px;bottom:-7px;min-width:21px;height:21px;padding:0 5px;font-size:11.5px;font-weight:800;line-height:1;z-index:2;border:2.5px solid var(--rail-bg,#1a1b1e);box-shadow:0 2px 6px rgba(0,0,0,.35)}
 :root.light .rbtn .badge{border-color:#e9eef4}
+
+/* ---------- motion: short, smooth, only transform and opacity (cheap for the phone), like Telegram and WhatsApp ---------- */
+:root{--ease-out:cubic-bezier(.22,.9,.3,1);--ease-spring:cubic-bezier(.2,1.25,.4,1)}
+/* switching tabs: the new list slides in from the side you're going to */
+.list.tab-in-r{animation:tabR .2s var(--ease-out)}
+.list.tab-in-l{animation:tabL .2s var(--ease-out)}
+@keyframes tabR{from{opacity:0;transform:translate3d(18px,0,0)}}
+@keyframes tabL{from{opacity:0;transform:translate3d(-18px,0,0)}}
+.tabbar button{transition:background .18s,color .18s,transform .12s}
+.tabbar button:active{transform:scale(.92)}
+.tabbar button.on .ico{animation:tabPop .28s var(--ease-spring)}
+@keyframes tabPop{40%{transform:scale(1.18)}}
+/* closing windows and menus: they slide / shrink away instead of vanishing */
+.layer-out{position:fixed;inset:0;z-index:49;pointer-events:none}
+.layer-out .scrim{animation:fadeOut .18s forwards}
+.layer-out .sheet{animation:sheetOut .18s ease-in forwards}
+.layer-out .menu,.layer-out .lightbox,.layer-out>*:not(.scrim):not(.sheet){animation:popOut .16s ease-in forwards}
+@keyframes fadeOut{to{opacity:0}}
+@keyframes popOut{to{opacity:0;transform:scale(.94)}}
+@keyframes sheetOut{to{opacity:0;transform:translate(-50%,calc(-50% + 30px))}}
+@media (max-width:760px){@keyframes sheetOut{to{transform:translate3d(0,100%,0)}}}
+/* windows open a bit faster */
+.sheet{animation-duration:.26s!important}
+.scrim{animation:fade .16s}
+/* everything you press answers right away */
+.gbtn,.row,.ch,.rbtn,.map-chip,.seg button,.opt,.sendb,.cbig{transition:transform .12s var(--ease-out),background-color .15s,opacity .15s}
+.gbtn:active,.rbtn:active,.map-chip:active,.seg button:active,.cbig:active{transform:scale(.93)}
+.row:active,.ch:active{transform:scale(.985);background:rgba(255,255,255,.06)}
+:root.light .row:active,:root.light .ch:active{background:rgba(20,40,70,.06)}
+/* messages: your new message flies up from the bar, incoming ones fade in */
+.m.new{animation:msgIn .24s var(--ease-out)}
+.m.me.new{animation:msgMe .26s var(--ease-spring)}
+@keyframes msgIn{from{opacity:0;transform:translate3d(-10px,6px,0) scale(.98)}}
+@keyframes msgMe{from{opacity:0;transform:translate3d(0,22px,0) scale(.96)}}
+/* reactions and counters pop */
+.reacts button{animation:tabPop .25s var(--ease-spring)}
+.badge{transition:transform .2s var(--ease-spring)}
+/* the send / mic button morphs */
+.sendb{animation:tabPop .22s var(--ease-spring)}
+@media (prefers-reduced-motion:reduce){.list.tab-in-r,.list.tab-in-l,.m.new,.m.me.new{animation:none}}
