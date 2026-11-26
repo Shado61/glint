@@ -598,16 +598,24 @@ API['POST /api/map/remove']=(req,res,b,u)=>{need(u);const id=String(b&&b.userId|
   if(u.mapf&&u.mapf[id]){delete u.mapf[id];mark('u:'+u.id)}if(o&&o.mapf&&o.mapf[u.id]){delete o.mapf[u.id];mark('u:'+o.id);mapPing(o.id)}
   return mapOut(u)};
 const okFriends=u=>Object.entries(u.mapf||{}).filter(([id,st])=>st==='ok'&&DB.users[id]&&DB.users[id].mapf&&DB.users[id].mapf[u.id]==='ok').map(([id])=>id);
-API['POST /api/map/loc']=(req,res,b,u)=>{need(u);
+function geoSet(u,b){
   const lat=+b.lat,lng=+b.lng,acc=Math.min(5000,Math.max(0,Math.round(+b.acc||0)));
   if(!isFinite(lat)||!isFinite(lng)||Math.abs(lat)>90||Math.abs(lng)>180)throw E(400,'Нет координат');
-  if(!limit('maploc:'+u.id,20,60e3))return {ok:true};
+  if(!limit('maploc:'+u.id,60,60e3))return {ok:true};
   const prevSave=u.geo&&u.geo.saved||0;
   u.geo={lat:Math.round(lat*1e5)/1e5,lng:Math.round(lng*1e5)/1e5,acc,ts:now(),saved:prevSave};
-  if(now()-prevSave>120e3){u.geo.saved=now();mark('u:'+u.id)} /* written to the database at most every 2 minutes, sent to friends right away */
-  const g=geoOut(u);okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:g}));return {ok:true}};
-API['POST /api/map/stop']=(req,res,b,u)=>{need(u);u.geo={off:true,ts:now()};mark('u:'+u.id);
-  okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:null}));return {ok:true}};
+  if(now()-prevSave>60e3){u.geo.saved=now();mark('u:'+u.id)} /* written to the database at most every minute, sent to friends right away */
+  const g=geoOut(u);okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:g}));return {ok:true}}
+function geoOff(u){u.geo={off:true,ts:now()};mark('u:'+u.id);okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:null}));return {ok:true}}
+API['POST /api/map/loc']=(req,res,b,u)=>{need(u);return geoSet(u,b||{})};
+API['POST /api/map/stop']=(req,res,b,u)=>{need(u);if(u.geoTok){delete u.geoTok}return geoOff(u)};
+/* the Android app keeps sending the position from a background service (screen off, app minimised).
+   It gets its own key that can only move this person's dot on the map — nothing else. */
+const geoKeyHash=t=>require('crypto').createHash('sha256').update(String(t)).digest('hex');
+API['POST /api/map/bgkey']=(req,res,b,u)=>{need(u);const t=require('crypto').randomBytes(24).toString('base64url');u.geoTok=geoKeyHash(t);if(!u.geo||u.geo.off)u.geo={ts:now()};mark('u:'+u.id);return {key:t}};
+const geoByKey=t=>{if(!/^[\w-]{20,64}$/.test(String(t||'')))return null;const h=geoKeyHash(t);return Object.values(DB.users).find(x=>x.geoTok===h)||null};
+API['POST /api/map/bgloc']=(req,res,b)=>{const u=geoByKey(b&&b.key);if(!u)throw E(401,'Ключ не действует');if(u.geo&&u.geo.off)throw E(401,'Геопозиция выключена');return geoSet(u,b)};
+API['POST /api/map/bgstop']=(req,res,b)=>{const u=geoByKey(b&&b.key);if(!u)return {ok:true};delete u.geoTok;return geoOff(u)};
 
 /* ---------- Saved Messages: a chat with yourself; stars mark important messages in any chat ---------- */
 function selfChat(u){

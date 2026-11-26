@@ -8,11 +8,15 @@
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
   <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
   <queries><intent><action android:name="android.support.customtabs.action.CustomTabsService"/></intent></queries>
   <application android:label="Manasenger" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher" android:allowBackup="true" android:supportsRtl="true" android:theme="@android:style/Theme.Translucent.NoTitleBar">
     <meta-data android:name="asset_statements" android:resource="@string/asset_statements"/>
     <activity android:name=".MainActivity" android:exported="true" android:label="Manasenger" android:launchMode="singleTask">
-      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/?apk=4"/>
+      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL" android:value="https://glint-v57l.onrender.com/?apk=5"/>
       <meta-data android:name="android.support.customtabs.trusted.STATUS_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.NAVIGATION_BAR_COLOR" android:resource="@color/bg"/>
       <meta-data android:name="android.support.customtabs.trusted.SPLASH_SCREEN_BACKGROUND_COLOR" android:resource="@color/bg"/>
@@ -36,6 +40,14 @@
         <data android:scheme="manasenger-once"/>
       </intent-filter>
     </activity>
+    <!-- friends map: keeps sending the position with the screen off, while sharing is on -->
+    <activity android:name=".GeoActivity" android:exported="true" android:excludeFromRecents="true" android:taskAffinity="com.manasenger.app.geo" android:theme="@android:style/Theme.Translucent.NoTitleBar">
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="manasenger-geo"/>
+      </intent-filter>
+    </activity>
+    <service android:name=".GeoService" android:exported="false" android:foregroundServiceType="location"/>
     <!-- updates: the downloaded new version -->
     <receiver android:name=".Updater" android:exported="true">
       <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE"/></intent-filter>

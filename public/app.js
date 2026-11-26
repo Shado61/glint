@@ -770,10 +770,11 @@ document.addEventListener('visibilitychange',()=>{const L=liveNow();if(!L)return
 /* ================= friends map (like 2GIS): friends who added each other see where the other one is ================= */
 const MAP_STYLES={liberty:['Обычная','https://tiles.openfreemap.org/styles/liberty'],bright:['Яркая','https://tiles.openfreemap.org/styles/bright'],positron:['Светлая','https://tiles.openfreemap.org/styles/positron']};
 let MAPD={sharing:false,friends:[]},MAP=null,MAPV=null,MK=new Map(),MEMK=null,mapSel=null;
-const GEO={watch:null,last:null,sentAt:0,sentPos:null,tick:null};
+const GEO={watch:null,last:null,lastAt:0,sentAt:0,sentPos:null,tick:null,lowAcc:false,native:false};
+let MAPT=0,mapFitted=false;
 const mapIn=()=>MAPD.friends.filter(f=>f.st==='in');
 function mapBadge(){const n=mapIn().length;return n?`<i class="tab-badge">${n}</i>`:''}
-async function mapRefresh(){try{MAPD=await api('/api/map');}catch(e){return}if(S.view==='home'&&$('#side .tabbar'))renderSide();if(MAPV)mapDraw()}
+async function mapRefresh(quiet){try{MAPD=await api('/api/map');}catch(e){return}if(!quiet&&S.view==='home'&&$('#side .tabbar'))renderSide();if(MAPV)mapDraw()}
 function ago(ts){const d=(Date.now()-ts)/1000;if(d<90)return 'только что';if(d<3600)return Math.round(d/60)+' мин назад';if(d<86400)return Math.round(d/3600)+' ч назад';return new Date(ts).toLocaleDateString('ru-RU',{day:'numeric',month:'short'})}
 function distKm(a,b){const R=6371,r=x=>x*Math.PI/180,dl=r(b.lat-a.lat),dg=r(b.lng-a.lng),h=Math.sin(dl/2)**2+Math.cos(r(a.lat))*Math.cos(r(b.lat))*Math.sin(dg/2)**2;return 2*R*Math.asin(Math.sqrt(h))}
 const fmtDist=km=>km<1?Math.round(km*1000)+' м':km<10?km.toFixed(1).replace('.',',')+' км':Math.round(km)+' км';
@@ -790,10 +791,12 @@ async function openMap(){
       <button class="gbtn ic glass map-fab" data-act="mapadd" aria-label="Добавить друзей" title="Добавить друзей">${ic('addUser')}<span id="mapinb"></span></button></div>
     <div class="map-tools"><button class="gbtn ic glass map-fab" data-act="mapme" aria-label="Где я" title="Где я">${ic('locate')}</button>
       <button class="gbtn ic glass map-fab" data-act="mapstyle" aria-label="Вид карты" title="Вид карты">${ic('layers')}</button>
-      <button class="gbtn glass map-fab map-3d" data-act="map3d" aria-label="3D" title="Объёмные здания">3D</button></div>
+      <button class="gbtn glass map-fab map-3d" data-act="map3d" aria-label="3D" title="Объёмные здания">3D</button>
+      <button class="gbtn glass map-fab map-tr ${TR.on?'on':''}" data-act="maptr" aria-label="Остановки и транспорт" title="Остановки и транспорт">🚌</button></div>
     <div class="map-bottom glass" id="mapbot"></div>`;
   document.body.appendChild(MAPV);requestAnimationFrame(()=>MAPV&&MAPV.classList.add('on'));
-  mapDraw();mapRefresh();
+  mapDraw();mapRefresh(true);mapFitted=false;
+  clearInterval(MAPT);MAPT=setInterval(()=>{if(!document.hidden&&MAPV){mapRefresh(true);if(GEO.watch!=null)geoPoll()}},12e3);
   try{await loadMapLib()}catch(e){$('#mapc').innerHTML='<div class="map-load">Не удалось загрузить карту. Проверьте интернет.</div>';return}
   if(!MAPV)return;
   const me=myPos(),first=MAPD.friends.find(f=>f.geo);
@@ -802,12 +805,23 @@ async function openMap(){
     MAP=new maplibregl.Map({container:'mapc',style:(MAP_STYLES[st]||MAP_STYLES.liberty)[1],center:me?[me.lng,me.lat]:first?[first.geo.lng,first.geo.lat]:[76.945,43.238],zoom:me||first?13:11,
       attributionControl:{compact:true},dragRotate:true,pitchWithRotate:true,touchPitch:true,fadeDuration:150,maxPitch:70,renderWorldCopies:false});
   }catch(e){$('#mapc').innerHTML='<div class="map-load">Карта не поддерживается на этом устройстве</div>';MAP=null;return}
-  MAP.on('load',()=>{const l=$('#mapc .map-load');if(l)l.remove();mapDraw()});
-  MAP.on('styledata',()=>{if(ROUTE&&ROUTE.geo&&!MAP.getSource('route')){if(ROUTE.mode==='bus')busDraw();else routeLayer()}});
-  MAP.on('click',()=>{if(mapSel&&!ROUTE){mapSel=null;mapBottom()}});
+  MAP.on('load',()=>{const l=$('#mapc .map-load');if(l)l.remove();mapDraw();mapFitAll();trSched()});
+  MAP.on('styledata',()=>{if(ROUTE&&ROUTE.geo&&!MAP.getSource('route')){if(ROUTE.mode==='bus')busDraw();else routeLayer()}trLayers();if(TR.line&&!MAP.getSource('trline'))trLineDraw()});
+  MAP.on('moveend',trSched);
+  MAP.on('click','tr-stops',e=>{const f=e.features&&e.features[0];if(!f)return;TR.clickAt=Date.now();trOpen(f.properties.id)});
+  MAP.on('mouseenter','tr-stops',()=>{MAP.getCanvas().style.cursor='pointer'});MAP.on('mouseleave','tr-stops',()=>{MAP.getCanvas().style.cursor=''});
+  MAP.on('click',()=>{if(Date.now()-(TR.clickAt||0)<400)return;if(TR.sel&&!ROUTE){trClose();return}if(mapSel&&!ROUTE){mapSel=null;mapBottom()}});
   if(!GEO.last&&navigator.geolocation&&store.get('geoAsked',false))navigator.geolocation.getCurrentPosition(p=>{GEO.last=p.coords;mapDraw()},()=>{},{maximumAge:60e3,timeout:15e3});
 }
-function closeMap(){if(!MAPV)return;const v=MAPV;MAPV=null;mapSel=null;ROUTE=null;v.classList.remove('on');setTimeout(()=>{if(MAP){MAP.remove();MAP=null}MK.clear();MEMK=null;v.remove()},220)}
+function closeMap(){if(!MAPV)return;const v=MAPV;MAPV=null;mapSel=null;ROUTE=null;TR.sel=null;TR.line=null;clearInterval(MAPT);MAPT=0;v.classList.remove('on');setTimeout(()=>{if(MAP){MAP.remove();MAP=null}MK.clear();MEMK=null;v.remove()},220)}
+/* a friend's dot glides to the new place instead of jumping */
+function mkMove(m,lng,lat){const a=m.getLngLat();if(Math.abs(a.lng-lng)<1e-7&&Math.abs(a.lat-lat)<1e-7)return;
+  if(m._anim)cancelAnimationFrame(m._anim);if(distKm({lat:a.lat,lng:a.lng},{lat,lng})>3||document.hidden){m.setLngLat([lng,lat]);return}
+  const t0=performance.now(),D=900,st=t=>{const k=Math.min(1,(t-t0)/D),e=1-Math.pow(1-k,3);m.setLngLat([a.lng+(lng-a.lng)*e,a.lat+(lat-a.lat)*e]);m._anim=k<1?requestAnimationFrame(st):0};m._anim=requestAnimationFrame(st)}
+/* on opening: show everyone at once, even friends in another city or country */
+function mapFitAll(){if(!MAP||mapFitted)return;const pts=MAPD.friends.filter(f=>f.st==='ok'&&f.geo).map(f=>[f.geo.lng,f.geo.lat]),p=myPos();if(p)pts.push([p.lng,p.lat]);
+  if(pts.length<2)return;mapFitted=true;const xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]);
+  MAP.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:{top:110,bottom:230,left:50,right:80},maxZoom:15,duration:800})}
 function fmEl(u,me){const d=document.createElement('div');d.className='fm'+(me?' me':'');d.style.setProperty('--c',u.color||'#5b8cff');
   d.innerHTML=me?'<i class="pulse"></i><i class="core"></i>':`<span class="fm-pin">${avatar(u,'s',false)}</span><span class="fm-n"></span>`;return d}
 function mapDraw(){
@@ -819,11 +833,12 @@ function mapDraw(){
     const seen=new Set();
     on.forEach(f=>{seen.add(f.user.id);let m=MK.get(f.user.id);
       if(!m){const el=fmEl(f.user);el.addEventListener('click',ev=>{ev.stopPropagation();mapFocus(f.user.id)});m=new maplibregl.Marker({element:el,anchor:'bottom'}).setLngLat([f.geo.lng,f.geo.lat]).addTo(MAP);MK.set(f.user.id,m)}
-      else m.setLngLat([f.geo.lng,f.geo.lat]);
-      const n=m.getElement().querySelector('.fm-n');n.textContent=nm(f.user).split(' ')[0]+(Date.now()-f.geo.ts>600e3?' · '+ago(f.geo.ts):'');
+      else mkMove(m,f.geo.lng,f.geo.lat);
+      const n=m.getElement().querySelector('.fm-n');n.textContent=nm(f.user).split(' ')[0]+(Date.now()-f.geo.ts>180e3?' · '+ago(f.geo.ts):'');
       m.getElement().classList.toggle('old',Date.now()-f.geo.ts>3600e3);m.getElement().classList.toggle('sel',mapSel===f.user.id)});
     for(const [id,m] of MK)if(!seen.has(id)){m.remove();MK.delete(id)}
-    const p=myPos();if(p){if(!MEMK)MEMK=new maplibregl.Marker({element:fmEl(S.me,true)}).setLngLat([p.lng,p.lat]).addTo(MAP);else MEMK.setLngLat([p.lng,p.lat])}
+    const p=myPos();if(p){if(!MEMK)MEMK=new maplibregl.Marker({element:fmEl(S.me,true)}).setLngLat([p.lng,p.lat]).addTo(MAP);else mkMove(MEMK,p.lng,p.lat)}
+    if(!mapFitted&&MAP.loaded())mapFitAll();
   }
   mapBottom();
 }
@@ -837,6 +852,7 @@ function mapBottom(){
       <button class="gbtn ic" data-act="maprouteoff" aria-label="Убрать маршрут">${ic('x')}</button></div>
       <div class="seg map-modes">${Object.keys(M).map(k=>`<button class="${ROUTE.mode===k?'on':''}" data-act="maproute" data-id="${f.user.id}" data-mode="${k}">${M[k][0]} ${M[k][1]}</button>`).join('')}</div>
       <div class="btns map-acts">${gisLinks(ROUTE.mode==='car'?'car':ROUTE.mode==='foot'?'pedestrian':'car')}<a class="gbtn" href="https://www.google.com/maps/dir/?api=1&origin=${ROUTE.a.lat},${ROUTE.a.lng}&destination=${ROUTE.b.lat},${ROUTE.b.lng}&travelmode=${ROUTE.mode==='car'?'driving':ROUTE.mode==='foot'?'walking':'bicycling'}" target="_blank" rel="noopener">Google Карты</a></div>`;return}ROUTE=null}
+  if(TR.sel){el.innerHTML=trPanel();return}
   if(mapSel){const f=ok.find(x=>x.user.id===mapSel);if(f){
     el.innerHTML=`<div class="map-card">${avatar(f.user,'',true)}<span class="mid"><b>${esc(nm(f.user))}</b><small>${f.geo?`${ago(f.geo.ts)}${p?' · '+fmtDist(distKm(p,f.geo))+' от вас':''}`:'Сейчас не делится геопозицией'}</small></span>
       <button class="gbtn ic" data-act="mapdesel" aria-label="Назад">${ic('x')}</button></div>
@@ -868,10 +884,10 @@ function busPanel(f,M){const R=ROUTE,B=R.bus;
 async function overpass(q){let last;for(const u of OVERPASS){try{const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});if(r.ok)return await r.json();last=new Error('busy')}catch(e){last=e}}throw last}
 async function busRoute(a,b){
   const R=600,q=`[out:json][timeout:20];
-(node(around:${R},${a.lat},${a.lng})[highway=bus_stop];node(around:${R},${a.lat},${a.lng})[public_transport=platform][bus=yes];)->.A;
-(node(around:${R},${b.lat},${b.lng})[highway=bus_stop];node(around:${R},${b.lat},${b.lng})[public_transport=platform][bus=yes];)->.B;
-rel(bn.A)[type=route][route~"^(bus|trolleybus|tram|share_taxi)$"]->.RA;
-rel(bn.B)[type=route][route~"^(bus|trolleybus|tram|share_taxi)$"]->.RB;
+(node(around:${R},${a.lat},${a.lng})[highway=bus_stop];node(around:${R},${a.lat},${a.lng})[public_transport~"^(platform|stop_position)$"];node(around:${R},${a.lat},${a.lng})[railway~"^(tram_stop|station)$"];)->.A;
+(node(around:${R},${b.lat},${b.lng})[highway=bus_stop];node(around:${R},${b.lat},${b.lng})[public_transport~"^(platform|stop_position)$"];node(around:${R},${b.lat},${b.lng})[railway~"^(tram_stop|station)$"];)->.B;
+rel(bn.A)[type=route][route~"^(bus|trolleybus|tram|subway|light_rail|share_taxi|minibus)$"]->.RA;
+rel(bn.B)[type=route][route~"^(bus|trolleybus|tram|subway|light_rail|share_taxi|minibus)$"]->.RB;
 rel.RA.RB->.C;
 .A out;.B out;.C out body;`;
   const j=await overpass(q),nodes=new Map(),rels=[];
@@ -912,6 +928,85 @@ function busDraw(){if(!MAP||!ROUTE||!ROUTE.bus)return;const B=ROUTE.bus,o=B.opts
   MAP.addLayer({id:'route-stops',type:'circle',source:'route',filter:['==',['get','k'],'s'],paint:{'circle-radius':8,'circle-color':'#18a34a','circle-stroke-color':'#fff','circle-stroke-width':3}});
   const xs=[A.lng,Z.lng,p1[0],p2[0]],ys=[A.lat,Z.lat,p1[1],p2[1]];
   MAP.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:{top:120,bottom:330,left:50,right:70},duration:900,pitch:0,bearing:0})}
+/* ================= public transport like 2GIS: every stop on the map; tap a stop → which buses, trolleybuses, trams,
+   metro and minibuses stop there, how often they come, and the whole line of any route on the map (OpenStreetMap data) ================= */
+const TR={on:store.get('mapTr',true),cells:new Set(),stops:new Map(),busy:0,timer:0,sel:null,line:null,clickAt:0,warned:false};
+const TRT={bus:['🚌','Автобус','#18a34a'],trolleybus:['🚎','Троллейбус','#2f80ff'],tram:['🚋','Трамвай','#e5484d'],subway:['🚇','Метро','#8e5bff'],light_rail:['🚈','Электричка','#8e5bff'],train:['🚆','Поезд','#6b7a90'],share_taxi:['🚐','Маршрутка','#f08a00'],minibus:['🚐','Маршрутка','#f08a00']};
+const TRDEF={bus:12,trolleybus:15,tram:15,subway:8,light_rail:30,train:60,share_taxi:10,minibus:10};
+const TR_CELL=0.02,TR_ZOOM=14;
+const trKind=t=>t.station==='subway'||t.subway==='yes'&&t.railway?'subway':t.railway==='tram_stop'||t.tram==='yes'&&!t.bus?'tram':t.trolleybus==='yes'&&t.bus!=='yes'?'trolleybus':'bus';
+const trName=t=>t&&(t.name||t['name:ru']||t['name:kk']||t.ref)||'Остановка';
+function trSched(){clearTimeout(TR.timer);TR.timer=setTimeout(trLoad,400)}
+async function trLoad(){if(!MAP||!MAPV)return;trLayers();if(!TR.on)return;
+  if(MAP.getZoom()<TR_ZOOM){if(!TR.warned&&MAP.getZoom()>=12){TR.warned=true;toast('Приблизьте карту — покажем все остановки',2200)}return}
+  const b=MAP.getBounds(),c=TR_CELL,need=[];
+  for(let y=Math.floor(b.getSouth()/c);y<=Math.floor(b.getNorth()/c);y++)for(let x=Math.floor(b.getWest()/c);x<=Math.floor(b.getEast()/c);x++){const k=x+':'+y;if(!TR.cells.has(k))need.push([k,x,y])}
+  if(!need.length||need.length>16)return;
+  need.forEach(([k])=>TR.cells.add(k));
+  const S0=Math.min(...need.map(n=>n[2]))*c,W0=Math.min(...need.map(n=>n[1]))*c,N0=(Math.max(...need.map(n=>n[2]))+1)*c,E0=(Math.max(...need.map(n=>n[1]))+1)*c,bb=`${S0.toFixed(4)},${W0.toFixed(4)},${N0.toFixed(4)},${E0.toFixed(4)}`;
+  const q=`[out:json][timeout:25];(node[highway=bus_stop](${bb});node[public_transport=platform](${bb});node[railway=tram_stop](${bb});node[railway=station][station=subway](${bb}););out body;`;
+  TR.busy++;
+  try{const j=await overpass(q);j.elements.forEach(e=>{if(e.type==='node'&&e.tags)TR.stops.set(e.id,e)})}catch(e){need.forEach(([k])=>TR.cells.delete(k))}
+  TR.busy--;trPaint()}
+function trData(){const out=[],seen=[];
+  for(const n of TR.stops.values()){const t=n.tags,nm0=trName(t);
+    /* the same stop is often drawn twice (pole + platform): keep one */
+    if(seen.some(o=>o.n===nm0&&Math.abs(o.lat-n.lat)<.00025&&Math.abs(o.lon-n.lon)<.00035))continue;seen.push({n:nm0,lat:n.lat,lon:n.lon});
+    const k=trKind(t);out.push({type:'Feature',properties:{id:n.id,n:nm0,c:TRT[k][2],k},geometry:{type:'Point',coordinates:[n.lon,n.lat]}})}
+  return {type:'FeatureCollection',features:out}}
+function trLayers(){if(!MAP||!MAP.isStyleLoaded()||MAP.getSource('trstops'))return;
+  MAP.addSource('trstops',{type:'geojson',data:trData()});
+  const before=MAP.getLayer('route-case')?'route-case':undefined;
+  MAP.addLayer({id:'tr-stops',type:'circle',source:'trstops',minzoom:TR_ZOOM,layout:{visibility:TR.on?'visible':'none'},paint:{'circle-radius':['interpolate',['linear'],['zoom'],14,4,17,8],'circle-color':['get','c'],'circle-stroke-color':'#fff','circle-stroke-width':['interpolate',['linear'],['zoom'],14,1.5,17,2.5]}},before);
+  MAP.addLayer({id:'tr-names',type:'symbol',source:'trstops',minzoom:16,layout:{visibility:TR.on?'visible':'none','text-field':['get','n'],'text-font':['Noto Sans Regular'],'text-size':11.5,'text-offset':[0,1.1],'text-anchor':'top','text-max-width':8,'text-optional':true},paint:{'text-color':'#24364d','text-halo-color':'#fff','text-halo-width':1.6}},before)}
+function trPaint(){if(!MAP)return;const src=MAP.getSource('trstops');if(src)src.setData(trData());else trLayers()}
+function trToggle(){TR.on=!TR.on;store.set('mapTr',TR.on);const b=$('.map-tr');if(b)b.classList.toggle('on',TR.on);
+  if(MAP)['tr-stops','tr-names'].forEach(l=>{if(MAP.getLayer(l))MAP.setLayoutProperty(l,'visibility',TR.on?'visible':'none')});
+  if(!TR.on&&TR.sel)trClose();toast(TR.on?'Остановки и транспорт показаны':'Остановки скрыты',1500);if(TR.on)trSched()}
+const trIv=t=>{const v=String(t&&(t['interval']||t['interval:conditional']||'')).match(/(\d{1,2}):(\d{2})|^(\d{1,3})/);return v?(v[3]?+v[3]:(+v[1])*60+(+v[2])):0};
+async function trOpen(id){const n=TR.stops.get(+id);if(!n)return;mapSel=null;if(ROUTE){routeClear();ROUTE=null}trLineClear();
+  TR.sel={id:n.id,n:trName(n.tags),lat:n.lat,lon:n.lon,busy:true,routes:[]};mapBottom();
+  const q=`[out:json][timeout:20];node(${n.id})->.s;node(around.s:40)[public_transport~"^(stop_position|platform)$"]->.n;node(around.s:40)[highway=bus_stop]->.b;(.s;.n;.b;)->.a;rel(bn.a)[type=route][route~"^(bus|trolleybus|tram|subway|light_rail|train|share_taxi|minibus)$"];out tags;`;
+  let rs=[];try{rs=(await overpass(q)).elements.filter(e=>e.type==='relation')}catch(e){if(TR.sel&&TR.sel.id===n.id){TR.sel.busy=false;TR.sel.err=true;mapBottom()}return}
+  if(!TR.sel||TR.sel.id!==n.id)return;
+  const by=new Map();rs.forEach(r=>{const t=r.tags||{},ty=TRT[t.route]?t.route:'bus',ref=t.ref||t.name||'?',k=ty+'|'+ref;
+    const o=by.get(k)||{ty,ref,ids:[],to:[],iv:0};o.ids.push(r.id);const to=t.to||(t.name||'').split(/→|=>|-\s/).pop().trim();if(to&&!o.to.includes(to))o.to.push(to);o.iv=o.iv||trIv(t);by.set(k,o)});
+  const ord=Object.keys(TRT);TR.sel.routes=[...by.values()].sort((a,b)=>ord.indexOf(a.ty)-ord.indexOf(b.ty)||(parseInt(a.ref)||999)-(parseInt(b.ref)||999)||String(a.ref).localeCompare(b.ref));
+  TR.sel.busy=false;mapBottom()}
+function trClose(quiet){TR.sel=null;trLineClear();if(!quiet)mapBottom()}
+function trPanel(){const T=TR.sel,map2=`https://2gis.kz/search/${encodeURIComponent(T.n)}?m=${T.lon}%2C${T.lat}%2F18`;
+  const head=`<div class="map-card"><span class="tr-ic">🚏</span><span class="mid"><b>${esc(T.n)}</b><small>${T.busy?'Ищем, какой транспорт здесь ходит…':T.err?'Не удалось загрузить — проверьте интернет':T.routes.length?T.routes.length+' '+plural(T.routes.length,'маршрут','маршрута','маршрутов'):'Маршрутов не нашли'}</small></span><button class="gbtn ic" data-act="troff" aria-label="Закрыть">${ic('x')}</button></div>`;
+  if(T.busy||T.err)return head;
+  if(TR.line&&TR.line.busy!==undefined){const L=TR.line,ty=TRT[L.ty]||TRT.bus;
+    return head+`<div class="tr-line"><em class="bus-n" style="background:${ty[2]}">${ty[0]} ${esc(L.ref)}</em><span>${L.busy?'Рисуем маршрут…':L.err?'Не удалось загрузить маршрут':`${L.stops} ${plural(L.stops,'остановка','остановки','остановок')}${L.len?' · '+fmtDist(L.len):''}${L.to?' · до «'+esc(L.to)+'»':''}`}</span><button class="gbtn" data-act="trback">Все маршруты</button></div>
+      <div class="btns map-acts"><a class="gbtn primary" href="${map2}" target="_blank" rel="noopener">Прибытие онлайн в 2ГИС</a></div>`}
+  const rows=T.routes.map((r,i)=>{const ty=TRT[r.ty]||TRT.bus,iv=r.iv||TRDEF[r.ty]||12;
+    return `<button class="tr-row" data-act="trroute" data-i="${i}"><em class="bus-n" style="background:${ty[2]}">${ty[0]} ${esc(r.ref)}</em><span class="mid"><b>${r.to.length?'→ '+esc(r.to.slice(0,2).join(' / ')):ty[1]}</b><small>${r.iv?'':'≈ '}каждые ${iv} мин · ждать ≈ ${Math.max(1,Math.round(iv/2))} мин</small></span></button>`}).join('');
+  return head+(rows?`<div class="tr-list">${rows}</div><p class="hint bus-hint">Время примерное — по интервалу движения. Нажмите на маршрут, чтобы увидеть его на карте.</p>`:'')+
+    `<div class="btns map-acts"><a class="gbtn primary" href="${map2}" target="_blank" rel="noopener">Прибытие онлайн в 2ГИС</a></div>`}
+const plural=(n,a,b,c)=>n%10===1&&n%100!==11?a:n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?b:c;
+async function trRoute(i){const T=TR.sel;if(!T)return;const r=T.routes[+i];if(!r)return;
+  trLineClear();TR.line={ty:r.ty,ref:r.ref,to:r.to[0]||'',busy:true};mapBottom();const L=TR.line;
+  const q=`[out:json][timeout:25];rel(${r.ids[0]})->.r;way(r.r);out geom;node(r.r);out;`;
+  try{const j=await overpass(q);if(TR.line!==L)return;
+    const lines=j.elements.filter(e=>e.type==='way'&&e.geometry).map(w=>w.geometry.map(g=>[g.lon,g.lat]));
+    const st=j.elements.filter(e=>e.type==='node'&&e.tags&&(e.tags.public_transport==='platform'||e.tags.highway==='bus_stop'||e.tags.railway==='tram_stop'||e.tags.railway==='station'));
+    let len=0;lines.forEach(l=>{for(let k=1;k<l.length;k++)len+=distKm({lat:l[k-1][1],lng:l[k-1][0]},{lat:l[k][1],lng:l[k][0]})});
+    Object.assign(L,{busy:false,lines,st:st.map(n=>[n.lon,n.lat,trName(n.tags)]),stops:st.length,len});
+    trLineDraw();
+    const all=lines.flat().concat(L.st.map(x=>[x[0],x[1]]));if(all.length&&MAP){const xs=all.map(p=>p[0]),ys=all.map(p=>p[1]);
+      MAP.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:{top:110,bottom:300,left:40,right:80},duration:900,pitch:0,bearing:0})}}
+  catch(e){if(TR.line===L){L.busy=false;L.err=true}}
+  mapBottom()}
+function trLineDraw(){const L=TR.line;if(!MAP||!L||!L.lines||!MAP.isStyleLoaded())return;const col=(TRT[L.ty]||TRT.bus)[2];
+  const data={type:'FeatureCollection',features:[{type:'Feature',properties:{},geometry:{type:'MultiLineString',coordinates:L.lines}},...L.st.map(p=>({type:'Feature',properties:{s:1,n:p[2]},geometry:{type:'Point',coordinates:[p[0],p[1]]}}))]};
+  if(MAP.getSource('trline')){MAP.getSource('trline').setData(data);return}
+  MAP.addSource('trline',{type:'geojson',data});
+  MAP.addLayer({id:'trline-case',type:'line',source:'trline',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#fff','line-width':['interpolate',['linear'],['zoom'],10,5,16,12]}});
+  MAP.addLayer({id:'trline',type:'line',source:'trline',filter:['==',['geometry-type'],'LineString'],layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':col,'line-width':['interpolate',['linear'],['zoom'],10,3,16,7]}});
+  MAP.addLayer({id:'trline-st',type:'circle',source:'trline',filter:['==',['geometry-type'],'Point'],paint:{'circle-radius':['interpolate',['linear'],['zoom'],11,3,16,6],'circle-color':'#fff','circle-stroke-color':col,'circle-stroke-width':2.5}});
+  MAP.addLayer({id:'trline-n',type:'symbol',source:'trline',minzoom:14,filter:['==',['geometry-type'],'Point'],layout:{'text-field':['get','n'],'text-font':['Noto Sans Regular'],'text-size':11,'text-offset':[0,1],'text-anchor':'top','text-optional':true},paint:{'text-color':'#24364d','text-halo-color':'#fff','text-halo-width':1.6}})}
+function trLineClear(){TR.line=null;if(MAP){['trline-n','trline-st','trline','trline-case'].forEach(l=>{if(MAP.getLayer(l))MAP.removeLayer(l)});if(MAP.getSource('trline'))MAP.removeSource('trline')}}
 /* route to a friend: free OpenStreetMap routing (car, on foot, by bike), drawn as a line on the map */
 let ROUTE=null;
 const fmtDur=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' мин':Math.floor(m/60)+' ч '+(m%60?m%60+' мин':'')};
@@ -931,7 +1026,7 @@ async function mapRoute(id,mode){
     try{const p=await new Promise((ok,no)=>navigator.geolocation.getCurrentPosition(ok,no,{enableHighAccuracy:true,timeout:15e3,maximumAge:30e3}));GEO.last=p.coords;a=myPos();mapDraw()}
     catch(e){toast('Разрешите доступ к геопозиции, чтобы построить маршрут',4000);return}}
   const b={lat:f.geo.lat,lng:f.geo.lng};
-  routeClear();ROUTE={id,mode,a,b,busy:true};mapSel=id;mapBottom();
+  routeClear();if(TR.sel)trClose(true);ROUTE={id,mode,a,b,busy:true};mapSel=id;mapBottom();
   if(mode==='bus'){try{const bus=await busRoute(a,b);if(!ROUTE||ROUTE.id!==id||ROUTE.mode!=='bus')return;ROUTE.busy=false;ROUTE.bus=bus;busDraw()}
     catch(e){if(ROUTE&&ROUTE.mode==='bus'){ROUTE.busy=false;ROUTE.bus={opts:[],near:''}}}mapBottom();return}
   const prof={car:'routed-car',foot:'routed-foot',bike:'routed-bike'}[mode];
@@ -943,7 +1038,7 @@ async function mapRoute(id,mode){
     if(MAP)MAP.fitBounds([[bb[0],bb[1]],[bb[2],bb[3]]],{padding:{top:120,bottom:230,left:50,right:70},duration:900,pitch:0,bearing:0});
   }catch(e){if(ROUTE&&ROUTE.id===id){ROUTE.busy=false;ROUTE.err=e.message&&/не найден/.test(e.message)?e.message:'Не получилось построить маршрут'}}
   mapBottom()}
-function mapFocus(id){const f=MAPD.friends.find(x=>x.user.id===id);mapSel=id;mapDraw();
+function mapFocus(id){const f=MAPD.friends.find(x=>x.user.id===id);if(TR.sel)trClose(true);mapSel=id;mapDraw();
   if(f&&f.geo&&MAP)MAP.flyTo({center:[f.geo.lng,f.geo.lat],zoom:Math.max(MAP.getZoom(),15),speed:1.6,curve:1.4,essential:true})}
 function mapAddSheet(){
   const st=Object.fromEntries(MAPD.friends.map(f=>[f.user.id,f.st]));
@@ -958,21 +1053,42 @@ function mapAddSheet(){
     <div class="map-list">${cand.length?cand.map(u=>row(u,st[u.id]==='ok'?'<span class="map-st ok">На карте</span>':st[u.id]==='out'?'<span class="map-st">Ждём ответа</span>':`<button class="gbtn" data-act="mapinv" data-id="${u.id}">Пригласить</button>`)).join(''):'<p class="hint">Пока нет контактов — пригласите друга по логину</p>'}</div>`);
 }
 /* sharing your own position: only while the person has switched it on; the phone asks for permission the first time */
+/* the Android app (version 5 and up) has a background service: the position keeps updating with the screen off */
+const IN_APK_GEO=()=>store.get('apk',0)>=5&&/Android/.test(navigator.userAgent);
+async function geoNative(on){try{
+  if(on){const r=await api('/api/map/bgkey',{});GEO.native=true;location.href=`intent://start?k=${encodeURIComponent(r.key)}#Intent;scheme=manasenger-geo;package=com.manasenger.app;end`}
+  else{GEO.native=false;location.href='intent://stop#Intent;scheme=manasenger-geo;package=com.manasenger.app;end'}}catch(e){}}
+function geoGot(c){if(!c)return;const t=Date.now();
+  /* a rough network fix doesn't overwrite a fresh precise GPS one */
+  if(GEO.last&&c.accuracy>150&&GEO.last.accuracy<c.accuracy/2&&t-GEO.lastAt<30e3)return;
+  GEO.last=c;GEO.lastAt=t;if(c.accuracy<150)GEO.lowAcc=false;geoSend();if(MAPV)mapDraw()}
+function geoLow(){navigator.geolocation.getCurrentPosition(p=>geoGot(p.coords),()=>{},{enableHighAccuracy:false,timeout:20e3,maximumAge:60e3})}
+/* asks the phone for a fresh position (watchPosition alone goes quiet when you stand still or the GPS sleeps) */
+function geoPoll(){if(!navigator.geolocation||GEO.watch==null||document.hidden)return;
+  navigator.geolocation.getCurrentPosition(p=>geoGot(p.coords),e=>{if(e.code!==1)geoLow()},{enableHighAccuracy:true,timeout:12e3,maximumAge:3e3})}
 function geoStart(){
   if(!navigator.geolocation){toast('Это устройство не умеет определять геопозицию');return false}
   if(GEO.watch!=null)return true;store.set('geoAsked',true);
-  GEO.watch=navigator.geolocation.watchPosition(p=>{GEO.last=p.coords;geoSend();if(MAPV)mapDraw()},err=>{
-    if(err.code===1){toast('Разрешите доступ к геопозиции для Manasenger в настройках телефона или браузера',5000);geoStop(true)}},{enableHighAccuracy:true,maximumAge:15e3,timeout:30e3});
-  clearInterval(GEO.tick);GEO.tick=setInterval(()=>{if(!document.hidden)geoSend(true)},60e3);
+  GEO.watch=navigator.geolocation.watchPosition(p=>geoGot(p.coords),err=>{
+    if(err.code===1){toast('Разрешите доступ к геопозиции для Manasenger в настройках телефона или браузера',5000);geoStop(true);return}
+    geoLow()},{enableHighAccuracy:true,maximumAge:3e3,timeout:20e3});
+  clearInterval(GEO.tick);GEO.tick=setInterval(()=>{if(document.hidden)return;geoPoll();geoSend()},8e3);
+  geoPoll();
+  if(IN_APK_GEO()&&!GEO.native)setTimeout(()=>{if(GEO.watch!=null&&!GEO.native)geoNative(true)},1500);
   return true}
+/* sent when you've moved 10+ metres (no more often than every 4 seconds), and at least every 25 seconds anyway */
 function geoSend(force){const c=GEO.last;if(!c)return;const p={lat:c.latitude,lng:c.longitude},t=Date.now();
   const moved=GEO.sentPos?distKm(GEO.sentPos,p)*1000:1e9;
-  if(!force&&t-GEO.sentAt<20e3&&moved<40)return;if(force&&t-GEO.sentAt<50e3&&moved<40)return;
-  GEO.sentAt=t;GEO.sentPos=p;MAPD.sharing=true;api('/api/map/loc',{lat:p.lat,lng:p.lng,acc:c.accuracy}).catch(()=>{})}
+  if(t-GEO.sentAt<4e3)return;
+  if(!force&&moved<Math.max(10,Math.min(60,(c.accuracy||0)/2))&&t-GEO.sentAt<25e3)return;
+  GEO.sentAt=t;GEO.sentPos=p;MAPD.sharing=true;api('/api/map/loc',{lat:p.lat,lng:p.lng,acc:c.accuracy}).catch(()=>{GEO.sentAt=0})}
 function geoStop(silent){if(GEO.watch!=null)navigator.geolocation.clearWatch(GEO.watch);GEO.watch=null;clearInterval(GEO.tick);GEO.sentAt=0;GEO.sentPos=null;
+  if(IN_APK_GEO())geoNative(false);
   store.set('geoShare',false);MAPD.sharing=false;api('/api/map/stop',{}).catch(()=>{});if(MAPV)mapDraw()}
+/* back to the app: send where you are right away and pull friends' fresh positions */
+document.addEventListener('visibilitychange',()=>{if(document.hidden||!S.me)return;if(GEO.watch!=null){geoPoll();geoSend(true)}if(MAPV)mapRefresh(true)});
 function shareSheet(){sheet(`<h2>Делиться геопозицией?</h2>
-  <p class="hint">Вашу геопозицию увидят <b>только друзья, которых вы добавили на карту</b> и которые согласились. Она обновляется, пока Manasenger открыт. Выключить можно в любой момент этим же переключателем.</p>
+  <p class="hint">Вашу геопозицию увидят <b>только друзья, которых вы добавили на карту</b> и которые согласились. Она обновляется каждые несколько секунд, пока вы двигаетесь${IN_APK_GEO()?', — даже с выключенным экраном (в шторке будет значок)':', пока Manasenger открыт'}. Выключить можно в любой момент этим же переключателем.</p>
   <div class="btns"><button class="gbtn primary" data-act="mapshareon">Включить</button><button class="gbtn" data-act="closemenu">Не сейчас</button></div>`)}
 /* «ИИ» tab: chat with a free assistant (Gemini when the server has a key) */
 let AI=null,AIbusy=false,AIimg=null;
@@ -2943,6 +3059,10 @@ document.addEventListener('click',async e=>{
     case 'vdeaf':voiceDeaf();break;
     case 'map':openMap();break;
     case 'mapclose':closeMap();break;
+    case 'maptr':trToggle();break;
+    case 'troff':trClose();break;
+    case 'trroute':trRoute(el.dataset.i);break;
+    case 'trback':trLineClear();mapBottom();break;
     case 'mapadd':mapAddSheet();break;
     case 'mapdesel':mapSel=null;mapDraw();break;
     case 'maproute':mapRoute(id,el.dataset.mode);break;

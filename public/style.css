@@ -1244,3 +1244,12 @@ textarea#admann{width:100%;resize:vertical;min-height:56px;font:inherit}
 .pf-hearts i{position:absolute;bottom:50%;font-style:normal;font-size:18px;animation:petHeart 1.3s ease-out forwards}
 .lite .pet-float svg{filter:none}
 @media (prefers-reduced-motion:reduce){.pet-svg *{animation:none!important}}
+/* public transport like 2GIS: stops, routes through a stop, a route's line */
+.map-tr{font-size:20px}.map-tr.on{background:linear-gradient(135deg,#18a34a,#2fbf62);color:#fff}
+.tr-ic{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-size:20px;background:rgba(24,163,74,.16);flex:none}
+.tr-list{display:flex;flex-direction:column;gap:4px;margin-top:10px;max-height:34vh;overflow:auto;-webkit-overflow-scrolling:touch}
+.tr-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:14px;background:rgba(255,255,255,.07);text-align:left;width:100%}
+:root.light .tr-row{background:rgba(20,40,70,.06)}
+.tr-row .bus-n,.tr-line .bus-n{flex:none;margin:0;min-width:58px;text-align:center}
+.tr-row .mid{flex:1;min-width:0}.tr-row b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tr-row small{display:block;font-size:12px;color:var(--fg2)}
+.tr-line{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px;flex-wrap:wrap}.tr-line span{flex:1;min-width:120px}.tr-line .gbtn{flex:none}

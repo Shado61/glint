@@ -17,8 +17,8 @@ function create(){
 }
 app.whenReady().then(()=>{
   const ses=session.defaultSession;
-  ses.setPermissionRequestHandler((wc,perm,cb)=>cb(['media','notifications','display-capture','clipboard-sanitized-write','fullscreen','mediaKeySystem'].includes(perm)));
-  ses.setPermissionCheckHandler((wc,perm)=>['media','notifications','clipboard-sanitized-write'].includes(perm));
+  ses.setPermissionRequestHandler((wc,perm,cb)=>cb(['media','notifications','display-capture','clipboard-sanitized-write','fullscreen','mediaKeySystem','geolocation'].includes(perm)));
+  ses.setPermissionCheckHandler((wc,perm)=>['media','notifications','clipboard-sanitized-write','geolocation'].includes(perm));
   /* screen sharing: share the whole first screen */
   /* screen sharing: the page shows its own list (whole screen or one window) and tells us which one was chosen */
   ses.setDisplayMediaRequestHandler((req,cb)=>{
