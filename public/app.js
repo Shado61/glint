@@ -349,7 +349,7 @@ function renderSideNow(){
       <button class="${S.tab==='calls'?'on':''}" data-act="tab" data-t="calls">${ic('calls')}<span>Звонки</span></button>
       <button data-act="map">${ic('pin')}<span>Карта</span>${mapBadge()}</button>
       <button class="${S.tab==='ai'?'on':''}" data-act="tab" data-t="ai"><span class="tt-ic">✦</span><span>ИИ</span></button>
-      <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Настройки</span></button></nav>${voicePanelHTML()}`;
+      <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Профиль</span></button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
 }
 function chatListHTML(){
@@ -687,7 +687,7 @@ async function openMap(){
       attributionControl:{compact:true},dragRotate:true,pitchWithRotate:true,touchPitch:true,fadeDuration:150,maxPitch:70,renderWorldCopies:false});
   }catch(e){$('#mapc').innerHTML='<div class="map-load">Карта не поддерживается на этом устройстве</div>';MAP=null;return}
   MAP.on('load',()=>{const l=$('#mapc .map-load');if(l)l.remove();mapDraw()});
-  MAP.on('styledata',()=>{if(ROUTE&&ROUTE.geo&&!MAP.getSource('route'))routeLayer()});
+  MAP.on('styledata',()=>{if(ROUTE&&ROUTE.geo&&!MAP.getSource('route')){if(ROUTE.mode==='bus')busDraw();else routeLayer()}});
   MAP.on('click',()=>{if(mapSel&&!ROUTE){mapSel=null;mapBottom()}});
   if(!GEO.last&&navigator.geolocation&&store.get('geoAsked',false))navigator.geolocation.getCurrentPosition(p=>{GEO.last=p.coords;mapDraw()},()=>{},{maximumAge:60e3,timeout:15e3});
 }
@@ -715,11 +715,12 @@ function mapBottom(){
   const el=$('#mapbot');if(!el)return;
   const ok=MAPD.friends.filter(f=>f.st==='ok'),p=myPos();
   if(ROUTE&&ROUTE.id===mapSel){const f=ok.find(x=>x.user.id===ROUTE.id);if(f){
-    const M={car:['🚗','Авто'],foot:['🚶','Пешком'],bike:['🚲','Велосипед']};
-    el.innerHTML=`<div class="map-card">${avatar(f.user,'s',false)}<span class="mid"><b>${ROUTE.busy?'Строим маршрут…':ROUTE.err?esc(ROUTE.err):`${M[ROUTE.mode][0]} ${fmtDur(ROUTE.dur)} · ${fmtDist(ROUTE.dist/1000)}`}</b><small>до ${esc(nm(f.user))}${ROUTE.busy||ROUTE.err?'':' · прибытие в '+new Date(Date.now()+ROUTE.dur*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</small></span>
+    const M={bus:['🚌','Автобус'],car:['🚗','Авто'],foot:['🚶','Пешком'],bike:['🚲','Вело']};
+    if(ROUTE.mode==='bus'){el.innerHTML=busPanel(f,M);return}
+    el.innerHTML=`<div class="map-card">${avatar(f.user,'s',false)}<span class="mid"><b>${ROUTE.busy?'Строим маршрут…':ROUTE.err?esc(ROUTE.err):`${M[ROUTE.mode][0]} ${fmtDur(ROUTE.dur)} · ${fmtDist(ROUTE.dist/1000)}`}</b><small>${esc(nm(f.user))}${ROUTE.busy||ROUTE.err?'':' · прибытие в '+new Date(Date.now()+ROUTE.dur*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</small></span>
       <button class="gbtn ic" data-act="maprouteoff" aria-label="Убрать маршрут">${ic('x')}</button></div>
       <div class="seg map-modes">${Object.keys(M).map(k=>`<button class="${ROUTE.mode===k?'on':''}" data-act="maproute" data-id="${f.user.id}" data-mode="${k}">${M[k][0]} ${M[k][1]}</button>`).join('')}</div>
-      <div class="btns map-acts"><a class="gbtn" href="https://www.google.com/maps/dir/?api=1&origin=${ROUTE.a.lat},${ROUTE.a.lng}&destination=${ROUTE.b.lat},${ROUTE.b.lng}&travelmode=${ROUTE.mode==='car'?'driving':ROUTE.mode==='foot'?'walking':'bicycling'}" target="_blank" rel="noopener">Открыть в Google Картах</a></div>`;return}ROUTE=null}
+      <div class="btns map-acts">${gisLinks(ROUTE.mode==='car'?'car':ROUTE.mode==='foot'?'pedestrian':'car')}<a class="gbtn" href="https://www.google.com/maps/dir/?api=1&origin=${ROUTE.a.lat},${ROUTE.a.lng}&destination=${ROUTE.b.lat},${ROUTE.b.lng}&travelmode=${ROUTE.mode==='car'?'driving':ROUTE.mode==='foot'?'walking':'bicycling'}" target="_blank" rel="noopener">Google Карты</a></div>`;return}ROUTE=null}
   if(mapSel){const f=ok.find(x=>x.user.id===mapSel);if(f){
     el.innerHTML=`<div class="map-card">${avatar(f.user,'',true)}<span class="mid"><b>${esc(nm(f.user))}</b><small>${f.geo?`${ago(f.geo.ts)}${p?' · '+fmtDist(distKm(p,f.geo))+' от вас':''}`:'Сейчас не делится геопозицией'}</small></span>
       <button class="gbtn ic" data-act="mapdesel" aria-label="Назад">${ic('x')}</button></div>
@@ -731,6 +732,70 @@ function mapBottom(){
     ${ok.length?`<div class="map-chips">${ok.map(f=>`<button class="map-chip ${f.geo?'':'off'}" data-act="mapgo" data-id="${f.user.id}">${avatar(f.user,'s',false)}<span><b>${esc(nm(f.user).split(' ')[0])}</b><small>${f.geo?(p?fmtDist(distKm(p,f.geo)):ago(f.geo.ts)):'скрыт'}</small></span></button>`).join('')}</div>`
       :`<button class="map-empty" data-act="mapadd">${ic('addUser')}<span><b>Добавьте друзей на карту</b><small>Вы будете видеть друг друга, когда оба согласитесь</small></span></button>`}`;
 }
+/* by bus: bus stops and lines from OpenStreetMap; the bus that goes from a stop near you to a stop near your friend */
+const OVERPASS=['https://overpass-api.de/api/interpreter','https://overpass.private.coffee/api/interpreter'];
+function gisLinks(t){if(!ROUTE)return '';const a=ROUTE.a,b=ROUTE.b;
+  return `${touch?`<a class="gbtn primary" href="dgis://2gis.ru/routeSearch/rsType/${t}/from/${a.lng},${a.lat}/to/${b.lng},${b.lat}">2ГИС</a>`:''}<a class="gbtn${touch?'':' primary'}" href="https://2gis.kz/directions/points/${a.lng}%2C${a.lat}%7C${b.lng}%2C${b.lat}" target="_blank" rel="noopener">2ГИС${touch?' (сайт)':''}</a>`}
+function busPanel(f,M){const R=ROUTE,B=R.bus;
+  const modes=`<div class="seg map-modes">${Object.keys(M).map(k=>`<button class="${R.mode===k?'on':''}" data-act="maproute" data-id="${f.user.id}" data-mode="${k}">${M[k][0]} ${M[k][1]}</button>`).join('')}</div>`;
+  const head=t=>`<div class="map-card">${avatar(f.user,'s',false)}<span class="mid"><b>${t}</b><small>${esc(nm(f.user))} · общественный транспорт</small></span><button class="gbtn ic" data-act="maprouteoff" aria-label="Убрать маршрут">${ic('x')}</button></div>`;
+  const links=`<div class="btns map-acts">${gisLinks('ctx')}</div>`;
+  if(R.busy)return head('Ищем автобусы и остановки…')+modes;
+  if(!B||!B.opts.length)return head(B&&B.near?'Прямого автобуса нет':'Не нашли остановок рядом')+modes+`<p class="hint bus-hint">${B&&B.near?`Рядом с вами: ${esc(B.near)}. Маршрут с пересадками покажет 2ГИС.`:'Откройте маршрут в 2ГИС — там все автобусы с пересадками.'}</p>`+links;
+  const o=B.opts[B.sel||0];
+  return head(`🚌 ${fmtDur(o.total)} · ${o.lines.slice(0,4).map(l=>esc(l)).join(', ')}`)+modes+
+    `<div class="bus-steps"><div class="bus-st"><i>🚶</i><span>${fmtDur(o.walkA)} пешком до остановки <b>«${esc(o.from)}»</b></span></div>
+      <div class="bus-st"><i>🚌</i><span>${o.lines.map(l=>`<em class="bus-n">${esc(l)}</em>`).join('')} · ${o.stops?o.stops+' '+(o.stops%10===1&&o.stops%100!==11?'остановка':o.stops%10>=2&&o.stops%10<=4&&(o.stops%100<12||o.stops%100>14)?'остановки':'остановок')+' · ':''}≈ ${fmtDur(o.ride)}</span></div>
+      <div class="bus-st"><i>📍</i><span>выйти на <b>«${esc(o.to)}»</b>, ${fmtDur(o.walkB)} пешком до друга</span></div></div>
+    ${B.opts.length>1?`<div class="bus-alt">${B.opts.slice(0,4).map((x,i)=>`<button class="${i===(B.sel||0)?'on':''}" data-act="busopt" data-i="${i}">${esc(x.lines[0])}${x.lines.length>1?' +'+(x.lines.length-1):''} · ${fmtDur(x.total)}</button>`).join('')}</div>`:''}
+    <p class="hint bus-hint">Время примерное, без ожидания автобуса.</p>`+links}
+async function overpass(q){let last;for(const u of OVERPASS){try{const r=await fetch(u,{method:'POST',body:'data='+encodeURIComponent(q),headers:{'Content-Type':'application/x-www-form-urlencoded'}});if(r.ok)return await r.json();last=new Error('busy')}catch(e){last=e}}throw last}
+async function busRoute(a,b){
+  const R=600,q=`[out:json][timeout:20];
+(node(around:${R},${a.lat},${a.lng})[highway=bus_stop];node(around:${R},${a.lat},${a.lng})[public_transport=platform][bus=yes];)->.A;
+(node(around:${R},${b.lat},${b.lng})[highway=bus_stop];node(around:${R},${b.lat},${b.lng})[public_transport=platform][bus=yes];)->.B;
+rel(bn.A)[type=route][route~"^(bus|trolleybus|tram|share_taxi)$"]->.RA;
+rel(bn.B)[type=route][route~"^(bus|trolleybus|tram|share_taxi)$"]->.RB;
+rel.RA.RB->.C;
+.A out;.B out;.C out body;`;
+  const j=await overpass(q),nodes=new Map(),rels=[];
+  j.elements.forEach(e=>{if(e.type==='node')nodes.set(e.id,e);else if(e.type==='relation')rels.push(e)});
+  const near=(p,id)=>{const n=nodes.get(id);return n?distKm(p,{lat:n.lat,lng:n.lon}):1e9};
+  const name=id=>{const n=nodes.get(id);return n&&n.tags&&(n.tags.name||n.tags['name:ru']||n.tags['name:kk'])||'остановка'};
+  const walk=km=>km*1000/1.25,opts=new Map();
+  for(const r of rels){
+    const st=r.members.filter(m=>m.type==='node'&&nodes.has(m.ref)).map((m,i)=>({id:m.ref,i:r.members.indexOf(m)}));
+    let best=null;
+    for(const x of st)for(const y of st){if(y.i<=x.i)continue;const da=near(a,x.id),db=near(b,y.id);if(da>R/1000*1.2||db>R/1000*1.2)continue;
+      const stops=r.members.slice(x.i,y.i+1).filter(m=>m.type==='node'&&/stop|platform/.test(m.role||'')).length-1;
+      const n1=nodes.get(x.id),n2=nodes.get(y.id),ride=distKm({lat:n1.lat,lng:n1.lon},{lat:n2.lat,lng:n2.lon})*1.35*1000/(20/3.6);
+      const total=walk(da)+walk(db)+ride;if(!best||total<best.total)best={x:x.id,y:y.id,da,db,stops:Math.max(1,stops),ride,total}}
+    if(!best)continue;
+    const ln=(r.tags&&(r.tags.ref||r.tags.name))||'?',k=best.x+'-'+best.y;
+    const o=opts.get(k);
+    if(o){if(!o.lines.includes(ln))o.lines.push(ln)}
+    else opts.set(k,{from:name(best.x),to:name(best.y),fa:nodes.get(best.x),fb:nodes.get(best.y),lines:[ln],stops:best.stops,walkA:walk(best.da),walkB:walk(best.db),ride:best.ride,total:best.total})}
+  const list=[...opts.values()].sort((p,q)=>p.total-q.total);
+  list.forEach(o=>o.lines.sort((p,q)=>(parseInt(p)||999)-(parseInt(q)||999)));
+  const stA=[...nodes.values()].filter(n=>distKm(a,{lat:n.lat,lng:n.lon})<=R/1000).sort((p,q)=>distKm(a,{lat:p.lat,lng:p.lon})-distKm(a,{lat:q.lat,lng:q.lon}));
+  return {opts:list.slice(0,6),near:stA.length?`«${name(stA[0].id)}»`:''};
+}
+function busDraw(){if(!MAP||!ROUTE||!ROUTE.bus)return;const B=ROUTE.bus,o=B.opts[B.sel||0];routeClear();
+  if(!o)return;const A=ROUTE.a,Z=ROUTE.b,p1=[o.fa.lon,o.fa.lat],p2=[o.fb.lon,o.fb.lat];
+  ROUTE.geo={type:'MultiLineString',coordinates:[[[A.lng,A.lat],p1],[p1,p2],[p2,[Z.lng,Z.lat]]]};
+  if(!MAP.isStyleLoaded())return;
+  MAP.addSource('route',{type:'geojson',data:{type:'FeatureCollection',features:[
+    {type:'Feature',properties:{k:'w'},geometry:{type:'LineString',coordinates:[[A.lng,A.lat],p1]}},
+    {type:'Feature',properties:{k:'b'},geometry:{type:'LineString',coordinates:[p1,p2]}},
+    {type:'Feature',properties:{k:'w'},geometry:{type:'LineString',coordinates:[p2,[Z.lng,Z.lat]]}},
+    {type:'Feature',properties:{k:'s',n:o.from},geometry:{type:'Point',coordinates:p1}},
+    {type:'Feature',properties:{k:'s',n:o.to},geometry:{type:'Point',coordinates:p2}}]}});
+  MAP.addLayer({id:'route-case',type:'line',source:'route',filter:['==',['get','k'],'b'],layout:{'line-cap':'round'},paint:{'line-color':'#fff','line-width':10}});
+  MAP.addLayer({id:'route',type:'line',source:'route',filter:['==',['get','k'],'b'],layout:{'line-cap':'round'},paint:{'line-color':'#18a34a','line-width':6}});
+  MAP.addLayer({id:'route-walk',type:'line',source:'route',filter:['==',['get','k'],'w'],layout:{'line-cap':'round'},paint:{'line-color':'#8e5bff','line-width':4,'line-dasharray':[1,1.8]}});
+  MAP.addLayer({id:'route-stops',type:'circle',source:'route',filter:['==',['get','k'],'s'],paint:{'circle-radius':8,'circle-color':'#18a34a','circle-stroke-color':'#fff','circle-stroke-width':3}});
+  const xs=[A.lng,Z.lng,p1[0],p2[0]],ys=[A.lat,Z.lat,p1[1],p2[1]];
+  MAP.fitBounds([[Math.min(...xs),Math.min(...ys)],[Math.max(...xs),Math.max(...ys)]],{padding:{top:120,bottom:330,left:50,right:70},duration:900,pitch:0,bearing:0})}
 /* route to a friend: free OpenStreetMap routing (car, on foot, by bike), drawn as a line on the map */
 let ROUTE=null;
 const fmtDur=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' мин':Math.floor(m/60)+' ч '+(m%60?m%60+' мин':'')};
@@ -740,7 +805,7 @@ function routeLayer(){if(!MAP||!ROUTE||!ROUTE.geo||!MAP.isStyleLoaded())return;
   else{MAP.addSource('route',{type:'geojson',data});
     MAP.addLayer({id:'route-case',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],10,6,16,14]}});
     MAP.addLayer({id:'route',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':ROUTE.mode==='foot'?'#8e5bff':'#2f80ff','line-width':['interpolate',['linear'],['zoom'],10,3.5,16,9],...(ROUTE.mode==='foot'?{'line-dasharray':[1,1.6]}:{})}})}}
-function routeClear(){if(MAP){['route','route-case'].forEach(l=>{if(MAP.getLayer(l))MAP.removeLayer(l)});if(MAP.getSource('route'))MAP.removeSource('route')}}
+function routeClear(){if(MAP){['route','route-case','route-walk','route-stops'].forEach(l=>{if(MAP.getLayer(l))MAP.removeLayer(l)});if(MAP.getSource('route'))MAP.removeSource('route')}}
 async function mapRoute(id,mode){
   const f=MAPD.friends.find(x=>x.user.id===id);if(!f||!f.geo)return;
   mode=mode||(ROUTE&&ROUTE.mode)||'car';
@@ -751,6 +816,8 @@ async function mapRoute(id,mode){
     catch(e){toast('Разрешите доступ к геопозиции, чтобы построить маршрут',4000);return}}
   const b={lat:f.geo.lat,lng:f.geo.lng};
   routeClear();ROUTE={id,mode,a,b,busy:true};mapSel=id;mapBottom();
+  if(mode==='bus'){try{const bus=await busRoute(a,b);if(!ROUTE||ROUTE.id!==id||ROUTE.mode!=='bus')return;ROUTE.busy=false;ROUTE.bus=bus;busDraw()}
+    catch(e){if(ROUTE&&ROUTE.mode==='bus'){ROUTE.busy=false;ROUTE.bus={opts:[],near:''}}}mapBottom();return}
   const prof={car:'routed-car',foot:'routed-foot',bike:'routed-bike'}[mode];
   try{const r=await fetch(`https://routing.openstreetmap.de/${prof}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
     const j=await r.json();if(!ROUTE||ROUTE.id!==id||ROUTE.mode!==mode)return;
@@ -2695,6 +2762,7 @@ document.addEventListener('click',async e=>{
     case 'mapadd':mapAddSheet();break;
     case 'mapdesel':mapSel=null;mapDraw();break;
     case 'maproute':mapRoute(id,el.dataset.mode);break;
+    case 'busopt':if(ROUTE&&ROUTE.bus){ROUTE.bus.sel=+el.dataset.i;busDraw();mapBottom()}break;
     case 'maprouteoff':routeClear();ROUTE=null;mapBottom();break;
     case 'mapgo':mapFocus(id);break;
     case 'mapmsg':closeMap();startDM(id);break;

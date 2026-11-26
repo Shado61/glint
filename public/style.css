@@ -1039,3 +1039,32 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 .btns{flex-wrap:wrap}
 .sheet{overflow-wrap:anywhere}
 .field input,.input{min-width:0;max-width:100%}
+/* by bus */
+.bus-steps{margin-top:10px;display:flex;flex-direction:column;gap:6px}
+.bus-st{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.35}
+.bus-st i{font-style:normal;width:22px;text-align:center;flex:none}
+.bus-st span{flex:1;min-width:0;overflow-wrap:anywhere}
+.bus-n{display:inline-block;font-style:normal;font-weight:800;padding:1px 8px;margin:0 4px 2px 0;border-radius:8px;background:#18a34a;color:#fff;font-size:12.5px}
+.bus-alt{display:flex;gap:6px;overflow-x:auto;margin-top:8px;scrollbar-width:none}
+.bus-alt button{flex:none;padding:6px 10px;border-radius:999px;background:rgba(255,255,255,.1);font-size:12.5px;white-space:nowrap}
+.bus-alt button.on{background:#18a34a;color:#fff}
+:root.light .bus-alt button{background:rgba(20,40,70,.07)}
+.bus-hint{margin:8px 0 0;font-size:12px}
+.map-modes button{font-size:12.5px}
+
+/* ---------- small screens: everything fits ---------- */
+.comp-in textarea::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comp-in textarea{min-width:0}
+@media (max-width:760px){
+  .tabbar{left:6px;right:6px;max-width:none}
+  .tabbar button{font-size:10px;letter-spacing:-.01em;padding:6px 0}
+}
+@media (max-width:400px){
+  .composer .comp-row{gap:6px}
+  .cbig{width:44px;height:44px}
+  .comp-in{padding-left:12px;gap:2px;min-height:46px}
+  .comp-in .gbtn.ic,.comp-in>button:not(.sendb){width:36px;height:36px}
+  .sendb{width:38px;height:38px}
+  .tabbar button{font-size:9px;letter-spacing:-.02em}
+  .tabbar button .ico{width:20px;height:20px}
+}
