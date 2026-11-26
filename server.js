@@ -25,9 +25,9 @@ const MAX_TEXT=4000,MAX_IMG=1.2e6,PAGE=60,KEEP_MSGS=3000;
 /* ---------- storage ----------
    Everything lives in memory and is written back in the background:
    one row per user (u:), per chat (c:) and per chat history (m:), plus sessions. */
-let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{},media:{},keys:{}};
+let DB={users:{},chats:{},msgs:{},sessions:{},servers:{},imgs:{},packs:{},stories:{},media:{},keys:{},opts:{}};
 /* one letter per table in the key-value store */
-const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories',x:'media',k:'keys'};
+const TB={u:'users',c:'chats',m:'msgs',g:'servers',i:'imgs',p:'packs',t:'stories',x:'media',k:'keys',o:'opts'};
 let pool=null;const DIRTY=new Set();
 const DATA_FILE=path.join(__dirname,'data','db.json');
 async function load(){
@@ -262,14 +262,18 @@ function dmBlocked(c,uid){
   if(!c||c.type!=='dm')return false;const o=c.members.find(x=>x!==uid),me=DB.users[uid],other=DB.users[o];
   return !!((me&&(me.blocked||[]).includes(o))||(other&&(other.blocked||[]).includes(uid)));
 }
-function kick(uid,reason){
+function kick(uid,reason,t){
   for(const k of Object.keys(DB.sessions))if(DB.sessions[k].uid===uid)delete DB.sessions[k];mark('s:all');
-  const s=SOCKS.get(uid);if(s)s.forEach(w=>{try{w.send(JSON.stringify({t:'banned',reason}));w.close()}catch(e){}});
+  const s=SOCKS.get(uid);if(s)s.forEach(w=>{try{w.send(JSON.stringify({t:t||'banned',reason}));w.close()}catch(e){}});
 }
+/* app-wide settings the admin changes (closed registration, announcement) */
+const OPT=()=>DB.opts.main||(DB.opts.main={});
+const START=Date.now();
 
 /* ---------- REST API ---------- */
 const API={};
 API['POST /api/register']=(req,res,b)=>{
+  if(OPT().regClosed)throw E(403,'Регистрация новых аккаунтов сейчас закрыта администратором');
   if(!limit('reg:'+ip(req),5,3600e3))throw E(429,'Слишком много регистраций. Попробуй позже.');
   const username=String(b.username||'').toLowerCase().trim(),name=cleanName(b.name)||username,pass=String(b.password||'');
   if(!USERNAME.test(username))throw E(400,'Логин: 3–20 символов, латиница, цифры и _');
@@ -306,16 +310,45 @@ API['POST /api/block']=(req,res,b,u)=>{
   for(const c of CALLS.values())if((c.a===u.id&&c.b===id)||(c.b===u.id&&c.a===id))endCall(c,'rejected',u.id);
   return {blocked:u.blocked};
 };
+const needAdmin=u=>{need(u);if(!isAdmin(u))throw E(403,'Только для администратора')};
 API['GET /api/admin/users']=(req,res,b,u)=>{
-  need(u);if(!isAdmin(u))throw E(403,'Только для администратора');
-  const msgs={};for(const [cid,l] of Object.entries(DB.msgs))for(const m of l)if(m.from)msgs[m.from]=(msgs[m.from]||0)+1;
+  needAdmin(u);
+  const msgs={},day=864e5,t0=new Date();t0.setHours(0,0,0,0);let total=0,today=0,week=0;const perDay=Array(7).fill(0);
+  for(const [cid,l] of Object.entries(DB.msgs))for(const m of l){if(!m.from||m.sys)continue;msgs[m.from]=(msgs[m.from]||0)+1;total++;
+    if(m.ts>=t0.getTime())today++;if(m.ts>=now()-7*day){week++;const d=Math.floor((t0.getTime()+day-m.ts)/day);if(d>=0&&d<7)perDay[6-d]++}}
   const list=Object.values(DB.users).map(x=>({id:x.id,username:x.username,name:x.name,avatar:x.avatar||'',color:x.color,created:x.created||0,lastSeen:x.lastSeen||0,
     online:ONLINE.has(x.id),banned:!!x.banned,admin:isAdmin(x),msgs:msgs[x.id]||0,
     chats:Object.values(DB.chats).filter(c=>c.members.includes(x.id)&&c.type!=='self').length})).sort((a,b)=>(b.online-a.online)||(b.lastSeen-a.lastSeen));
-  return {users:list,total:list.length,online:list.filter(x=>x.online).length,banned:list.filter(x=>x.banned).length};
+  const chats=Object.values(DB.chats),o=OPT();
+  return {users:list,total:list.length,online:list.filter(x=>x.online).length,banned:list.filter(x=>x.banned).length,
+    stats:{msgs:total,today,week,perDay,newWeek:list.filter(x=>x.created>=now()-7*day).length,active:list.filter(x=>x.lastSeen>=now()-day||x.online).length,
+      dms:chats.filter(c=>c.type==='dm').length,groups:chats.filter(c=>c.type==='group').length,servers:Object.keys(DB.servers).length,
+      sessions:Object.keys(DB.sessions).length,calls:CALLS.size,uptime:now()-START,mem:Math.round(process.memoryUsage().rss/1048576)},
+    regClosed:!!o.regClosed,ann:o.ann||null};
+};
+/* a notice for everybody: shown at the top of the app until each person closes it */
+API['POST /api/admin/announce']=(req,res,b,u)=>{
+  needAdmin(u);const text=String(b.text||'').trim().slice(0,300),o=OPT();
+  o.ann=text?{id:rid(6),text,ts:now(),by:u.name}:null;mark('o:main');
+  for(const id of SOCKS.keys())sendTo(id,{t:'announce',ann:o.ann});
+  return {ann:o.ann};
+};
+API['POST /api/admin/reg']=(req,res,b,u)=>{needAdmin(u);OPT().regClosed=!b.open;mark('o:main');return {regClosed:OPT().regClosed}};
+/* sign a person out on all their devices (e.g. a lost phone) */
+API['POST /api/admin/logout']=(req,res,b,u)=>{
+  needAdmin(u);const x=DB.users[String(b.userId||'')];if(!x)throw E(404,'Нет такого пользователя');
+  kick(x.id,'Администратор завершил все ваши сеансы. Войдите снова','signedout');return {ok:true};
+};
+/* a forgotten password: the admin gets a temporary one to pass on */
+API['POST /api/admin/resetpass']=(req,res,b,u)=>{
+  needAdmin(u);const x=DB.users[String(b.userId||'')];if(!x)throw E(404,'Нет такого пользователя');
+  if(isAdmin(x)&&x.id!==u.id)throw E(400,'Пароль другого администратора сбросить нельзя');
+  const pass=Array.from(crypto.randomBytes(8),v=>'abcdefghjkmnpqrstuvwxyz23456789'[v%31]).join('');
+  x.pass=hashPass(pass);mark('u:'+x.id);if(x.id!==u.id)kick(x.id,'Пароль сменил администратор. Войдите с новым паролем','signedout');
+  return {password:pass};
 };
 API['POST /api/admin/ban']=(req,res,b,u)=>{
-  need(u);if(!isAdmin(u))throw E(403,'Только для администратора');
+  needAdmin(u);
   const x=DB.users[String(b.userId||'')];if(!x)throw E(404,'Нет такого пользователя');if(isAdmin(x))throw E(400,'Администратора заблокировать нельзя');
   x.banned=!!b.on;mark('u:'+x.id);if(x.banned)kick(x.id,'Ваш аккаунт заблокирован администратором');
   return {ok:true,banned:x.banned};
@@ -375,7 +408,7 @@ API['GET /api/me']=(req,res,b,u)=>{
   const servers=Object.values(DB.servers).filter(g=>g.members.includes(u.id));
   servers.forEach(g=>g.members.forEach(m=>ids.add(m)));
   Object.keys(u.contacts||{}).forEach(i=>ids.add(i));
-  return {me:Object.assign(pubUser(u),{admin:isAdmin(u)||undefined,blocked:u.blocked||[]}),chats,servers:servers.map(g=>serverOut(g,u.id)),packs:userPacks(u),contacts:u.contacts||{},stars:u.stars||[],tz:TZ,
+  return {me:Object.assign(pubUser(u),{admin:isAdmin(u)||undefined,blocked:u.blocked||[]}),chats,servers:servers.map(g=>serverOut(g,u.id)),packs:userPacks(u),contacts:u.contacts||{},stars:u.stars||[],tz:TZ,ann:OPT().ann||null,
     users:[...ids].map(i=>pubUser(DB.users[i])).filter(Boolean)};
 };
 API['POST /api/profile']=(req,res,b,u)=>{
@@ -805,8 +838,12 @@ function leaveVoiceOf(uid,g){g.channels.forEach(ch=>{if(ch.type==='voice'&&VOICE
 function closeVoice(cid){const room=VOICE.get(cid);if(!room)return;room.forEach(v=>{if(v.ws&&v.ws.readyState===1)v.ws.send(JSON.stringify({t:'vkicked',channel:cid}))});VOICE.delete(cid)}
 /* ---------- the streak pet («Серийчик»): one per private chat; both people can name and dress it.
    Some things open only after a long streak (the best one this pair ever had). ---------- */
-const PET_ITEMS={color:{ember:0,rose:0,sky:0,mint:0,grape:0,night:14,gold:30},hat:{none:0,cap:0,beanie:0,bow:0,flower:0,headphones:7,witch:7,tophat:14,crown:30},
-  eyes:{none:0,round:0,sun:0,hearts:0,star:7},neck:{none:0,scarf:0,bowtie:0,beads:0,bandana:7,medal:30}};
+const PET_ITEMS={color:{ember:0,rose:0,sky:0,mint:0,grape:0,cherry:0,cloud:0,cocoa:0,lava:7,night:14,ice:14,gold:30,galaxy:30},
+  style:{gloss:0,clay:0,plush:0,glass:0,toon:0,neon:7,metal:14},
+  hat:{none:0,cap:0,beanie:0,bow:0,flower:0,cat:0,party:0,santa:0,headphones:7,witch:7,halo:7,tophat:14,horns:14,crown:30},
+  eyes:{none:0,round:0,nerd:0,sun:0,hearts:0,mask:0,star:7,monocle:14,visor:30},
+  neck:{none:0,scarf:0,bowtie:0,tie:0,bell:0,beads:0,locket:0,bandana:7,chain:14,medal:30},
+  fx:{none:0,sparkles:0,hearts:0,bubbles:0,notes:0,snow:7,aura:14,rainbow:30}};
 /* add the pet to a group or a server channel */
 API['POST /api/pet/enable']=(req,res,b,u)=>{
   need(u);const c=DB.chats[String(b.chat||'')];if(!member(c,u.id)||(c.type!=='group'&&c.type!=='channel'))throw E(404,'Чат не найден');

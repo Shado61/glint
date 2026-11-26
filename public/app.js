@@ -101,33 +101,93 @@ const chatName=c=>c.type==='dm'?nm(peerOf(c)):c.type==='self'?'Избранно�
 /* ---------- the streak pet («Серийчик») ---------- */
 const petDays=c=>Math.max((c.pet&&c.pet.best)||0,(c.streak&&c.streak.n)||0);
 function petMood(c){const s=c.streak;if(!s)return c.st0?'wait':'sleep';if(s.today)return 'happy';return s.me&&s.me.length?'wait':'sleep'}
-function petSvgOf(c,mood){const p=c.pet||{};return window.PET?PET.petSVG({days:petDays(c),color:p.color,hat:p.hat,eyes:p.eyes,neck:p.neck,mood:mood||petMood(c)}):''}
-function refreshPetBtn(){const c=S.chats[S.cur],b=document.querySelector('.pet-btn');if(b&&c)b.innerHTML=petSvgOf(c)}
+function petOpts(c,mood,big){const p=c.pet||{};return {days:petDays(c),color:p.color,style:p.style,hat:p.hat,eyes:p.eyes,neck:p.neck,fx:big?p.fx:'none',mini:!big,mood:mood||petMood(c)}}
+function petSvgOf(c,mood,big){return window.PET?PET.petSVG(petOpts(c,mood,big)):''}
+function refreshPetBtn(){const c=S.chats[S.cur],b=document.querySelector('.pet-btn');if(b&&c)b.innerHTML=petSvgOf(c);petFloat()}
 /* pat the pet: hearts float up (also when the other person pats it) */
 function petPat(mine){
-  const h=$('#petHearts'),btn=document.querySelector('.pet-btn');navigator.vibrate&&navigator.vibrate(8);
-  const host=h||btn;if(!host)return;
-  for(let i=0;i<(h?5:2);i++){const e=document.createElement('i');e.textContent=mine?'💕':'💗';e.style.left=(20+Math.random()*60)+'%';e.style.animationDelay=(i*.08)+'s';(h||btn).appendChild(e);setTimeout(()=>e.remove(),1400)}
-  const svg=(h?h.parentNode:btn).querySelector('svg');if(svg){svg.classList.remove('patted');void svg.offsetWidth;svg.classList.add('patted')}
+  const h=$('#petHearts'),fl=document.querySelector('.pet-float'),btn=document.querySelector('.pet-btn');navigator.vibrate&&navigator.vibrate(8);
+  const host=h||(fl&&fl.querySelector('.pf-hearts'))||btn;if(!host)return;
+  for(let i=0;i<(h?6:3);i++){const e=document.createElement('i');e.textContent=mine?'💕':'💗';e.style.left=(20+Math.random()*60)+'%';e.style.animationDelay=(i*.08)+'s';host.appendChild(e);setTimeout(()=>e.remove(),1400)}
+  const svg=(h?h.parentNode:fl||btn).querySelector('svg');if(svg){svg.classList.remove('patted');void svg.offsetWidth;svg.classList.add('patted')}
 }
+/* the pet walks around the chat: drag it anywhere, it springs to the nearest side like a picture-in-picture window.
+   Tap — pat it, hold — open it. Its place is remembered. */
+const PF=64;
+function petFloatOn(c){return !!(c&&c.pet&&(c.type==='dm'||c.petOn)&&store.get('petfloat','on')==='on')}
+function pfBounds(main){
+  const W=main.clientWidth,H=main.clientHeight,hd=main.querySelector('.chat-h'),cp=main.querySelector('.composer'),mr=main.getBoundingClientRect();
+  const top=(hd?hd.getBoundingClientRect().bottom-mr.top:60)+8,bot=(cp?cp.getBoundingClientRect().top-mr.top:H-80)-PF-8;
+  return {l:8,r:W-PF-8,t:top,b:Math.max(top,bot)};
+}
+function pfPlace(el,x,y,anim){
+  const B=pfBounds(el.parentNode);x=Math.min(B.r,Math.max(B.l,x));y=Math.min(B.b,Math.max(B.t,y));
+  el.classList.toggle('snap',!!anim);el.style.transform=`translate3d(${x}px,${y}px,0)`;el._x=x;el._y=y;return [x,y];
+}
+function petFloat(){
+  const main=$('#main'),c=S.chats[S.cur];let el=main&&main.querySelector('.pet-float');
+  const hb=document.querySelector('.pet-btn');
+  if(!main||!petFloatOn(c)){if(el)el.remove();if(hb)hb.hidden=false;return}
+  if(hb)hb.hidden=true;
+  const o=petOpts(c,null,true),sig=JSON.stringify(o);
+  if(!el){el=document.createElement('div');el.className='pet-float';el.setAttribute('role','button');el.setAttribute('aria-label',(c.pet.name||'Серийчик')+' — перетащи, нажми, чтобы погладить, удерживай, чтобы открыть');main.appendChild(el);pfDrag(el);
+    const same=S.pfLast===S.cur;S.pfLast=S.cur;if(same)el.classList.add('now');
+    requestAnimationFrame(()=>{const B=pfBounds(main),p=store.get('pfp',null);pfPlace(el,p?B.l+p.x*(B.r-B.l):B.r,p?B.t+p.y*(B.b-B.t):B.b);el.classList.add('in');requestAnimationFrame(()=>el.classList.remove('now'))});
+    if(!store.get('pfhint',0)){store.set('pfhint',1);setTimeout(()=>toast(`${c.pet.name||'Серийчик'} гуляет по чату: перетащи его куда хочешь, нажми — погладить, удерживай — открыть`,5000),900)}}
+  if(el.dataset.sig!==sig){el.dataset.sig=sig;el.innerHTML=PET.petSVG(o)+'<span class="pf-hearts"></span>'}
+}
+function pfDrag(el){
+  let sx,sy,ox,oy,moved=false,down=false,lp=0,last=[],tx=0;
+  const look=(e)=>{const r=el.getBoundingClientRect();el.style.setProperty('--lx',Math.max(-1,Math.min(1,(e.clientX-r.left-PF/2)/120)).toFixed(2));el.style.setProperty('--ly',Math.max(-1,Math.min(1,(e.clientY-r.top-PF/2)/120)).toFixed(2))};
+  el.addEventListener('pointerdown',e=>{if(e.button)return;down=true;moved=false;sx=e.clientX;sy=e.clientY;ox=el._x||0;oy=el._y||0;last=[[e.clientX,e.clientY,e.timeStamp]];
+    el.setPointerCapture(e.pointerId);el.classList.add('held');el.classList.remove('snap');
+    lp=setTimeout(()=>{if(!moved){down=false;el.classList.remove('held');navigator.vibrate&&navigator.vibrate(12);petSheet()}},480)});
+  el.addEventListener('pointermove',e=>{if(!down)return;const dx=e.clientX-sx,dy=e.clientY-sy;
+    if(!moved&&Math.hypot(dx,dy)>6){moved=true;clearTimeout(lp);el.classList.add('drag')}
+    if(!moved)return;last.push([e.clientX,e.clientY,e.timeStamp]);if(last.length>5)last.shift();
+    const vx=last.length>1?(last[last.length-1][0]-last[0][0])/Math.max(1,last[last.length-1][2]-last[0][2]):0;
+    tx=Math.max(-25,Math.min(25,vx*14));el.style.setProperty('--tilt',tx.toFixed(1)+'deg');
+    pfPlace(el,ox+dx,oy+dy,false)});
+  const up=e=>{if(!down)return;down=false;clearTimeout(lp);el.classList.remove('held','drag');el.style.setProperty('--tilt','0deg');
+    if(!moved){petPat(true);wsSend({t:'pat',chat:S.cur});return}
+    /* fling: keep the speed for a moment, then spring to the nearest side */
+    const a=last[0],b=last[last.length-1],dt=Math.max(1,b[2]-a[2]),vx=(b[0]-a[0])/dt,vy=(b[1]-a[1])/dt;
+    const B=pfBounds(el.parentNode),px=el._x+vx*140,py=el._y+vy*140,x=px+PF/2<(B.l+B.r+PF)/2?B.l:B.r;
+    const [fx,fy]=pfPlace(el,x,py,true);store.set('pfp',{x:B.r>B.l?(fx-B.l)/(B.r-B.l):1,y:B.b>B.t?(fy-B.t)/(B.b-B.t):1});navigator.vibrate&&navigator.vibrate(6)};
+  el.addEventListener('pointerup',up);el.addEventListener('pointercancel',up);
+  el.addEventListener('contextmenu',e=>e.preventDefault());
+  document.addEventListener('pointermove',e=>{if(!down&&el.isConnected)look(e)},{passive:true});
+}
+addEventListener('resize',()=>{const el=document.querySelector('.pet-float');if(el&&el.isConnected)pfPlace(el,el._x||0,el._y||0,false)});
 function petSheet(tab){
   const c=S.chats[S.cur];if(!c||!c.pet||!window.PET)return;
   const P=PET,p=c.pet,days=petDays(c),st=P.stageOf(days),next=P.STAGES[st+1],mood=petMood(c),peer=peerOf(c);
-  S.petTab=tab||S.petTab||'color';
+  const groups={color:['Цвет',P.COLORS,'ember'],style:['Стиль',P.STYLES,'gloss'],hat:['Шапка',P.HATS,'none'],eyes:['Очки',P.EYES,'none'],neck:['Шея',P.NECK,'none'],fx:['Эффект',P.FX,'none']};
+  S.petTab=tab||S.petTab||'color';if(!groups[S.petTab])S.petTab='color';
   const grpPet=c.type!=='dm';
   const moodText={happy:grpPet?'Счастлив — сегодня тут уже общались 💕':'Счастлив — вы оба написали сегодня 💕',wait:grpPet?'Ждёт, когда напишет ещё кто-нибудь (нужно хотя бы двое)':(c.streak&&c.streak.me&&c.streak.me.includes(S.me.id)?`Ждёт, когда напишет ${esc(nm(peer))}`:'Ждёт твоего сообщения'),sleep:c.streak?'Спит — сегодня ещё никто не написал':'Загрустил: серия прервалась. Напишите друг другу, чтобы он проснулся'}[mood];
-  const groups={color:['Цвет',P.COLORS],hat:['Шапка',P.HATS],eyes:['Очки',P.EYES],neck:['Шея',P.NECK]};
-  const [gn,T]=groups[S.petTab],cur=p[S.petTab]||(S.petTab==='color'?'ember':'none');
-  const items=Object.keys(T).map(k=>{const it=T[k],lock=(it.need||0)>(p.best||0),o={days:Math.max(days,3),color:p.color,hat:p.hat,eyes:p.eyes,neck:p.neck,mood:'wait'};o[S.petTab]=k;
+  const [,T,def]=groups[S.petTab],cur=p[S.petTab]||def,best=p.best||0;
+  const items=Object.keys(T).map(k=>{const it=T[k],lock=(it.need||0)>best,o=Object.assign(petOpts(c,'wait',true),{days:Math.max(days,8)});if(S.petTab!=='fx')o.fx='none';o[S.petTab]=k;
     return `<button class="pet-it ${cur===k?'on':''} ${lock?'lock':''}" data-act="petset" data-k="${S.petTab}" data-v="${k}" ${lock?`title="Откроется на ${it.need}-й день"`:''}>${P.petSVG(o)}<small>${esc(it.n)}</small>${lock?`<i class="pet-lock">🔒 ${it.need} дн.</i>`:''}</button>`}).join('');
-  sheet(`<div class="pet-hero ${mood}" data-act="petpat">${petSvgOf(c)}<span class="pet-hearts" id="petHearts"></span></div>
-    <div class="pet-name"><input class="input" id="petName" maxlength="20" value="${esc(p.name||'Серийчик')}" aria-label="Имя питомца"><button class="gbtn" data-act="petname">${ic('check')}</button></div>
+  const fl=store.get('petfloat','on')==='on';
+  sheet(`<div class="pet-hero ${mood}" data-act="petpat" id="petHero">${petSvgOf(c,null,true)}<span class="pet-hearts" id="petHearts"></span></div>
+    <div class="pet-name"><input class="input" id="petName" maxlength="20" value="${esc(p.name||'Серийчик')}" aria-label="Имя питомца"><button class="gbtn" data-act="petname" aria-label="Сохранить имя">${ic('check')}</button></div>
     <p class="pet-mood">${moodText}</p>
-    <div class="pet-stat"><span>${esc(P.STAGES[st].n)}</span><b>${fire(c,false)||'🔥 '+((c.streak&&c.streak.n)||0)}</b><span>Рекорд: ${p.best||0} дн.</span></div>
+    <div class="pet-stat"><span>${esc(P.STAGES[st].n)}</span><b>${fire(c,false)||'🔥 '+((c.streak&&c.streak.n)||0)}</b><span>Рекорд: ${best} дн.</span></div>
     ${next?`<div class="pet-prog"><i style="width:${Math.min(100,Math.round(days/next.from*100))}%"></i></div><p class="pet-mood dim">Ещё ${next.from-days} дн. подряд — и станет «${esc(next.n)}»</p>`:'<p class="pet-mood dim">Максимальная стадия — Легенда ✨</p>'}
+    <div class="set-row pet-walk"><span class="mid"><b>Гуляет по чату</b><small>Перетаскивай его пальцем куда угодно</small></span><button class="sw ${fl?'on':''}" data-act="petfloat" role="switch" aria-checked="${fl}" aria-label="Гуляет по чату"><i></i></button></div>
     <div class="seg pet-tabs">${Object.entries(groups).map(([k,[n]])=>`<button class="${S.petTab===k?'on':''}" data-act="pettab" data-v="${k}">${n}</button>`).join('')}</div>
     <div class="pet-grid">${items}</div>
-    <p class="pet-mood dim">Нажми на питомца, чтобы погладить. Наряд видите вы оба.</p>`);
+    <div class="btns"><button class="gbtn" data-act="petrand">🎲 Случайный образ</button></div>
+    <p class="pet-mood dim">Нажми на питомца — погладить, поводи пальцем — он следит глазами. Наряд видят все в чате.</p>`);
+  petTilt($('#petHero'));
+}
+/* the big pet turns in 3D after the finger and looks at it */
+function petTilt(h){if(!h)return;
+  const set=(x,y)=>{h.style.setProperty('--rx',(y*-16).toFixed(1)+'deg');h.style.setProperty('--ry',(x*20).toFixed(1)+'deg');h.style.setProperty('--lx',x.toFixed(2));h.style.setProperty('--ly',y.toFixed(2))};
+  const mv=e=>{const r=h.getBoundingClientRect();set(Math.max(-1,Math.min(1,(e.clientX-r.left)/r.width*2-1)),Math.max(-1,Math.min(1,(e.clientY-r.top)/r.height*2-1)))};
+  h.addEventListener('pointermove',mv);h.addEventListener('pointerdown',mv);
+  h.addEventListener('pointerleave',()=>{h.classList.add('back');set(0,0);setTimeout(()=>h.classList.remove('back'),500)});
 }
 /* fire streak: shown from 3 days in a row; dimmed with an hourglass if nobody wrote today yet */
 function fire(c,big){
@@ -322,7 +382,7 @@ function pushSetup(){
 /* the server sends notifications only while Manasenger is not on screen */
 const sendVis=()=>wsSend({t:'vis',v:!document.hidden&&document.hasFocus()});
 ['visibilitychange','focus','blur'].forEach(ev=>(ev==='visibilitychange'?document:window).addEventListener(ev,sendVis));
-function setMe(r){setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
+function setMe(r){if('ann' in r)showAnn(r.ann);setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
 function renderShell(){
   $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
   renderRail();renderSide();renderMain();
@@ -452,6 +512,7 @@ function renderMain(){
   const t=$('#txt');t.value=S.draft[c.id]||'';autosize(t);compState();
   renderStatus();renderCtx();gcBanner();renderMsgs(true);applyChatWall(c.id);S.stk=false;
   if(c.type==='dm'){const o=peerOf(c);if((S.me.blocked||[]).includes(o.id)){const cp=document.querySelector('.composer');if(cp)cp.innerHTML=`<div class="blk-bar glass pill"><span>🚫 Вы заблокировали этого человека</span><button class="gbtn" data-act="block" data-id="${o.id}">Разблокировать</button></div>`}}
+  petFloat();
   if(!mobile())t.focus();
 }
 function renderStatus(){
@@ -470,7 +531,10 @@ async function openChat(id){
   history.replaceState(null,'','#'+id);
   const fresh=!$('#app').classList.contains('open');
   renderSide();renderMain();
-  if(fresh&&mobile()){const m=$('#main');if(m){m.classList.remove('enter');void m.offsetWidth;m.classList.add('enter');setTimeout(()=>m.classList.remove('enter'),320)}}
+  if(fresh&&mobile()&&!isLite()){const m=$('#main'),a=$('#app'),sd=$('#side');if(m){a.classList.add('peek','pushing');m.style.transition='none';m.style.transform='translate3d(100%,0,0)';
+    if(sd){sd.style.transition='none';sd.style.transform='none'}void m.offsetWidth;
+    m.style.transition='transform .42s cubic-bezier(.32,.72,0,1)';m.style.transform='translate3d(0,0,0)';if(sd){sd.style.transition='transform .42s cubic-bezier(.32,.72,0,1),filter .42s';sd.style.transform='translate3d(-28%,0,0)';sd.style.filter='brightness(.75)'}
+    clearTimeout(S.pushT);S.pushT=setTimeout(()=>{m.style.transition='';m.style.transform='';if(sd){sd.style.transition='';sd.style.transform='';sd.style.filter=''}a.classList.remove('peek','pushing');petFloat()},430)}}
   if(!S.msgs[id]){
     try{const r=await api('/api/messages?chat='+id);S.msgs[id]=mergeMsgs(r.messages,S.msgs[id]);S.more[id]=r.more}catch(e){toast(e.message);S.msgs[id]=S.msgs[id]||[]}
     if(S.cur===id)renderMsgs(true);
@@ -485,9 +549,9 @@ function mergeMsgs(loaded,live){
   return out.sort((a,b)=>a.ts-b.ts);
 }
 function closeChat(anim){if(anim===true&&mobile()&&!isLite()&&$('#main')&&!$('#app').classList.contains('peek')){
-    const m=$('#main');$('#app').classList.add('peek');m.style.transition='transform .22s cubic-bezier(.3,.7,.4,1)';m.style.transform='translate3d(100%,0,0)';
-    const sd=$('#side');if(sd){sd.style.transform='translate3d(-28%,0,0)';sd.style.transition='none';requestAnimationFrame(()=>{sd.style.transition='transform .22s cubic-bezier(.3,.7,.4,1)';sd.style.transform=''})}
-    setTimeout(()=>{m.style.transition='';m.style.transform='';if(sd){sd.style.transition='';sd.style.transform=''}$('#app').classList.remove('peek');closeChat(false)},220);return}
+    const m=$('#main');$('#app').classList.add('peek');m.style.transition='transform .34s cubic-bezier(.32,.72,0,1)';m.style.transform='translate3d(100%,0,0)';
+    const sd=$('#side');if(sd){sd.style.transform='translate3d(-28%,0,0)';sd.style.filter='brightness(.75)';sd.style.transition='none';requestAnimationFrame(()=>{sd.style.transition='transform .34s cubic-bezier(.32,.72,0,1),filter .34s';sd.style.transform='';sd.style.filter=''})}
+    setTimeout(()=>{m.style.transition='';m.style.transform='';if(sd){sd.style.transition='';sd.style.transform='';sd.style.filter=''}$('#app').classList.remove('peek');closeChat(false)},330);return}
   if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;S.cur=null;history.replaceState(null,'',location.pathname);renderSide();renderMain()}
 
 /* who has read a message: everyone whose "read up to" time is at or after it */
@@ -1208,10 +1272,16 @@ function openMenu(html,x,y){
   mn.style.left=left+'px';mn.style.top=top+'px';mn.style.setProperty('--ox',(x-left)+'px');mn.style.setProperty('--oy',(y<top?0:h)+'px');
 }
 function closeLayer(){const L=$('#layer');if(!L||!L.innerHTML)return;
-  if(isLite()||matchMedia('(prefers-reduced-motion:reduce)').matches){L.innerHTML='';return}
-  const g=document.createElement('div');g.className='layer-out';g.setAttribute('aria-hidden','true');
-  while(L.firstChild)g.appendChild(L.firstChild);document.body.appendChild(g);setTimeout(()=>g.remove(),200)}
-function sheet(html){$('#layer').innerHTML=`<div class="scrim" data-act="closemenu"></div><div class="sheet glass" role="dialog" aria-modal="true">${html}</div>`}
+  if(isLite()||matchMedia('(prefers-reduced-motion:reduce)').matches){L.innerHTML='';document.body.classList.remove('sheet-on');return}
+  const g=document.createElement('div');g.className='layer-out';g.setAttribute('aria-hidden','true');document.body.classList.remove('sheet-on');
+  while(L.firstChild)g.appendChild(L.firstChild);document.body.appendChild(g);setTimeout(()=>g.remove(),300)}
+function sheet(html){const L=$('#layer'),old=L.querySelector('.sheet'),sk=html.slice(0,48),top=old&&L.dataset.sk===sk?old.scrollTop:0;L.dataset.sk=sk;
+  L.innerHTML=`<div class="scrim" data-act="closemenu"></div><div class="sheet glass ${old?'swap':''}" role="dialog" aria-modal="true">${html}</div>`;
+  if(old&&top)L.querySelector('.sheet').scrollTop=top;
+  /* like iOS: the app behind a bottom window moves back a little */
+  if(mobile()&&!isLite())document.body.classList.add('sheet-on')}
+/* any other way the layer gets emptied: the app comes forward again */
+new MutationObserver(()=>{const L=$('#layer');if(L&&!L.querySelector('.sheet'))document.body.classList.remove('sheet-on')}).observe(document.getElementById('layer')||document.body,{childList:true});
 
 /* ---------- new chat / new group / info / settings ---------- */
 /* addTo: a group id — then the same picker adds people to an existing group */
@@ -1281,17 +1351,63 @@ function blockedSheet(){
   const l=(S.me.blocked||[]).map(i=>S.users[i]||{id:i,name:'Пользователь',username:''});
   sheet(`<h2>Заблокированные</h2><p class="sub">Эти люди не могут вам писать и звонить</p>${l.map(u=>`<div class="row">${avatar(u,'s',false)}<span class="mid"><span class="nm">${esc(nm(u))}</span><span class="sub"><span class="lm">@${esc(u.username||'')}</span></span></span><button class="gbtn" data-act="block" data-id="${u.id}">Разблокировать</button></div>`).join('')||'<div class="empty">Никого</div>'}`);
 }
-/* admin: everyone using Manasenger, and blocking accounts */
+/* admin: statistics, an announcement for everybody, registration, and every account with actions */
+const admAgo=t=>{if(!t)return '—';const m=Math.round((Date.now()-t)/60e3);return m<1?'только что':m<60?m+' мин назад':m<1440?Math.round(m/60)+' ч назад':Math.round(m/1440)+' дн. назад'};
 async function adminSheet(keep){
   let r;try{r=await api('/api/admin/users')}catch(e){toast(e.message);return}
-  S.adm=r;const q=keep&&$('#admq')?$('#admq').value:'';
-  const ago=t=>{if(!t)return '—';const m=Math.round((Date.now()-t)/60e3);return m<1?'только что':m<60?m+' мин назад':m<1440?Math.round(m/60)+' ч назад':Math.round(m/1440)+' дн. назад'};
-  const row=u=>`<div class="row adm-row" data-q="${esc((u.name+' '+u.username).toLowerCase())}">${avatar(Object.assign({},u,{online:u.online}),'s')}<span class="mid"><span class="top"><span class="nm">${esc(u.name)}${u.admin?' 👑':''}${u.banned?' <b class="adm-ban">ЗАБЛОКИРОВАН</b>':''}</span></span><span class="sub"><span class="lm">@${esc(u.username)} · ${u.online?'<b style="color:var(--good)">в сети</b>':'был(а) '+ago(u.lastSeen)} · ${u.msgs} сообщ. · ${u.chats} чатов · с ${u.created?new Date(u.created).toLocaleDateString('ru'):'—'}</span></span></span>${u.admin?'':`<button class="gbtn ${u.banned?'':'danger'}" data-act="adm-ban" data-id="${u.id}" data-on="${u.banned?0:1}">${u.banned?'Разблокировать':'Заблокировать'}</button>`}</div>`;
+  S.adm=r;S.admF=S.admF||'all';S.admS=S.admS||'act';const q=keep&&$('#admq')?$('#admq').value:'';
+  const st=r.stats||{},mx=Math.max(1,...(st.perDay||[0])),days=['вс','пн','вт','ср','чт','пт','сб'];
+  const up=st.uptime?(st.uptime>864e5?Math.floor(st.uptime/864e5)+' дн. ':'')+Math.floor(st.uptime%864e5/36e5)+' ч':'—';
+  const tile=(n,l,cl)=>`<div><b${cl?` style="color:var(--${cl})"`:''}>${n==null?'—':n}</b><small>${l}</small></div>`;
+  const ann=r.ann;
   sheet(`<h2>👑 Админ-панель</h2>
-    <div class="adm-stats"><div><b>${r.total}</b><small>пользователей</small></div><div><b style="color:var(--good)">${r.online}</b><small>в сети</small></div><div><b style="color:var(--bad)">${r.banned}</b><small>заблокировано</small></div></div>
+    <div class="adm-stats">${tile(r.total,'пользователей')}${tile(r.online,'в сети','good')}${tile(st.active,'активны за сутки')}
+      ${tile(st.newWeek,'новых за неделю')}${tile(st.today,'сообщений сегодня')}${tile(st.week,'за неделю')}
+      ${tile(st.dms,'личных чатов')}${tile(st.groups,'групп')}${tile(st.servers,'серверов')}</div>
+    <div class="adm-chart" aria-label="Сообщения за 7 дней">${(st.perDay||[]).map((v,i)=>{const d=new Date(Date.now()-(6-i)*864e5);return `<div title="${v} сообщ." style="--i:${i}"><i style="height:${Math.max(4,Math.round(v/mx*100))}%"></i><small>${i===6?'сег.':days[d.getDay()]}</small></div>`}).join('')}</div>
+    <p class="pet-mood dim" style="margin:4px 0 0">Сервер работает ${up} · память ${st.mem||'—'} МБ · сеансов ${st.sessions||0} · звонков сейчас ${st.calls||0} · всего сообщений ${st.msgs||0}</p>
+    <div class="section-t set-sec">Объявление для всех</div>
+    ${ann?`<div class="adm-ann"><b>Сейчас висит:</b> ${esc(ann.text)}<small>${esc(ann.by||'')} · ${admAgo(ann.ts)}</small></div>`:''}
+    <textarea class="input" id="admann" rows="2" maxlength="300" placeholder="Например: «Сегодня в 22:00 обновление, приложение перезапустится»"></textarea>
+    <div class="btns" style="margin-top:8px">${ann?'<button class="gbtn" data-act="adm-annoff">Убрать</button>':''}<button class="gbtn primary" data-act="adm-ann">📣 Отправить всем</button></div>
+    <div class="section-t set-sec">Доступ</div>
+    <div class="set-row"><span class="mid"><b>Регистрация новых аккаунтов</b><small>${r.regClosed?'Закрыта — войти могут только те, у кого уже есть аккаунт':'Открыта — любой может создать аккаунт'}</small></span><button class="sw ${r.regClosed?'':'on'}" data-act="adm-reg" role="switch" aria-checked="${!r.regClosed}" aria-label="Регистрация"><i></i></button></div>
+    <div class="section-t set-sec">Пользователи · ${r.total}${r.banned?` · <span style="color:var(--bad)">${r.banned} заблок.</span>`:''}</div>
     <input class="input" id="admq" placeholder="Поиск по имени или логину" value="${esc(q)}">
-    <div class="adm-list">${r.users.map(row).join('')}</div>`);
-  const i=$('#admq');if(i&&q)i.dispatchEvent(new Event('input'));
+    <div class="seg" style="margin-top:8px">${[['all','Все'],['on','В сети'],['new','Новые'],['ban','Заблок.']].map(([k,n])=>`<button class="${S.admF===k?'on':''}" data-act="adm-f" data-v="${k}">${n}</button>`).join('')}</div>
+    <div class="seg" style="margin-top:6px">${[['act','По активности'],['msg','По сообщениям'],['reg','По дате']].map(([k,n])=>`<button class="${S.admS===k?'on':''}" data-act="adm-s" data-v="${k}">${n}</button>`).join('')}</div>
+    <div class="adm-list" id="admList"></div>`);
+  admList();const i=$('#admq');if(i&&q)i.dispatchEvent(new Event('input'));
+}
+function admList(){
+  const r=S.adm,box=$('#admList');if(!r||!box)return;
+  const wk=Date.now()-7*864e5,F={all:()=>true,on:u=>u.online,new:u=>u.created>=wk,ban:u=>u.banned}[S.admF]||(()=>true);
+  const sorter={act:(a,b)=>(b.online-a.online)||(b.lastSeen-a.lastSeen),msg:(a,b)=>b.msgs-a.msgs,reg:(a,b)=>(b.created||0)-(a.created||0)}[S.admS];
+  const list=r.users.filter(F).sort(sorter);
+  box.innerHTML=list.map(u=>`<button class="row adm-row" data-act="adm-user" data-id="${u.id}" data-q="${esc((u.name+' '+u.username).toLowerCase())}">${avatar(Object.assign({},u,{online:u.online}),'s')}<span class="mid"><span class="top"><span class="nm">${esc(u.name)}${u.admin?' 👑':''}${u.banned?' <b class="adm-ban">ЗАБЛОКИРОВАН</b>':''}</span></span><span class="sub"><span class="lm">@${esc(u.username)} · ${u.online?'<b style="color:var(--good)">в сети</b>':admAgo(u.lastSeen)} · ${u.msgs} сообщ.</span></span></span><span class="adm-chev">›</span></button>`).join('')||'<div class="empty" style="padding:16px">Никого</div>';
+  const q=$('#admq');if(q&&q.value)q.dispatchEvent(new Event('input'));
+}
+/* one account: what we know and what the admin can do */
+function adminUser(id){
+  const u=S.adm&&S.adm.users.find(x=>x.id===id);if(!u)return;
+  sheet(`<div class="adm-back"><button class="gbtn" data-act="admin-back">‹ Все пользователи</button></div>
+    <div class="prof">${avatar(Object.assign({},u,{online:u.online}),'xl')}<h3>${esc(u.name)}${u.admin?' 👑':''}</h3><small>@${esc(u.username)} · ${u.online?'в сети':'был(а) '+admAgo(u.lastSeen)}</small></div>
+    <div class="adm-stats">${[[u.msgs,'сообщений'],[u.chats,'чатов'],[u.created?new Date(u.created).toLocaleDateString('ru'):'—','с нами с']].map(([n,l])=>`<div><b>${n}</b><small>${l}</small></div>`).join('')}</div>
+    ${u.banned?'<p class="pet-mood" style="color:var(--bad)">⛔ Аккаунт заблокирован</p>':''}
+    <div class="adm-acts">
+      ${u.id!==S.me.id?`<button class="row" data-act="adm-dm" data-id="${u.id}"><span class="adm-ic">💬</span><span class="mid"><span class="nm">Написать</span><span class="sub"><span class="lm">Открыть личный чат</span></span></span></button>`:''}
+      <button class="row" data-act="adm-copy" data-v="@${esc(u.username)}"><span class="adm-ic">📋</span><span class="mid"><span class="nm">Скопировать логин</span><span class="sub"><span class="lm">@${esc(u.username)}</span></span></span></button>
+      ${u.id!==S.me.id?`<button class="row" data-act="adm-out" data-id="${u.id}"><span class="adm-ic">🚪</span><span class="mid"><span class="nm">Завершить все сеансы</span><span class="sub"><span class="lm">Выйдет на всех устройствах (например, потерял телефон)</span></span></span></button>`:''}
+      ${!u.admin||u.id===S.me.id?`<button class="row" data-act="adm-pass" data-id="${u.id}"><span class="adm-ic">🔑</span><span class="mid"><span class="nm">Сбросить пароль</span><span class="sub"><span class="lm">Получите временный пароль и передайте человеку</span></span></span></button>`:''}
+      ${u.admin?'':`<button class="row ${u.banned?'':'bad'}" data-act="adm-ban" data-id="${u.id}" data-on="${u.banned?0:1}"><span class="adm-ic">${u.banned?'✅':'⛔'}</span><span class="mid"><span class="nm">${u.banned?'Разблокировать':'Заблокировать'}</span><span class="sub"><span class="lm">${u.banned?'Снова сможет входить и писать':'Не сможет войти, все сеансы завершатся'}</span></span></span></button>`}
+    </div><div id="admRes"></div>`);
+}
+/* the announcement banner at the top of the app */
+function showAnn(a){
+  const old=$('#annBar');if(!a||store.get('annSeen','')===a.id){if(old)old.remove();return}
+  const el=old||document.createElement('div');el.id='annBar';el.className='ann-bar glass';el.setAttribute('role','status');
+  el.innerHTML=`<span class="ann-ic">📣</span><span class="ann-t"><b>Объявление</b>${esc(a.text)}</span><button class="gbtn ic" data-act="annclose" data-id="${a.id}" aria-label="Закрыть">${ic('x')}</button>`;
+  if(!old)document.body.appendChild(el);
 }
 function settingsSheet(){
   const me=S.me,th=store.get('theme','auto'),w=store.get('wall','slate');
@@ -1300,19 +1416,24 @@ function settingsSheet(){
     <label class="field"><span>Имя</span><input class="input" id="pname" maxlength="40" value="${esc(me.name)}"></label>
     <label class="field"><span>О себе</span><input class="input" id="pbio" maxlength="140" value="${esc(me.bio||'')}" placeholder="Пара слов о себе"></label>
     <div class="set-row"><span class="mid"><b>Логин</b><small>@${esc(me.username)} — по нему тебя находят</small></span><button class="gbtn" data-act="copyname">${ic('copy')}</button></div>
+    ${me.admin?`<div class="set-row"><span class="mid"><b>👑 Админ-панель</b><small>Пользователи, статистика, объявления, регистрация</small></span><button class="gbtn primary" data-act="admin">Открыть</button></div>`:''}
+    <div class="section-t set-sec">Оформление</div>
     <div class="set-row"><span class="mid"><b>Тема</b></span><div class="seg" style="width:220px">${[['auto','Авто'],['light','Светлая'],['dark','Тёмная']].map(([k,n])=>`<button class="${th===k?'on':''}" data-act="theme" data-v="${k}">${n}</button>`).join('')}</div></div>
     <div class="set-row" style="display:block"><b>Обои</b><div class="walls" style="margin-top:8px">${[['slate','Сланец'],['steel','Сталь'],['mist','Туман'],['ocean','Море']].map(([k,n])=>`<button class="${w===k&&!S.appWall?'on':''}" data-act="wall" data-w="${k}" aria-label="${n}" title="${n}"></button>`).join('')}<button class="wall-pick ${S.appWall?'on':''}" data-act="appwall" title="Своё фото" aria-label="Обои из галереи" ${S.appWall?`style="background-image:url('${S.appWall}')"`:''}>${S.appWall?'':ic('image')}</button></div>${S.appWall?'<div class="btns" style="margin-top:8px"><button class="gbtn" data-act="appwalldel">Убрать своё фото</button></div>':''}</div>
-    <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
-    <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
-    ${me.admin?`<div class="set-row"><span class="mid"><b>👑 Админ-панель</b><small>Все пользователи Manasenger, блокировка аккаунтов</small></span><button class="gbtn primary" data-act="admin">Открыть</button></div>`:''}
-    <div class="set-row"><span class="mid"><b>Заблокированные</b><small>${(me.blocked||[]).length?(me.blocked.length+' чел. — не могут вам писать и звонить'):'Никого'}</small></span>${(me.blocked||[]).length?'<button class="gbtn" data-act="blocklist">Список</button>':''}</div>
     <div class="set-row"><span class="mid"><b>Стиль сообщений</b><small>Цвет и рамка ваших сообщений</small></span><button class="gbtn" data-act="bubbles">Выбрать</button></div>
+    <div class="set-row"><span class="mid"><b>Серийчик гуляет по чату</b><small>Питомца можно перетаскивать пальцем по экрану чата</small></span><button class="sw ${store.get('petfloat','on')==='on'?'on':''}" data-act="petfloat" role="switch" aria-checked="${store.get('petfloat','on')==='on'}" aria-label="Серийчик гуляет по чату"><i></i></button></div>
+    <div class="section-t set-sec">Чаты и стикеры</div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
-    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
+    <div class="section-t set-sec">Конфиденциальность</div>
+    <div class="set-row"><span class="mid"><b>Заблокированные</b><small>${(me.blocked||[]).length?(me.blocked.length+' чел. — не могут вам писать и звонить'):'Никого'}</small></span>${(me.blocked||[]).length?'<button class="gbtn" data-act="blocklist">Список</button>':''}</div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
       <label class="field" style="margin-top:10px"><span>Текущий пароль</span><input class="input" id="op" type="password" autocomplete="current-password"></label>
       <label class="field"><span>Новый пароль</span><input class="input" id="nwp" type="password" minlength="6" autocomplete="new-password"></label></details>
+    <div class="section-t set-sec">Приложение</div>
+    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
+    <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
+    <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
     <div class="btns"><button class="gbtn danger" data-act="logout">Выйти</button><button class="gbtn primary" data-act="saveprof">Сохранить</button></div>`);
 }
 function installSheet(){
@@ -1389,6 +1510,8 @@ function onWS(m){
       const was=S.chats[m.chat.id];S.chats[m.chat.id]=Object.assign(was||{},m.chat);if(!m.chat.streak)delete S.chats[m.chat.id].streak;
       if(m.chat.streak&&m.chat.streak.n>=3&&was&&(!was.streak||was.streak.n<m.chat.streak.n)&&m.chat.streak.today&&S.cur===m.chat.id)navigator.vibrate&&navigator.vibrate([20,40,20]);
       frameSide();if(S.cur===m.chat.id){frameStatus();if(m.chat.pet&&!document.querySelector('.pet-btn'))renderMain();else refreshPetBtn()}return}
+    case 'announce':showAnn(m.ann);if(m.ann&&store.get('annSeen','')!==m.ann.id)navigator.vibrate&&navigator.vibrate([10,40,10]);return;
+    case 'signedout':{S.banned=true;try{WS.onclose=null;WS.close()}catch(e){}toast(m.reason||'Сеанс завершён',4000);store.set('tok','');setTimeout(()=>location.reload(),2500);return}
     case 'banned':{S.banned=true;try{WS.onclose=null;WS.close()}catch(e){}$('#app').innerHTML=`<div class="auth"><div class="card glass empty"><b>⛔ Аккаунт заблокирован</b>${esc(m.reason||'Администратор заблокировал этот аккаунт')}</div></div>`;return}
     case 'error':{
       if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);frameMsgs()}}
@@ -2688,10 +2811,10 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
   /* the chat follows the finger, drawn once per screen frame; the list underneath slides in a little slower, like in Telegram */
   const paint=()=>{rafId=0;if(mode!=='edge'||!el)return;const w=W(),k=Math.min(1,swipeX/w);
     el.style.transform=`translate3d(${swipeX}px,0,0)`;if(side)side.style.transform=`translate3d(${(k-1)*w*.28}px,0,0)`};
-  const EASE='cubic-bezier(.22,.9,.3,1)';
+  const EASE='cubic-bezier(.32,.72,0,1)';
   const unside=()=>{if(side){side.style.transition=`transform .26s ${EASE}`;side.style.transform='';const s2=side;setTimeout(()=>{s2.style.transition=''},280);side=null}};
   const W=()=>innerWidth;
-  const ignore=t=>t.closest('.mapview,input,textarea,[type=range],.ed-wrap,.sed-canvas,.fx-row,.stk-tabs,.stories,.local,.sv,.scam,.sed');
+  const ignore=t=>t.closest('.mapview,input,textarea,[type=range],.ed-wrap,.sed-canvas,.fx-row,.stk-tabs,.stories,.local,.sv,.scam,.sed,.pet-hero,.pet-float,.pet-tabs');
   document.addEventListener('touchstart',e=>{
     if(e.touches.length>1){mode=null;return}
     const t=e.touches[0],tg=e.target;sx=t.clientX;sy=t.clientY;st=Date.now();dx=dy=0;mode=null;el=null;bub=null;
@@ -2706,7 +2829,7 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
     if(tg.closest('#callEl')&&!tg.closest('.bar,.local,.fx-panel')&&CALL&&CALL.state==='active'){mode='call';el=$('#callEl');return}
     if(tg.closest('#callEl,.sv,.scam,.sed'))return;
     /* from the left edge: back, the screen follows the finger */
-    if(sx<32&&mobile()&&(S.cur||(S.view!=='home'&&S.servers[S.view]))){mode='edge';el=S.cur?$('#main'):$('#side');return}
+    if(sx<32&&mobile()&&!tg.closest('.pet-float')&&(S.cur||(S.view!=='home'&&S.servers[S.view]))){mode='edge';el=S.cur?$('#main'):$('#side');return}
     if(S.cur){bub=tg.closest('.m');if(bub&&!bub.querySelector('[data-act="msg"]'))bub=null;
       /* the direction is decided after the first few pixels: right — back to the list (from anywhere, like Telegram), left on a message — reply */
       mode=mobile()&&!ignore(tg)&&!tg.closest('.composer,.stk-panel,.recb,.chat-h')?'maybe':(bub?'bubble':null);return}
@@ -2729,7 +2852,8 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
     if(mode==='sheet'||mode==='call'){
       if(dy<0||Math.abs(dx)>Math.abs(dy)*1.2){if(Math.abs(dx)>20)mode=null;return}
       el.style.transition='none';
-      el.style.transform=el.classList.contains('sheet')&&mobile()?`translate(-50%,${dy}px)`:el.classList.contains('sheet')?`translate(-50%,calc(-50% + ${dy}px))`:`translateY(${dy}px)`;
+      el.style.transform=el.classList.contains('sheet')&&mobile()?`translate3d(0,${dy}px,0)`:el.classList.contains('sheet')?`translate(-50%,calc(-50% + ${dy}px))`:`translateY(${dy}px)`;
+      if(el.classList.contains('sheet')){const sc=document.querySelector('#layer .scrim');if(sc){sc.style.transition='none';sc.style.opacity=String(Math.max(0,1-dy/(el.offsetHeight||500)))}}
       if(mode==='call'||el.classList.contains('lightbox'))el.style.opacity=String(Math.max(.4,1-dy/600));
       return;
     }
@@ -2752,7 +2876,12 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
         if(navigator.vibrate)navigator.vibrate(8)}
       else{node.style.transform='';unside();setTimeout(()=>{node.style.transition='';$('#app').classList.remove('peek')},270)}
     }
-    else if(mode==='sheet'&&el){const node=el,go=dy>110||(dy>30&&vy>.6);settle(node,go,()=>{node.style.transform+=' translateY(100vh)';setTimeout(()=>{closeLayer();if(SV&&SV.paused)svPause(false);syncBack()},180)})}
+    else if(mode==='sheet'&&el){const node=el,go=dy>110||(dy>30&&vy>.6),sc=document.querySelector('#layer .scrim');
+      if(go){const ms=Math.round(Math.max(160,Math.min(320,(innerHeight-dy)/Math.max(.8,vy)))),L=$('#layer');
+        node.style.transition=`transform ${ms}ms cubic-bezier(.2,.8,.3,1)`;node.style.transform=node.classList.contains('sheet')&&mobile()?'translate3d(0,110%,0)':node.style.transform+' translateY(100vh)';
+        if(sc){sc.style.transition=`opacity ${ms}ms`;sc.style.opacity='0'}document.body.classList.remove('sheet-on');
+        setTimeout(()=>{if(L&&L.contains(node))L.innerHTML='';if(SV&&SV.paused)svPause(false);syncBack()},ms)}
+      else{node.style.transition='transform .42s cubic-bezier(.32,.72,0,1)';node.style.transform='';if(sc){sc.style.transition='opacity .3s';sc.style.opacity=''}setTimeout(()=>{node.style.transition=''},440)}}
     else if(mode==='call'&&el){const node=el,go=dy>120||(dy>40&&vy>.6);settle(node,go,()=>{setTimeout(()=>{node.style.transform='';node.style.opacity='';node.style.transition='';if(CALL){CALL.min=true;renderCall()}syncBack()},10)})}
     else if(mode==='bubble'&&bub){
       const id=bub.dataset.id;bub.style.transition='transform .2s';bub.style.transform='';const b=bub;setTimeout(()=>{b.style.transition=''},220);
@@ -2886,6 +3015,10 @@ document.addEventListener('click',async e=>{
     case 'petset':{if(el.classList.contains('lock')){toast('Откроется на '+el.title.replace(/\D+/g,'')+'-й день серии 🔥');break}const b={chat:S.cur};b[el.dataset.k]=el.dataset.v;try{const r=await api('/api/pet',b);Object.assign(S.chats[S.cur],r.chat);petSheet();refreshPetBtn()}catch(err){toast(err.message)}break}
     case 'petname':try{const r=await api('/api/pet',{chat:S.cur,name:$('#petName').value});Object.assign(S.chats[S.cur],r.chat);toast('Имя сохранено');refreshPetBtn()}catch(err){toast(err.message)}break;
     case 'petpat':petPat(true);wsSend({t:'pat',chat:S.cur});break;
+    case 'petfloat':{const on=store.get('petfloat','on')!=='on';store.set('petfloat',on?'on':'off');el.classList.toggle('on',on);el.setAttribute('aria-checked',on);petFloat();break}
+    case 'petrand':{const c=S.chats[S.cur];if(!c||!c.pet||!window.PET)break;const best=c.pet.best||0,b={chat:S.cur};
+      [['color',PET.COLORS],['style',PET.STYLES],['hat',PET.HATS],['eyes',PET.EYES],['neck',PET.NECK],['fx',PET.FX]].forEach(([k,T])=>{const ok=Object.keys(T).filter(x=>(T[x].need||0)<=best);b[k]=ok[Math.floor(Math.random()*ok.length)]});
+      try{const r=await api('/api/pet',b);Object.assign(S.chats[S.cur],r.chat);petSheet();refreshPetBtn();const sv=document.querySelector('#petHero svg');if(sv)sv.classList.add('patted')}catch(err){toast(err.message)}break}
     case 'gadd':newChatSheet(true,S.cur);break;
     case 'gmember':memberSheet(S.cur,id);break;
     case 'gtitle':try{const r=await api('/api/chats/title',{chat:S.cur,userId:id,title:$('#mtitle').value});Object.assign(S.chats[S.cur],r.chat);infoSheet();renderMsgs();toast('Подписано')}catch(err){toast(err.message)}break;
@@ -2978,8 +3111,25 @@ document.addEventListener('click',async e=>{
     case 'blocklist':blockedSheet();break;
     case 'admin':adminSheet();break;
     case 'adm-q':break;
-    case 'adm-ban':{const uid=el.dataset.id,on=el.dataset.on==='1';if(on&&!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно?';return}
-      try{await api('/api/admin/ban',{userId:uid,on});toast(on?'Аккаунт заблокирован':'Аккаунт разблокирован');adminSheet(true)}catch(err){toast(err.message)}break}
+    case 'adm-ban':{const uid=el.dataset.id,on=el.dataset.on==='1';if(on&&!el.dataset.sure){el.dataset.sure=1;const n=el.querySelector('.nm');if(n)n.textContent='Точно заблокировать?';else el.textContent='Точно?';return}
+      try{await api('/api/admin/ban',{userId:uid,on});toast(on?'Аккаунт заблокирован':'Аккаунт разблокирован');await adminSheet(true);adminUser(uid)}catch(err){toast(err.message)}break}
+    case 'adm-user':adminUser(el.dataset.id);break;
+    case 'admin-back':adminSheet(true);break;
+    case 'adm-f':S.admF=el.dataset.v;el.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===el));admList();break;
+    case 'adm-s':S.admS=el.dataset.v;el.parentNode.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===el));admList();break;
+    case 'adm-ann':{const t=$('#admann').value.trim();if(!t){toast('Напишите текст объявления');break}
+      if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно отправить всем?';return}
+      try{const r=await api('/api/admin/announce',{text:t});toast('Объявление отправлено всем');showAnn(r.ann);adminSheet()}catch(err){toast(err.message)}break}
+    case 'adm-annoff':try{await api('/api/admin/announce',{text:''});showAnn(null);toast('Объявление убрано');adminSheet()}catch(err){toast(err.message)}break;
+    case 'adm-reg':{const open=!el.classList.contains('on');try{const r=await api('/api/admin/reg',{open});el.classList.toggle('on',!r.regClosed);el.setAttribute('aria-checked',!r.regClosed);toast(r.regClosed?'Регистрация закрыта':'Регистрация открыта');S.adm.regClosed=r.regClosed;const sm=el.parentNode.querySelector('small');if(sm)sm.textContent=r.regClosed?'Закрыта — войти могут только те, у кого уже есть аккаунт':'Открыта — любой может создать аккаунт'}catch(err){toast(err.message)}break}
+    case 'adm-dm':closeLayer();startDM(el.dataset.id);break;
+    case 'adm-copy':try{await navigator.clipboard.writeText(el.dataset.v);toast('Скопировано: '+el.dataset.v)}catch(e){toast(el.dataset.v)}break;
+    case 'adm-out':{const n=el.querySelector('.nm');if(!el.dataset.sure){el.dataset.sure=1;n.textContent='Точно завершить все сеансы?';return}
+      try{await api('/api/admin/logout',{userId:el.dataset.id});toast('Готово: человек вышел на всех устройствах');n.textContent='Сеансы завершены';delete el.dataset.sure}catch(err){toast(err.message)}break}
+    case 'adm-pass':{const n=el.querySelector('.nm');if(!el.dataset.sure){el.dataset.sure=1;n.textContent='Точно сбросить пароль?';return}
+      try{const r=await api('/api/admin/resetpass',{userId:el.dataset.id});delete el.dataset.sure;n.textContent='Сбросить пароль';
+        $('#admRes').innerHTML=`<div class="adm-ann"><b>Временный пароль:</b> <code class="adm-pw">${esc(r.password)}</code><small>Передайте его человеку — пусть войдёт и сменит пароль в настройках</small><div class="btns" style="margin-top:8px"><button class="gbtn" data-act="adm-copy" data-v="${esc(r.password)}">📋 Скопировать</button></div></div>`}catch(err){toast(err.message)}break}
+    case 'annclose':store.set('annSeen',el.dataset.id);{const b=$('#annBar');if(b){b.classList.add('out');setTimeout(()=>b.remove(),300)}}break;
     case 'saveprof':{
       const b={name:$('#pname').value,bio:$('#pbio').value};
       if($('#nwp').value){b.password=$('#op').value;b.newPassword=$('#nwp').value}
