@@ -36,13 +36,6 @@
         <data android:scheme="manasenger-once"/>
       </intent-filter>
     </activity>
-    <!-- TikTok inside the app, with Manasenger's tab bar under it -->
-    <activity android:name=".TikTokActivity" android:exported="true" android:launchMode="singleTask" android:configChanges="orientation|screenSize|keyboardHidden" android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-      <intent-filter>
-        <action android:name="android.intent.action.VIEW"/><category android:name="android.intent.category.DEFAULT"/><category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="manasenger-tiktok"/>
-      </intent-filter>
-    </activity>
     <!-- updates: the downloaded new version -->
     <receiver android:name=".Updater" android:exported="true">
       <intent-filter><action android:name="android.intent.action.DOWNLOAD_COMPLETE"/></intent-filter>

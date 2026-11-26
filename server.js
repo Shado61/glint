@@ -299,33 +299,6 @@ API['POST /api/logout']=(req,res,b)=>{
   res.setHeader('Set-Cookie','glint=; Path=/; Max-Age=0');return {ok:true};
 };
 API['GET /api/version']=()=>({v:APP_VERSION});
-/* a short TikTok link (vm.tiktok.com/…) → the video number, so the video can play inside Manasenger */
-const TT=new Map();
-/* title, author and picture of a TikTok video (official oEmbed); ok:false when it is gone or the author turned embedding off */
-const TTM=new Map();
-async function ttMeta(id){
-  if(TTM.has(id))return TTM.get(id);
-  const r=await fetch('https://www.tiktok.com/oembed?url='+encodeURIComponent('https://www.tiktok.com/@_/video/'+id),{signal:AbortSignal.timeout(6000)}).catch(()=>null);
-  if(!r)return {};
-  const j=await r.json().catch(()=>null);
-  const m=r.ok&&j&&j.html?{ok:true,title:String(j.title||'').slice(0,200),author:String(j.author_name||'').slice(0,80),thumb:/^https:\/\/[\w.-]+\.(tiktokcdn(-us|-eu)?\.com|ibyteimg\.com)\//.test(j.thumbnail_url||'')?j.thumbnail_url:''}:{ok:false};
-  TTM.set(id,m);if(TTM.size>800)TTM.delete(TTM.keys().next().value);return m;
-}
-API['GET /api/tiktok/meta']=async(req,res,b,u,q)=>{need(u);const id=String(q.get('id')||'');if(!/^\d{8,25}$/.test(id))throw E(400,'Нет видео');return Object.assign({id},await ttMeta(id))};
-API['GET /api/tiktok']=async(req,res,b,u,q)=>{
-  need(u);const url=String(q.get('u')||'');
-  let m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(url);if(m)return {id:m[1]};
-  if(!/^https:\/\/(vm|vt|www|m)\.tiktok\.com\/[\w@./-]+$/.test(url))throw E(400,'Это не ссылка на TikTok');
-  if(TT.has(url))return {id:TT.get(url)};
-  if(!limit('tt:'+u.id,30,60e3))throw E(429,'Слишком часто');
-  let next=url;
-  for(let i=0;i<4;i++){
-    const r=await fetch(next,{redirect:'manual',headers:{'User-Agent':'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/130 Safari/537.36'},signal:AbortSignal.timeout(6000)}).catch(()=>null);
-    if(!r)break;const loc=r.headers.get('location');m=/\/(?:video|v)\/(\d{8,25})/.exec(loc||next);if(m){TT.set(url,m[1]);if(TT.size>500)TT.delete(TT.keys().next().value);return {id:m[1]}}
-    if(!loc)break;next=new URL(loc,next).href;
-  }
-  throw E(404,'Не получилось открыть это видео — откройте его в TikTok');
-};
 API['POST /api/block']=(req,res,b,u)=>{
   need(u);const id=String(b.userId||'');if(!DB.users[id]||id===u.id)throw E(404,'Нет такого человека');
   u.blocked=(u.blocked||[]).filter(x=>x!==id);if(b.on)u.blocked.push(id);mark('u:'+u.id);
@@ -567,6 +540,41 @@ API['GET /api/users/find']=(req,res,b,u,q)=>{ /* exact login, for "add contact" 
   need(u);const s=String(q.get('u')||'').toLowerCase().replace(/^@/,'').trim();
   const o=Object.values(DB.users).find(x=>x.username===s);if(!o)throw E(404,'Нет пользователя с логином @'+s);return {user:pubUser(o)};
 };
+
+/* ---------- friends map: people who added each other see where the other one is (like 2GIS).
+   Both have to agree; anyone can hide or stop sharing at any time. Positions are only sent to accepted friends. ---------- */
+const geoOut=u=>u&&u.geo&&!u.geo.off&&typeof u.geo.lat==='number'?{lat:u.geo.lat,lng:u.geo.lng,acc:u.geo.acc||0,ts:u.geo.ts}:null;
+function mapOut(u){
+  const fr=u.mapf||{};
+  return {sharing:!!(u.geo&&!u.geo.off),friends:Object.entries(fr).filter(([id])=>DB.users[id]).map(([id,st])=>{const o=DB.users[id];
+    return {user:pubUser(o),st,geo:st==='ok'&&o.mapf&&o.mapf[u.id]==='ok'?geoOut(o):null}})};
+}
+const mapPing=id=>sendTo(id,{t:'map'});
+API['GET /api/map']=(req,res,b,u)=>{need(u);return mapOut(u)};
+API['POST /api/map/invite']=(req,res,b,u)=>{need(u);const o=DB.users[String(b&&b.userId||'')];
+  if(!o||o.id===u.id)throw E(404,'Нет такого пользователя');if((o.blocked||[]).includes(u.id))throw E(403,'Нельзя добавить');
+  if(!limit('mapinv:'+u.id,40,3600e3))throw E(429,'Слишком часто');
+  u.mapf=u.mapf||{};o.mapf=o.mapf||{};
+  if(u.mapf[o.id]==='ok')return mapOut(u);
+  if(u.mapf[o.id]==='in'){u.mapf[o.id]='ok';o.mapf[u.id]='ok'}else{u.mapf[o.id]='out';o.mapf[u.id]='in'}
+  mark('u:'+u.id);mark('u:'+o.id);mapPing(o.id);return mapOut(u)};
+API['POST /api/map/accept']=(req,res,b,u)=>{need(u);const o=DB.users[String(b&&b.userId||'')];
+  if(!o||!u.mapf||u.mapf[o.id]!=='in')throw E(404,'Нет приглашения');
+  u.mapf[o.id]='ok';o.mapf=o.mapf||{};o.mapf[u.id]='ok';mark('u:'+u.id);mark('u:'+o.id);mapPing(o.id);return mapOut(u)};
+API['POST /api/map/remove']=(req,res,b,u)=>{need(u);const id=String(b&&b.userId||''),o=DB.users[id];
+  if(u.mapf&&u.mapf[id]){delete u.mapf[id];mark('u:'+u.id)}if(o&&o.mapf&&o.mapf[u.id]){delete o.mapf[u.id];mark('u:'+o.id);mapPing(o.id)}
+  return mapOut(u)};
+const okFriends=u=>Object.entries(u.mapf||{}).filter(([id,st])=>st==='ok'&&DB.users[id]&&DB.users[id].mapf&&DB.users[id].mapf[u.id]==='ok').map(([id])=>id);
+API['POST /api/map/loc']=(req,res,b,u)=>{need(u);
+  const lat=+b.lat,lng=+b.lng,acc=Math.min(5000,Math.max(0,Math.round(+b.acc||0)));
+  if(!isFinite(lat)||!isFinite(lng)||Math.abs(lat)>90||Math.abs(lng)>180)throw E(400,'Нет координат');
+  if(!limit('maploc:'+u.id,20,60e3))return {ok:true};
+  const prevSave=u.geo&&u.geo.saved||0;
+  u.geo={lat:Math.round(lat*1e5)/1e5,lng:Math.round(lng*1e5)/1e5,acc,ts:now(),saved:prevSave};
+  if(now()-prevSave>120e3){u.geo.saved=now();mark('u:'+u.id)} /* written to the database at most every 2 minutes, sent to friends right away */
+  const g=geoOut(u);okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:g}));return {ok:true}};
+API['POST /api/map/stop']=(req,res,b,u)=>{need(u);u.geo={off:true,ts:now()};mark('u:'+u.id);
+  okFriends(u).forEach(id=>sendTo(id,{t:'mapLoc',id:u.id,geo:null}));return {ok:true}};
 
 /* ---------- Saved Messages: a chat with yourself; stars mark important messages in any chat ---------- */
 function selfChat(u){
@@ -1159,8 +1167,8 @@ function handle(ws,u,m){
 /* ---------- HTTP ---------- */
 const MIME={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.webmanifest':'application/manifest+json','.svg':'image/svg+xml','.png':'image/png','.ico':'image/x-icon','.mp3':'audio/mpeg','.bin':'application/octet-stream','.wasm':'application/wasm','.mjs':'text/javascript; charset=utf-8','.task':'application/octet-stream','.mdl':'application/octet-stream','.tflite':'application/octet-stream','.txt':'text/plain; charset=utf-8','.woff2':'font/woff2','.jpg':'image/jpeg','.jpeg':'image/jpeg'};
 const SEC={'X-Content-Type-Options':'nosniff','Referrer-Policy':'same-origin','X-Frame-Options':'DENY',
-  'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self)',
-  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob: https://*.tiktokcdn.com https://*.tiktokcdn-us.com https://*.tiktokcdn-eu.com https://*.ibyteimg.com; media-src 'self' blob:; connect-src 'self' ws: wss:; frame-src https://www.tiktok.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
+  'Permissions-Policy':'camera=(self), microphone=(self), display-capture=(self), geolocation=(self)',
+  'Content-Security-Policy':"default-src 'self'; img-src 'self' data: blob: https://tiles.openfreemap.org; media-src 'self' blob:; connect-src 'self' ws: wss: https://tiles.openfreemap.org; worker-src 'self' blob:; child-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'wasm-unsafe-eval'; font-src 'self' data:; frame-ancestors 'none'"};
 /* answers bigger than a couple of kilobytes (the chat list, message history) go out compressed: several times less to download */
 function send(res,code,o){
   const h=Object.assign({'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','Vary':'Accept-Encoding'},SEC);let b=Buffer.from(JSON.stringify(o));
