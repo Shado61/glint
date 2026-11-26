@@ -199,7 +199,7 @@ async function mediaDelete(id){
   const m=DB.media[id];if(!m)return;delete DB.media[id];mark('x:'+id);
   try{if(pool)await pool.query('DELETE FROM glint_media WHERE k=$1',[id]);else fs.unlinkSync(path.join(MEDIA_DIR,id))}catch(e){}
 }
-const MEDIA_MAX={voice:6e6,round:15e6,video:45e6},MEDIA_TYPES=/^(video\/(mp4|webm|quicktime|x-matroska|3gpp)|audio\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav))(;.*)?$/;
+const MEDIA_MAX={voice:10e6,round:25e6,video:45e6},MEDIA_TYPES=/^(video\/(mp4|webm|quicktime|x-matroska|3gpp)|audio\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav))(;.*)?$/;
 const USER_QUOTA=800e6;
 async function mediaSave(id,buf){
   if(pool)await pool.query('INSERT INTO glint_media(k,b) VALUES($1,$2) ON CONFLICT(k) DO UPDATE SET b=EXCLUDED.b',[id,buf]);
@@ -1011,32 +1011,91 @@ function groomJoin(ws,u,c,kind,m){
   }
 }
 /* "Проверить" in settings: a test notification to every device of this account, with the answer of each push service */
-/* «ИИ» tab: free assistant. With GEMINI_API_KEY (free key from aistudio.google.com) it asks Google Gemini, otherwise a free public model */
-const AI_SYS='Ты — дружелюбный помощник внутри мессенджера Manasenger. Отвечай по-русски (или на языке вопроса), коротко и по делу.';
-API['POST /api/ai']=async(req,res,b,u)=>{
-  need(u);if(!limit('ai:'+u.id,20,60e3))throw E(429,'Слишком много вопросов, подождите минуту');
+/* «ИИ» tab: free assistant. With GEMINI_API_KEY (free key from aistudio.google.com) it asks Google Gemini
+   (with Google Search for fresh facts), otherwise a free public model. Answers come word by word (streaming). */
+function aiSys(u,tz){
+  let d;try{d=new Date().toLocaleString('ru-RU',{timeZone:/^[\w/+-]{1,40}$/.test(tz||'')?tz:'Asia/Almaty',dateStyle:'full',timeStyle:'short'})}catch(e){d=new Date().toISOString()}
+  return `Ты — умный и дружелюбный ИИ-помощник внутри мессенджера Manasenger. Сейчас ${d}. Собеседника зовут ${(u&&u.name)||'пользователь'}.
+Правила:
+- Отвечай на языке вопроса (обычно по-русски), живо и по делу. Простой вопрос — короткий ответ, сложный — подробно и по шагам.
+- Используй Markdown: **жирный** для главного, списки, заголовки ###, блоки кода \`\`\` для кода. Без таблиц на всю ширину — экран телефона узкий.
+- Если не уверен в факте — так и скажи, не выдумывай. Для свежих новостей, цен, погоды, расписаний опирайся на поиск, если он есть.
+- Помогай с учёбой (объясняй решение, а не только ответ), текстами, переводом, кодом, идеями, советами.
+- Ты помнишь весь этот разговор и можешь продолжать мысль.`}
+function aiMsgsOf(b){
   const all=Array.isArray(b.msgs)?b.msgs:[],last=all[all.length-1]||{};
   const pic=typeof last.img==='string'&&last.img.length<1.9e6&&/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/.exec(last.img);
-  const msgs=all.slice(-12).map(m=>({r:m.r==='a'?'a':'u',t:String(m.t||'').slice(0,4000)})).filter((m,i,a)=>m.t||(pic&&i===a.length-1));
-  if(pic&&!msgs[msgs.length-1].t)msgs[msgs.length-1].t='Что на этом фото? Расскажи подробно.';
+  const msgs=all.slice(-24).map(m=>({r:m.r==='a'?'a':'u',t:String(m.t||'').slice(0,6000)})).filter((m,i,a)=>m.t||(pic&&i===a.length-1));
+  while(msgs.length&&msgs[0].r==='a')msgs.shift(); /* Gemini wants the talk to start with the person */
+  if(pic&&msgs.length&&!msgs[msgs.length-1].t)msgs[msgs.length-1].t='Что на этом фото? Расскажи подробно.';
   if(!msgs.length||msgs[msgs.length-1].r!=='u')throw E(400,'Пустой вопрос');
+  return {msgs,pic};
+}
+/* stops a request after a minute, or earlier when the person pressed «stop» (works on older Node too) */
+function aiSig(sig){const t=AbortSignal.timeout(60000);if(!sig)return t;if(AbortSignal.any)return AbortSignal.any([sig,t]);const c=new AbortController(),f=()=>c.abort();sig.addEventListener('abort',f);t.addEventListener('abort',f);return c.signal}
+/* reads a "data: …" event stream line by line */
+async function* sseLines(body){
+  const dec=new TextDecoder();let buf='';
+  for await(const ch of body){buf+=dec.decode(ch,{stream:true});let i;
+    while((i=buf.indexOf('\n'))>=0){const l=buf.slice(0,i).trim();buf=buf.slice(i+1);if(l.startsWith('data:'))yield l.slice(5).trim()}}
+  if(buf.trim().startsWith('data:'))yield buf.trim().slice(5).trim();
+}
+/* asks the models one after another; onText gets every new piece of the answer. Returns who answered */
+async function aiAsk(u,b,onText,signal){
+  const {msgs,pic}=aiMsgsOf(b),sys=aiSys(u,b.tz);let got=false;
+  const emit=t=>{if(t){got=true;onText(t)}};
   const key=process.env.GEMINI_API_KEY;
   if(key){
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+(process.env.GEMINI_MODEL||'gemini-2.5-flash')+':generateContent',{method:'POST',
-      headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(40000),
-      body:JSON.stringify({systemInstruction:{parts:[{text:AI_SYS}]},contents:msgs.map((m,i)=>({role:m.r==='a'?'model':'user',parts:(pic&&i===msgs.length-1?[{inlineData:{mimeType:pic[1],data:pic[2]}}]:[]).concat([{text:m.t}])}))})}).catch(()=>null);
-    const j=r&&await r.json().catch(()=>null);
-    const t=j&&j.candidates&&j.candidates[0]&&j.candidates[0].content&&(j.candidates[0].content.parts||[]).map(x=>x.text||'').join('');
-    if(t)return {t,by:'Gemini'};
-    if(!r||r.status!==429)console.log('Gemini:',r&&r.status,j&&j.error&&j.error.message);
+    const models=[...new Set([process.env.GEMINI_MODEL||'gemini-2.5-flash','gemini-2.5-flash','gemini-2.0-flash','gemini-2.5-flash-lite'])];
+    const contents=msgs.map((m,i)=>({role:m.r==='a'?'model':'user',parts:(pic&&i===msgs.length-1?[{inlineData:{mimeType:pic[1],data:pic[2]}}]:[]).concat([{text:m.t}])}));
+    for(const model of models){
+      for(const search of [true,false]){
+        if(signal&&signal.aborted)return 'stop';
+        const body={systemInstruction:{parts:[{text:sys}]},contents,generationConfig:{temperature:.8,maxOutputTokens:4096}};
+        if(search)body.tools=[{google_search:{}}];
+        if(/2\.5/.test(model))body.generationConfig.thinkingConfig={thinkingBudget:/lite/.test(model)?0:512};
+        const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+model+':streamGenerateContent?alt=sse',{method:'POST',
+          headers:{'Content-Type':'application/json','x-goog-api-key':key},signal:aiSig(signal),body:JSON.stringify(body)}).catch(()=>null);
+        if(!r||!r.ok){const j=r&&await r.json().catch(()=>null);if(r&&r.status!==429)console.log('Gemini',model,search?'+search':'',r.status,j&&j.error&&j.error.message);
+          if(r&&r.status===400&&search)continue; /* this model can't search: ask it without search */
+          break} /* busy or no such model: the next one */
+        try{for await(const d of sseLines(r.body)){let j;try{j=JSON.parse(d)}catch(e){continue}
+          const c=j.candidates&&j.candidates[0];emit(c&&c.content&&(c.content.parts||[]).filter(x=>!x.thought).map(x=>x.text||'').join(''))}}catch(e){if(signal&&signal.aborted)return 'stop'}
+        if(got)return 'Gemini';
+        break;
+      }
+    }
   }
-  const r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},signal:AbortSignal.timeout(40000),
-    body:JSON.stringify({model:'openai',messages:[{role:'system',content:AI_SYS}].concat(msgs.map((m,i)=>({role:m.r==='a'?'assistant':'user',content:pic&&i===msgs.length-1?[{type:'text',text:m.t},{type:'image_url',image_url:{url:pic[0]}}]:m.t})))})}).catch(()=>null);
-  const j=r&&await r.json().catch(()=>null);
-  const t=j&&j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content;
-  if(t)return {t:String(t),by:'free'};
+  /* free model, no key needed */
+  const r=await fetch('https://text.pollinations.ai/openai',{method:'POST',headers:{'Content-Type':'application/json'},signal:aiSig(signal),
+    body:JSON.stringify({model:'openai',stream:true,messages:[{role:'system',content:sys}].concat(msgs.map((m,i)=>({role:m.r==='a'?'assistant':'user',content:pic&&i===msgs.length-1?[{type:'text',text:m.t},{type:'image_url',image_url:{url:pic[0]}}]:m.t})))})}).catch(()=>null);
+  if(r&&r.ok){
+    if(/event-stream/.test(r.headers.get('content-type')||'')){
+      try{for await(const d of sseLines(r.body)){if(d==='[DONE]')break;let j;try{j=JSON.parse(d)}catch(e){continue}
+        const c=j.choices&&j.choices[0];emit(c&&c.delta&&typeof c.delta.content==='string'?c.delta.content:'')}}catch(e){if(signal&&signal.aborted)return 'stop'}
+    }else{const j=await r.json().catch(()=>null);emit(j&&j.choices&&j.choices[0]&&j.choices[0].message&&String(j.choices[0].message.content||''))}
+    if(got)return 'free';
+  }
+  if(signal&&signal.aborted)return 'stop';
   throw E(503,'ИИ сейчас не отвечает. Попробуйте ещё раз через минуту');
+}
+API['POST /api/ai']=async(req,res,b,u)=>{
+  need(u);if(!limit('ai:'+u.id,20,60e3))throw E(429,'Слишком много вопросов, подождите минуту');
+  let t='';const by=await aiAsk(u,b,x=>{t+=x});return {t,by};
 };
+/* the same, but the answer is sent piece by piece as it is written: one JSON per line */
+async function aiStream(req,res,u){
+  if(!u)return send(res,401,{error:'Войди в аккаунт'});
+  if(!sameOrigin(req))return send(res,403,{error:'запрос с чужого сайта'});
+  if(!limit('ai:'+u.id,20,60e3))return send(res,429,{error:'Слишком много вопросов, подождите минуту'});
+  let b;try{b=await body(req);aiMsgsOf(b)}catch(e){return send(res,e.code||400,{error:e.message})}
+  const ctl=new AbortController();res.on('close',()=>{if(!res.writableEnded)ctl.abort()});
+  res.writeHead(200,Object.assign({'Content-Type':'application/x-ndjson; charset=utf-8','Cache-Control':'no-store','X-Accel-Buffering':'no'},SEC));
+  const line=o=>{if(!res.destroyed)res.write(JSON.stringify(o)+'\n')};
+  try{const by=await aiAsk(u,b,t=>line({d:t}),ctl.signal);line({end:1,by})}
+  catch(e){line({error:e.code?e.message:'ИИ не ответил'});if(!e.code)console.error(e)}
+  res.end();
+}
 API['POST /api/push/test']=async(req,res,b,u)=>{
   need(u);if(!webpush)return {sent:0,error:'на сервере нет модуля уведомлений'};
   const subs=u.push||[];
@@ -1226,6 +1285,7 @@ const server=http.createServer(async(req,res)=>{
   try{
     const url=new URL(req.url,'http://x'),p=decodeURIComponent(url.pathname);
     if(p==='/api/upload'&&req.method==='POST')return upload(req,res,userOf(req),url);
+    if(p==='/api/ai/stream'&&req.method==='POST')return aiStream(req,res,userOf(req));
     if(p.startsWith('/api/')){
       const fn=API[req.method+' '+p];if(!fn)return send(res,404,{error:'нет такого запроса'});
       if(req.method!=='GET'&&!sameOrigin(req))return send(res,403,{error:'запрос с чужого сайта'});

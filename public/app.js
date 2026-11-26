@@ -34,6 +34,7 @@ const P={
   more:'<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   check:'<path d="M20 6 9 17l-5-5"/>',
   min:'<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>',
+  pip:'<rect x="2" y="4" width="20" height="16" rx="2"/><rect x="12" y="12" width="8" height="6" rx="1" fill="currentColor"/>',
   incall:'<path d="m16 3 5 5-5 5"/><path d="M21 8h-7"/>',
   outcall:'<path d="M17 21l-5-5 5-5"/><path d="M12 16h7"/>',
   plus:'<path d="M12 5v14M5 12h14"/>',
@@ -69,7 +70,7 @@ const TICK2='<svg viewBox="0 0 16 12" fill="none" stroke="currentColor" stroke-w
 const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',found:[],typing:{},reply:null,edit:null,calls:null,draft:{},servers:{},view:'home',win:{},
   packs:[],pk:null,stk:false,contacts:{},stars:new Set(),stories:[],tz:5};
 /* weak phones: lighter mode — no animations or glass, smaller camera picture, fewer messages on screen */
-const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=2)||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=2)||(navigator.connection&&navigator.connection.saveData);
+const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=(/Android/.test(navigator.userAgent)?3:2))||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=2)||(navigator.connection&&navigator.connection.saveData);
 const isLite=()=>{const v=store.get('lite','auto');return v==='on'||(v==='auto'&&!!LITE_AUTO)};
 document.documentElement.classList.toggle('lite',isLite());
 const WIN=isLite()?60:120; /* messages kept on screen at once; older ones appear on demand */
@@ -588,7 +589,7 @@ function msgHTML(c,m,prev,next){
   else if(m.media&&m.media.k==='round'){ /* video circle: no bubble, just the circle */
     const md=m.media,src=md.local||md.url,re3=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb rndb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:''}${fwd}
-      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="auto" disablepictureinpicture></video><svg class="rring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
+      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="" decoding="async">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="metadata" disablepictureinpicture></video><svg class="rring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
       <span class="rnd-t">${m.pending?`<i class="spin"></i>${md.progress||0}%`:clock(md.dur)}</span><span class="rnd-snd">${ic('vol')}</span></div>${meta}${re3}</div></div>`;
   }
   else if(m.call){
@@ -597,11 +598,11 @@ function msgHTML(c,m,prev,next){
       <span><b>${m.call.group?'Групповой':out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${m.call.group?(m.call.dur?durText(m.call.dur):'Никто не ответил'):miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
   }else{
     inner=(grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:'')+fwd+
-      (m.story?`<div class="story-ref"><img src="${esc(m.story.img)}" alt="" loading="lazy" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
+      (m.story?`<div class="story-ref"><img src="${esc(m.story.img)}" alt="" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
       (m.reply?`<button class="rq" data-act="jump" data-id="${esc(m.reply.id)}"><b>${esc(nm(S.users[m.reply.from]))}</b><span>${esc(m.reply.text)}</span></button>`:'')+
       (m.img?`<img class="pic" src="${esc(m.img)}" alt="Фото" data-act="zoom" loading="lazy" decoding="async">`:'')+
       (m.media&&m.media.k==='voice'?voiceHTML(m):'')+
-      (m.media&&m.media.k==='video'?`<button class="vidm ${m.pending?'up':''}" data-act="playvid" data-id="${m.id}" style="${m.media.w&&m.media.h?`aspect-ratio:${m.media.w}/${m.media.h}`:''}">${m.media.poster||m.media.posterLocal?`<img src="${esc(m.media.posterLocal||m.media.poster)}" alt="" loading="lazy">`:'<video src="'+esc(m.media.local||m.media.url)+'#t=0.5" preload="metadata" muted playsinline></video>'}
+      (m.media&&m.media.k==='video'?`<button class="vidm ${m.pending?'up':''}" data-act="playvid" data-id="${m.id}" style="${m.media.w&&m.media.h?`aspect-ratio:${m.media.w}/${m.media.h}`:''}">${m.media.poster||m.media.posterLocal?`<img src="${esc(m.media.posterLocal||m.media.poster)}" alt="" loading="lazy" decoding="async">`:'<video src="'+esc(m.media.local||m.media.url)+'#t=0.5" preload="metadata" muted playsinline></video>'}
         <span class="vid-play">${m.pending?`<i class="spin"></i>`:'▶'}</span><span class="vid-t">${m.pending?(m.media.progress||0)+'%':clock(m.media.dur)}</span></button>`:'')+
       (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
   }
@@ -749,12 +750,85 @@ function liveMedia(L){const ms=navigator.mediaSession;if(!ms)return;
     set('hangup',liveHangup);
     set('togglemicrophone',()=>{if(CALL)toggleMic();else if(GC)gcMic();else if(VC)voiceMute()});
     set('togglecamera',()=>{if(CALL)toggleCam();else if(GC)gcCam()});
-    if(L.video)set('enterpictureinpicture',livePip);
+    set('enterpictureinpicture',livePip);
     try{ms.setMicrophoneActive&&ms.setMicrophoneActive(!!L.mic);ms.setCameraActive&&ms.setCameraActive(!!L.cam)}catch(e){}}catch(e){}}
 function liveHangup(){if(CALL)hangup();else if(GC)gcLeave();else if(VC)voiceLeave()}
-/* a video call shrinks into a small window over other apps when you leave Manasenger (where the phone allows it) */
-async function livePip(){try{if(document.pictureInPictureElement)return;const v=[...document.querySelectorAll('#callEl video,.gcall video')].find(x=>x.srcObject&&x.videoWidth&&!x.muted)||[...document.querySelectorAll('#callEl video,.gcall video')].find(x=>x.srcObject&&x.videoWidth);
-  if(v&&v.requestPictureInPicture)await v.requestPictureInPicture()}catch(e){}}
+/* ================= the call in its own small window, on top of other apps =================
+   Computer (Chrome / Edge / the Manasenger app): a real mini window with the picture and buttons — mic, camera, hang up.
+   Phone: a floating picture-in-picture window. For a voice call it shows the person, the time and the mic.
+   It opens with the «Окно поверх» button and by itself when you leave Manasenger (where the phone allows it). */
+const POP={win:null,card:null,cv:null,timer:0};
+function popInfo(){
+  if(CALL){const p=CALL.peer||{};return {name:nm(p),user:p,t0:CALL.started,mic:CALL.mic,cam:CALL.cam,stream:CALL.rs&&(CALL.rs.cam||CALL.rs.screen)?CALL.remote:null}}
+  if(GC){const c=S.chats[GC.chat];let st=null,u=null;GC.peers.forEach((p,id)=>{if(!st&&p.stream&&p.stream.getVideoTracks().some(x=>x.readyState==='live'&&!x.muted)){st=p.stream;u=S.users[id]}});
+    return {name:c?chatName(c):'Звонок',user:u||(c&&c.type==='dm'?peerOf(c):{name:c?chatName(c):'?',color:c&&c.color,avatar:c&&c.avatar}),t0:GC.t0,mic:GC.mic,cam:GC.cam,stream:st}}
+  if(VC){const ch=S.chats[VC.cid],g=S.servers[VC.sid]||{};return {name:'🔊 '+((ch&&ch.name)||'Голосовой чат'),user:{name:g.name||'#',color:g.color,avatar:g.avatar},t0:VC.t0,mic:!VC.mute,cam:false,stream:null}}
+  return null}
+const popClock=t0=>{if(!t0)return 'соединение…';const s=Math.floor((Date.now()-t0)/1000);return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`};
+/* a live picture of a voice call (avatar, name, time) for the phone's floating window */
+function popCard(){
+  if(POP.card)return POP.card;
+  const cv=document.createElement('canvas');cv.width=480;cv.height=270;const x=cv.getContext('2d'),img=new Image();let imgSrc='';
+  const draw=()=>{const I=popInfo();if(!I)return;const u=I.user||{};
+    if(u.avatar&&imgSrc!==u.avatar){imgSrc=u.avatar;img.src=u.avatar}
+    const g=x.createLinearGradient(0,0,0,270);g.addColorStop(0,'#3b4a63');g.addColorStop(1,'#151a22');x.fillStyle=g;x.fillRect(0,0,480,270);
+    x.save();x.beginPath();x.arc(240,98,56,0,Math.PI*2);x.closePath();
+    if(img.complete&&img.naturalWidth&&imgSrc){x.clip();x.drawImage(img,184,42,112,112)}else{x.fillStyle=u.color||'#5b8cff';x.fill();x.fillStyle='#fff';x.font='bold 44px system-ui,sans-serif';x.textAlign='center';x.textBaseline='middle';x.fillText(initials(nm(u)||I.name),240,100)}
+    x.restore();
+    x.fillStyle='#fff';x.font='600 26px system-ui,sans-serif';x.textAlign='center';x.textBaseline='alphabetic';
+    let n=I.name;while(x.measureText(n).width>440&&n.length>3)n=n.slice(0,-2);if(n!==I.name)n+='…';x.fillText(n,240,198);
+    x.fillStyle='rgba(255,255,255,.75)';x.font='22px system-ui,sans-serif';x.fillText((I.mic?'🎙 ':'🔇 ')+popClock(I.t0),240,234)};
+  draw();
+  const v=document.createElement('video');v.muted=true;v.playsInline=true;v.autoplay=true;v.setAttribute('playsinline','');
+  v.srcObject=cv.captureStream?cv.captureStream(2):null;v.style.cssText='position:fixed;width:2px;height:2px;opacity:0;pointer-events:none;left:0;top:0';document.body.appendChild(v);
+  POP.card={v,draw};POP.timer=setInterval(()=>{if(!popInfo())return popClose();draw()},500);
+  return POP.card}
+async function callPop(auto){
+  const I=popInfo();if(!I)return;
+  /* computers: a real mini window with buttons */
+  if(window.documentPictureInPicture&&!touch){
+    if(POP.win&&!POP.win.closed){if(!auto)POP.win.focus();return}
+    try{const w=await documentPictureInPicture.requestWindow({width:340,height:I.stream?240:200});POP.win=w;popFill(w);return}catch(e){if(auto)return}
+  }
+  /* phones: a floating window from a video */
+  try{if(document.pictureInPictureElement)return;
+    let v=null;
+    if(I.stream){v=[...document.querySelectorAll('#callEl video.remote,.gcall video')].find(x=>x.srcObject===I.stream&&x.videoWidth)}
+    if(!v){const c=popCard();v=c.v;await v.play().catch(()=>{});if(!v.videoWidth)await new Promise(k=>{v.onloadedmetadata=k;setTimeout(k,600)})}
+    if(v&&v.requestPictureInPicture){await v.requestPictureInPicture();v.addEventListener('leavepictureinpicture',()=>{if(POP.card&&v===POP.card.v)popCardStop()},{once:true})}
+    else if(!auto)toast('Это устройство не умеет показывать звонок в отдельном окне')}
+  catch(e){if(!auto)toast('Окно поверх других приложений недоступно: разрешите «Картинка в картинке» для браузера в настройках телефона',5000)}
+}
+function popCardStop(){clearInterval(POP.timer);if(POP.card){try{POP.card.v.srcObject&&POP.card.v.srcObject.getTracks().forEach(t=>t.stop())}catch(e){}POP.card.v.remove()}POP.card=null}
+function popClose(){popCardStop();if(POP.win&&!POP.win.closed)POP.win.close();POP.win=null;if(document.pictureInPictureElement)document.exitPictureInPicture().catch(()=>{})}
+/* fills the computer mini window: picture (or avatar), name, time, buttons */
+function popFill(w){
+  const d=w.document;d.title='Manasenger · звонок';
+  const st=d.createElement('style');st.textContent=`*{box-sizing:border-box;margin:0}body{font:14px system-ui,-apple-system,Segoe UI,sans-serif;background:#151a22;color:#fff;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+  .v{flex:1;min-height:0;position:relative;display:grid;place-items:center;background:linear-gradient(#3b4a63,#151a22)}video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+  .av{width:72px;height:72px;border-radius:50%;display:grid;place-items:center;font-size:28px;font-weight:700;background:#5b8cff;background-size:cover;background-position:center}
+  .inf{position:absolute;left:8px;top:8px;right:8px;display:flex;gap:6px;align-items:center;font-weight:600;text-shadow:0 1px 3px #000}.inf small{opacity:.8;font-weight:400}
+  .bar{display:flex;justify-content:center;gap:10px;padding:8px;background:#0d1016}button{width:44px;height:44px;border-radius:50%;border:0;background:#2b3240;color:#fff;cursor:pointer;display:grid;place-items:center}
+  button.off{background:#fff;color:#111}button.end{background:#ff3b4f}button svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}`;
+  d.head.appendChild(st);
+  d.body.innerHTML=`<div class="v"><video autoplay playsinline muted></video><div class="av"></div><div class="inf"><span class="nm"></span><small class="tm"></small></div></div><div class="bar"><button data-a="mic"></button><button data-a="cam"></button><button data-a="back" title="Вернуться в Manasenger"><svg viewBox="0 0 24 24">${P.min}</svg></button><button data-a="end" class="end" title="Завершить"><svg viewBox="0 0 24 24">${P.end}</svg></button></div>`;
+  const vid=d.querySelector('video'),av=d.querySelector('.av');
+  const upd=()=>{const I=popInfo();if(!I){w.close();return}
+    const s=I.stream;if(vid.srcObject!==s){vid.srcObject=s;if(s)vid.play().catch(()=>{})}vid.style.display=s?'':'none';av.style.display=s?'none':'';
+    const u=I.user||{};av.style.background=u.avatar?`center/cover url("${u.avatar}")`:(u.color||'#5b8cff');av.textContent=u.avatar?'':initials(nm(u)||I.name);
+    d.querySelector('.nm').textContent=I.name;d.querySelector('.tm').textContent=popClock(I.t0);
+    const m=d.querySelector('[data-a=mic]'),c=d.querySelector('[data-a=cam]');
+    m.className=I.mic?'':'off';m.innerHTML=`<svg viewBox="0 0 24 24">${P[I.mic?'mic':'micOff']}</svg>`;m.title=I.mic?'Выключить микрофон':'Включить микрофон';
+    c.style.display=VC?'none':'';c.className=I.cam?'':'off';c.innerHTML=`<svg viewBox="0 0 24 24">${P[I.cam?'video':'videoOff']}</svg>`};
+  d.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const a=b.dataset.a;
+    if(a==='mic'){if(CALL)toggleMic();else if(GC)gcMic();else if(VC)voiceMute()}
+    else if(a==='cam'){if(CALL)toggleCam();else if(GC)gcCam()}
+    else if(a==='end'){liveHangup();w.close()}
+    else if(a==='back'){window.focus();w.close()}
+    setTimeout(upd,150)});
+  upd();const t=setInterval(upd,1000);w.addEventListener('pagehide',()=>{clearInterval(t);if(POP.win===w)POP.win=null});
+}
+const livePip=()=>callPop(true);
 async function liveWake(on){try{if(on&&!LIVE.wl&&'wakeLock' in navigator&&!document.hidden){LIVE.wl=await navigator.wakeLock.request('screen');LIVE.wl.addEventListener('release',()=>{LIVE.wl=null})}
   else if(!on&&LIVE.wl){LIVE.wl.release();LIVE.wl=null}}catch(e){}}
 /* the camera is switched off by the phone while the app is in the background; bring it back */
@@ -763,10 +837,10 @@ async function liveCamBack(){
       const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:CALL.facing||'user'}});const nt=st.getVideoTracks()[0];
       if(t){CALL.local.removeTrack(t)}CALL.local.addTrack(nt);if(CALL.fx&&CALL.fx.setSource)CALL.fx.setSource(nt);pushVideo()}}}catch(e){}}
 function liveTick(){const L=liveNow(),k=L?L.k+'|'+L.mic+'|'+L.cam:'';
-  if(k!==LIVE.k){const changedCall=(LIVE.k.split('|')[0])!==(L?L.k:'');LIVE.k=k;if(changedCall)liveNotify(L);liveMedia(L);liveWake(!!L)}}
+  if(k!==LIVE.k){const changedCall=(LIVE.k.split('|')[0])!==(L?L.k:'');LIVE.k=k;if(changedCall)liveNotify(L);liveMedia(L);liveWake(!!L);if(!L)popClose()}}
 setInterval(liveTick,1000);
 document.addEventListener('visibilitychange',()=>{const L=liveNow();if(!L)return;
-  if(document.hidden){if(L.video)livePip()}else{liveWake(true);liveCamBack();if(document.pictureInPictureElement)document.exitPictureInPicture().catch(()=>{})}});
+  if(document.hidden){livePip()}else{liveWake(true);liveCamBack();if(document.pictureInPictureElement)document.exitPictureInPicture().catch(()=>{})}});
 /* ================= friends map (like 2GIS): friends who added each other see where the other one is ================= */
 const MAP_STYLES={liberty:['Обычная','https://tiles.openfreemap.org/styles/liberty'],bright:['Яркая','https://tiles.openfreemap.org/styles/bright'],positron:['Светлая','https://tiles.openfreemap.org/styles/positron']};
 let MAPD={sharing:false,friends:[]},MAP=null,MAPV=null,MK=new Map(),MEMK=null,mapSel=null;
@@ -1091,29 +1165,61 @@ function shareSheet(){sheet(`<h2>Делиться геопозицией?</h2>
   <p class="hint">Вашу геопозицию увидят <b>только друзья, которых вы добавили на карту</b> и которые согласились. Она обновляется каждые несколько секунд, пока вы двигаетесь${IN_APK_GEO()?', — даже с выключенным экраном (в шторке будет значок)':', пока Manasenger открыт'}. Выключить можно в любой момент этим же переключателем.</p>
   <div class="btns"><button class="gbtn primary" data-act="mapshareon">Включить</button><button class="gbtn" data-act="closemenu">Не сейчас</button></div>`)}
 /* «ИИ» tab: chat with a free assistant (Gemini when the server has a key) */
-let AI=null,AIbusy=false,AIimg=null;
+let AI=null,AIbusy=false,AIimg=null,AIctl=null;
 function aiList(){if(!AI){AI=store.get('ai',[]);if(!Array.isArray(AI))AI=[]}return AI}
+/* the answer is written in Markdown: bold, lists, headings, code — shown nicely (everything is escaped first) */
+function aiMd(t){
+  const parts=String(t||'').split(/```/);
+  return parts.map((p,i)=>{
+    if(i%2){const nl=p.indexOf('\n'),lang=nl>=0?p.slice(0,nl).trim():'',code=nl>=0?p.slice(nl+1):p;
+      return `<pre class="ai-code">${lang&&/^[\w+#.-]{1,20}$/.test(lang)?`<small>${esc(lang)}</small>`:''}<code>${esc(code.replace(/\n$/,''))}</code></pre>`}
+    return linkify(p)
+      .replace(/`([^`\n]+)`/g,'<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>').replace(/__([^_\n]+)__/g,'<b>$1</b>')
+      .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g,'$1<i>$2</i>')
+      .replace(/^#{1,6}\s+(.+)$/gm,'<b class="ai-h">$1</b>')
+      .replace(/^(\s*)[-*•]\s+/gm,'$1• ')
+      .replace(/^\s*(?:-{3,}|\*{3,})\s*$/gm,'<hr>')
+      .replace(/^&gt;\s?(.*)$/gm,'<span class="ai-q">$1</span>');
+  }).join('');
+}
 function aiMsgs(){const l=aiList();
-  return l.length?l.map(m=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?linkify(m.t):esc(m.t)}</div>`).join('')+(AIbusy?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
-    :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, идеями — бесплатно, прямо в Manasenger</small></div>`}
+  return l.length?l.map((m,i)=>`<div class="ai-m ${m.r==='a'?'a':'u'}">${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?aiMd(m.t)+(m.live?'<i class="ai-cur"></i>':''):esc(m.t)}</div>${m.r==='a'&&!m.live&&m.t?`<div class="ai-tools"><button data-act="aicopy" data-i="${i}">Копировать</button>${i===l.length-1&&!AIbusy?`<button data-act="airegen">Ответить заново</button>`:''}</div>`:''}`).join('')+(AIbusy&&!(l[l.length-1]||{}).live?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
+    :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, кодом, идеями, свежими новостями — бесплатно, прямо в Manasenger. Можно прикрепить фото.</small>
+      <div class="ai-sug">${['Объясни тему по физике простыми словами','Придумай подпись к фото','Переведи текст на английский','Составь план на неделю'].map(x=>`<button class="gbtn" data-act="aisug">${x}</button>`).join('')}</div></div>`}
 function aiHTML(){return `<div class="ai-box"><div class="ai-msgs" id="aimsgs">${aiMsgs()}</div>
-  ${AIimg?`<div class="ai-att"><img src="${AIimg}" alt=""><button class="x" data-act="aiunpic" aria-label="Убрать фото">${ic('x')}</button></div>`:''}<div class="ai-in glass"><button class="x" data-act="aipic" title="Фото" aria-label="Прикрепить фото">${ic('image')}</button><input type="file" id="aifile" accept="image/*" hidden><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="Отправить">${ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
+  ${AIimg?`<div class="ai-att"><img src="${AIimg}" alt=""><button class="x" data-act="aiunpic" aria-label="Убрать фото">${ic('x')}</button></div>`:''}<div class="ai-in glass"><button class="x" data-act="aipic" title="Фото" aria-label="Прикрепить фото">${ic('image')}</button><input type="file" id="aifile" accept="image/*" hidden><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="${AIbusy?'Остановить':'Отправить'}">${AIbusy?'<i class="ai-stop"></i>':ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
 /* shrinks a picture so it is quick to send (and small to keep on the phone) */
 function picScale(src,max,q){return new Promise(ok=>{const im=new Image();im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');
   c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',q))};im.onerror=()=>ok(null);im.src=src})}
 function aiFile(f){if(!f||!/^image\//.test(f.type))return;const u=URL.createObjectURL(f);
   picScale(u,1280,.82).then(d=>{URL.revokeObjectURL(u);if(!d)return toast('Не получилось открыть фото');AIimg=d;aiRe();const q=$('#aiq');q&&q.focus()})}
 function aiRe(){const o=$('#aiq'),v=o?o.value:'';renderSide();const q=$('#aiq');if(q&&v)q.value=v;aiDraw()}
-function aiDraw(){const b=$('#aimsgs');if(!b)return;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight}
-async function aiSend(){
-  const q=$('#aiq'),t=q?q.value.trim():'';if((!t&&!AIimg)||AIbusy)return;
-  const l=aiList(),m={r:'u',t};if(AIimg){m.img=AIimg;m.th=await picScale(AIimg,160,.6)}
-  l.push(m);AIimg=null;if(q)q.value='';AIbusy=true;renderSide();aiDraw();
+function aiDraw(live){const b=$('#aimsgs');if(!b)return;const sc=$('#list'),near=!live||!sc||sc.scrollHeight-sc.scrollTop-sc.clientHeight<140;b.innerHTML=aiMsgs();b.scrollTop=b.scrollHeight;if(near&&sc)sc.scrollTop=sc.scrollHeight}
+async function aiSend(again){
+  const q=$('#aiq'),t=q?q.value.trim():'';if(AIbusy)return;
+  const l=aiList();
+  if(again){while(l.length&&l[l.length-1].r==='a')l.pop();if(!l.length)return}
+  else{if(!t&&!AIimg)return;const m={r:'u',t};if(AIimg){m.img=AIimg;m.th=await picScale(AIimg,160,.6)}l.push(m);AIimg=null;if(q)q.value=''}
+  AIbusy=true;renderSide();aiDraw();
   const send=l.map((x,i)=>i===l.length-1?{r:x.r,t:x.t,img:x.img}:{r:x.r,t:x.t||(x.th?'[фото]':'')});
-  try{const r=await api('/api/ai',{msgs:send});l.push({r:'a',t:r.t})}catch(e){toast(e.message||'ИИ не ответил')}
-  AIbusy=false;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l.map(x=>({r:x.r,t:x.t,th:x.th})));
-  if(S.tab==='ai'){if(!$('.ai-in .x'))renderSide();aiDraw()}
+  const body={msgs:send,tz:(()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone}catch(e){return ''}})()};
+  const a={r:'a',t:'',live:true};let raf=0;const paint=()=>{raf=0;aiDraw(true)};
+  AIctl=window.AbortController?new AbortController():null;
+  try{
+    const r=await fetch('/api/ai/stream',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:AIctl&&AIctl.signal});
+    if(!r.ok||!r.body){let j=null;try{j=await r.json()}catch(e){}
+      if(r.status===404||!r.body){const j2=await api('/api/ai',body);a.t=j2.t;l.push(a)}else throw new Error((j&&j.error)||'ИИ не ответил')}
+    else{l.push(a);const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+      for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+        while((i=buf.indexOf('\n'))>=0){const ln=buf.slice(0,i);buf=buf.slice(i+1);if(!ln)continue;let o;try{o=JSON.parse(ln)}catch(e){continue}
+          if(o.d){a.t+=o.d;if(!raf)raf=requestAnimationFrame(paint)}if(o.error)throw new Error(o.error)}}
+      if(!a.t)throw new Error('ИИ не ответил')}
+  }catch(e){if(e.name!=='AbortError'){toast(e.message||'ИИ не ответил');if(!a.t){const k=l.indexOf(a);if(k>=0)l.splice(k,1)}}}
+  delete a.live;AIbusy=false;AIctl=null;if(l.length>60)l.splice(0,l.length-60);store.set('ai',l.map(x=>({r:x.r,t:x.t,th:x.th})));
+  if(S.tab==='ai'){renderSide();aiDraw()}
 }
+function aiStop(){if(AIctl)AIctl.abort()}
 function linkifyOld(t){
   return esc(t).replace(/\bhttps?:\/\/[^\s<]+[^\s<.,:;"')\]!?]/g,u=>`<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
 }
@@ -1276,7 +1382,7 @@ const REC={
     if(CALL||VC){toast('Сначала заверши звонок');return}
     this.on=true;this.kind=kind;this.cancelled=false;this.locked=false;this.wave=[];
     try{
-      this.stream=await navigator.mediaDevices.getUserMedia(kind==='round'?{audio:AUDIO,video:{facingMode:'user',width:{ideal:480},height:{ideal:480},aspectRatio:{ideal:1},frameRate:{ideal:30,max:30}}}:{audio:AUDIO});
+      this.stream=await navigator.mediaDevices.getUserMedia(kind==='round'?{audio:AUDIO,video:isLite()?{facingMode:'user',width:{ideal:480},height:{ideal:480},aspectRatio:{ideal:1},frameRate:{ideal:30,max:30}}:{facingMode:'user',width:{ideal:720},height:{ideal:720},aspectRatio:{ideal:1},frameRate:{ideal:30,max:30},resizeMode:{ideal:'crop-and-scale'}}}:{audio:AUDIO});
     }catch(e){this.on=false;toast(e.name==='NotAllowedError'?'Нет доступа к '+(kind==='round'?'камере':'микрофону')+'. Разреши его в настройках браузера.':'Не удалось включить '+(kind==='round'?'камеру':'микрофон'));return}
     if(!this.on){this.stream.getTracks().forEach(t=>t.stop());return} /* released before the microphone was ready */
     let rec=this.stream;
@@ -1285,12 +1391,25 @@ const REC={
          the circle shape and the selfie mirror are done when it is shown */
       const v=this.v=document.createElement('video');v.muted=true;v.playsInline=true;v.setAttribute('playsinline','');v.autoplay=true;v.srcObject=this.stream;
       this.poster='';await v.play().catch(()=>{});
-      setTimeout(()=>{try{const w=v.videoWidth,h=v.videoHeight,m=Math.min(w,h);if(!m)return;const cv=document.createElement('canvas');cv.width=cv.height=240;const x=cv.getContext('2d');x.translate(240,0);x.scale(-1,1);x.drawImage(v,(w-m)/2,(h-m)/2,m,m,0,0,240,240);this.poster=cv.toDataURL('image/jpeg',.7)}catch(e){}},700);
+      setTimeout(()=>{try{const w=v.videoWidth,h=v.videoHeight,m=Math.min(w,h);if(!m)return;const cv=document.createElement('canvas');cv.width=cv.height=360;const x=cv.getContext('2d');x.translate(360,0);x.scale(-1,1);x.drawImage(v,(w-m)/2,(h-m)/2,m,m,0,0,360,360);this.poster=cv.toDataURL('image/jpeg',.7)}catch(e){}},700);
     }
     const a=ac();if(a){try{const src=a.createMediaStreamSource(this.stream),an=a.createAnalyser();an.fftSize=512;src.connect(an);const buf=new Uint8Array(256);
       this.meter=setInterval(()=>{an.getByteTimeDomainData(buf);let s=0;for(let i=0;i<buf.length;i++){const q=(buf[i]-128)/128;s+=q*q}this.wave.push(Math.min(31,Math.round(Math.sqrt(s/buf.length)*140)));const d=document.querySelector('.rec-dot');if(d)d.style.transform=`scale(${1+Math.min(.8,Math.sqrt(s/buf.length)*4)})`},100)}catch(e){}}
+    /* the sound goes through a small studio chain: rumble filter, compressor and a bit of gain —
+       the voice is louder, even and clear, without wind and hum (only when the audio engine is running) */
+    this.fx=null;
+    if(a&&a.state==='running'&&a.createMediaStreamDestination){try{
+      const src=a.createMediaStreamSource(this.stream),hp=a.createBiquadFilter(),pres=a.createBiquadFilter(),cmp=a.createDynamicsCompressor(),g=a.createGain(),dst=a.createMediaStreamDestination();
+      hp.type='highpass';hp.frequency.value=85;hp.Q.value=.7;
+      pres.type='peaking';pres.frequency.value=3200;pres.Q.value=.9;pres.gain.value=3; /* clearer speech */
+      cmp.threshold.value=-26;cmp.knee.value=10;cmp.ratio.value=3.5;cmp.attack.value=.004;cmp.release.value=.22;
+      g.gain.value=1.7;
+      src.connect(hp);hp.connect(pres);pres.connect(cmp);cmp.connect(g);g.connect(dst);
+      const at=dst.stream.getAudioTracks()[0];
+      if(at){rec=new MediaStream([at].concat(this.stream.getVideoTracks()));this.fx={src,dst}}
+    }catch(e){rec=this.stream;this.fx=null}}
     const mime=this.mime(kind);this.chunks=[];
-    try{this.mr=new MediaRecorder(rec,mime?{mimeType:mime,audioBitsPerSecond:kind==='voice'?32000:48000,videoBitsPerSecond:isLite()?350000:600000}:undefined)}catch(e){this.mr=new MediaRecorder(rec)}
+    try{this.mr=new MediaRecorder(rec,mime?{mimeType:mime,audioBitsPerSecond:kind==='voice'?64000:128000,videoBitsPerSecond:kind==='round'?(isLite()?900000:2000000):undefined}:undefined)}catch(e){try{this.mr=new MediaRecorder(this.stream,mime?{mimeType:mime}:undefined)}catch(e2){this.mr=new MediaRecorder(this.stream)}}
     this.mr.ondataavailable=e=>{if(e.data&&e.data.size)this.chunks.push(e.data)};
     this.mr.onstop=()=>this.done();
     this.mr.start(500);this.t0=Date.now();navigator.vibrate&&navigator.vibrate(15);
@@ -1306,6 +1425,7 @@ const REC={
     if(!this.on)return;this.cancelled=!send;this.on=false;clearInterval(this.tick);clearInterval(this.meter);cancelAnimationFrame(this.raf);
     try{this.mr&&this.mr.state!=='inactive'?this.mr.stop():this.done()}catch(e){this.done()}
     this.stream&&this.stream.getTracks().forEach(t=>t.stop());
+    if(this.fx){const fx=this.fx;this.fx=null;setTimeout(()=>{try{fx.src.disconnect();fx.dst.stream.getTracks().forEach(t=>t.stop())}catch(e){}},600)}
     const comp=document.querySelector('.composer');if(comp)comp.classList.remove('recording');const b=$('#recBar');if(b)b.remove();const r=$('#recRound');if(r)r.remove();
   },
   done(){
@@ -1672,7 +1792,7 @@ let CALL=null,ICE=null;
 let ICE_AT=0,ICE_RELAY=false;
 async function iceServers(){if(!ICE||Date.now()-ICE_AT>3*3600e3){try{const r=await api('/api/ice');ICE=r.iceServers;ICE_RELAY=!!r.relay;ICE_AT=Date.now()}catch(e){ICE=ICE||[{urls:'stun:stun.l.google.com:19302'}]}}return ICE}
 const AUDIO={echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:{ideal:1},sampleRate:{ideal:48000}};
-const camC=(facing)=>(isLite()||(touch&&GC&&GC.peers.size>2))?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}};
+const camC=(facing)=>(isLite()||(touch&&GC&&GC.peers.size>2))?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:(touch?{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}}:{facingMode:facing||'user',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30}});
 async function getMedia(video){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Браузер не даёт доступ к микрофону. Открой сайт по https.');
   let st;
@@ -1700,7 +1820,7 @@ function preferCodecs(tv){
   try{
     if(!tv.setCodecPreferences||!RTCRtpReceiver.getCapabilities)return;
     const cs=RTCRtpReceiver.getCapabilities('video').codecs;
-    const rank=c=>/H264/i.test(c.mimeType)?(isLite()||touch?0:1):/VP8/i.test(c.mimeType)?(isLite()||touch?1:0):/VP9|AV1/i.test(c.mimeType)?2:3;
+    const hw=isLite()||touch,rank=c=>/H264/i.test(c.mimeType)?(hw?0:2):/VP9/i.test(c.mimeType)?(hw?2:0):/VP8/i.test(c.mimeType)?1:/AV1/i.test(c.mimeType)?3:4;
     tv.setCodecPreferences(cs.slice().sort((a,b)=>rank(a)-rank(b)));
   }catch(e){}
 }
@@ -1761,14 +1881,21 @@ function restartIce(){
 /* video bitrate: HD when the network is good, lower when it is not */
 /* ---------- speaker: where the call sound goes (speakers, headphones…) and "loud" mode ----------
    Loud mode sends the other side's voice through a volume boost with a limiter, so it is louder but never crackles. */
-const SPK={loud:store.get('loud',false),sink:store.get('sink',''),ctx:null,nodes:new Map()};
+/* loud mode is on by default on Android and computers (iPhone plays calls through its own path, there it stays an option) */
+const SPK={loud:store.get('loud',!document.documentElement.classList.contains('ios')),sink:store.get('sink',''),ctx:null,nodes:new Map()};
 function callStreams(){const l=[];if(CALL&&CALL.remote)l.push(['c',CALL.remote,$('#ra')]);if(GC)GC.peers.forEach((p,id)=>{if(p.audio&&p.audio.srcObject)l.push(['g'+id,p.audio.srcObject,p.audio])});return l}
 function applySpeaker(){
   store.set('sink',SPK.sink);
   const list=callStreams();
   if(SPK.loud&&list.length&&(window.AudioContext||window.webkitAudioContext)){
     if(!SPK.ctx){const A=window.AudioContext||window.webkitAudioContext;SPK.ctx=new A({latencyHint:'interactive'});
-      SPK.gain=SPK.ctx.createGain();SPK.gain.gain.value=2.6;SPK.comp=SPK.ctx.createDynamicsCompressor();SPK.comp.threshold.value=-10;SPK.comp.ratio.value=12;SPK.gain.connect(SPK.comp);SPK.comp.connect(SPK.ctx.destination)}
+      /* voice → clarity (presence boost) → compressor (quiet words come up) → gain → limiter (loud, but never crackles) */
+      const c=SPK.ctx,eq=c.createBiquadFilter(),cmp=c.createDynamicsCompressor(),g=c.createGain(),lim=c.createDynamicsCompressor();
+      eq.type='peaking';eq.frequency.value=2600;eq.Q.value=.8;eq.gain.value=4;
+      cmp.threshold.value=-30;cmp.knee.value=8;cmp.ratio.value=4;cmp.attack.value=.003;cmp.release.value=.2;
+      g.gain.value=3.4;
+      lim.threshold.value=-1.5;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=.001;lim.release.value=.08;
+      eq.connect(cmp);cmp.connect(g);g.connect(lim);lim.connect(c.destination);SPK.gain=eq;SPK.comp=lim}
     SPK.ctx.resume().catch(()=>{});
     if(SPK.sink&&SPK.ctx.setSinkId)SPK.ctx.setSinkId(SPK.sink).catch(()=>{});
     for(const [k,st,el] of list){
@@ -1795,8 +1922,9 @@ function tuneSenders(){
   const sd=CALL.vv.sender,p=sd.getParameters();if(!p.encodings||!p.encodings.length)p.encodings=[{}];
   const bad=CALL.q==='bad',mid=CALL.q==='mid',lite=isLite();
   const e=p.encodings[0];
-  if(CALL.screen){e.maxBitrate=bad?800e3:2500e3;e.maxFramerate=bad?10:20;e.scaleResolutionDownBy=1}
-  else{e.maxBitrate=bad?300e3:mid?700e3:lite?900e3:1800e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2:1}
+  if(CALL.screen){e.maxBitrate=bad?1000e3:mid?2500e3:lite?2500e3:5000e3;e.maxFramerate=bad?12:mid?20:30;e.scaleResolutionDownBy=1}
+  else{e.maxBitrate=bad?350e3:mid?900e3:lite?1200e3:touch?2500e3:3500e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2:1}
+  e.priority='high';
   /* on a weak network keep the picture smooth (lower sharpness) instead of freezing */
   p.degradationPreference=CALL.screen?'maintain-resolution':bad?'maintain-framerate':'balanced';
   sd.setParameters(p).catch(()=>{});
@@ -1974,7 +2102,8 @@ function fxNoteHTML(){
   else if(cur&&cur.hint&&st.tab==='m')t=esc(cur.hint)+' 😉';
   return `<div class="fx-note ${t?'on':''}">${t}</div>`;
 }
-setInterval(()=>{const n=document.querySelector('.fx-note');if(n&&fxNoteFor)n.outerHTML=fxNoteHTML()},700);
+/* the hint under the masks: changed only when its text changes (no needless page work every 0.7 s) */
+setInterval(()=>{if(document.hidden||!fxNoteFor)return;const n=document.querySelector('.fx-note');if(!n)return;const h=fxNoteHTML();if(n.outerHTML!==h)n.outerHTML=h},700);
 function fxStripHTML(M,st,a){
   const it=(on,k,v,icon,n)=>`<button class="fx-it ${on?'on':''}" ${a}="fx" data-${k}="${v}">${icon}<small>${esc(n)}</small></button>`;
   let row;
@@ -2040,7 +2169,7 @@ async function captureScreen(){
   if(!canShare()){toast('На этом устройстве браузер не умеет показывать экран. Попробуйте с компьютера');return null}
   try{
     if(window.mnDesktop&&window.mnDesktop.sources){const id=await pickSource();if(!id)return null;window.mnDesktop.choose(id)}
-    const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:20,max:30},width:{max:1920},height:{max:1080}},audio:false,selfBrowserSurface:'exclude',surfaceSwitching:'include',preferCurrentTab:false});
+    const s=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:{ideal:30,max:30},width:{ideal:1920,max:2560},height:{ideal:1080,max:1440}},audio:false,selfBrowserSurface:'exclude',surfaceSwitching:'include',preferCurrentTab:false});
     const t=s.getVideoTracks()[0];if(t&&'contentHint' in t)t.contentHint='detail';
     return s;
   }catch(e){if(e.name!=='NotAllowedError'&&e.name!=='AbortError')toast('Демонстрация экрана недоступна');return null}
@@ -2088,6 +2217,7 @@ function renderCall(){
      btn('c-fx','mask',fxIsOn?'on':'','','Маски и фильтры')+
      (touch&&CALL.cam?btn('c-flip','flip','','','Сменить камеру'):'')+
      (canShare()?btn('c-screen','screen',CALL.screen?'on':'','',CALL.screen?'Остановить демонстрацию':'Демонстрация экрана'):'')+
+     (st==='active'?btn('c-pop','pip','','','Окно поверх других приложений'):'')+
      btn('c-min','min','','','Свернуть')+
      btn('c-end','end','end','','Завершить');
   /* keep the <video> elements alive between renders so the picture does not blink */
@@ -2229,7 +2359,7 @@ async function gcStart(chatId,kind){
 /* group calls: the upload is shared between everyone, so with more people each picture is lighter (no freezing) */
 function gcTune(){
   if(!GC)return;const n=Math.max(1,GC.peers.size),lite=isLite()||touch;
-  const total=GC.screen?(lite?1500e3:3000e3):(lite?1200e3:2500e3),per=Math.max(150e3,Math.min(GC.screen?2500e3:1200e3,total/n));
+  const total=GC.screen?(lite?2000e3:5000e3):(lite?1500e3:4000e3),per=Math.max(200e3,Math.min(GC.screen?4000e3:2000e3,total/n));
   GC.peers.forEach(p=>{
     if(p.vs){const q=p.vs.getParameters();if(!q.encodings||!q.encodings.length)q.encodings=[{}];const e=q.encodings[0];
       e.maxBitrate=per;e.maxFramerate=GC.screen?15:(n>3?20:24);e.scaleResolutionDownBy=GC.screen?1:(n>4?2:n>2?1.5:1);q.degradationPreference=GC.screen?'maintain-resolution':'maintain-framerate';p.vs.setParameters(q).catch(()=>{})}
@@ -2345,6 +2475,7 @@ function gcRender(){
     ${GC.cam&&touch?`<button class="cbtn" data-act="gc-flip" aria-label="Другая камера">${ic('flip')}</button>`:''}
     ${canScreen?`<button class="cbtn ${GC.screen?'on':''}" data-act="gc-screen" aria-label="Экран">${ic('screen')}</button>`:''}
     <button class="cbtn ${SPK.loud?'on':''}" data-act="c-spk" aria-label="Динамик">${ic('vol')}</button>
+    <button class="cbtn" data-act="c-pop" aria-label="Окно поверх" title="Окно поверх других приложений">${ic('pip')}</button>
     <button class="cbtn end" data-act="gc-end" aria-label="Выйти из звонка">${ic('end')}</button>`;
   el.querySelector('.gc-pill').innerHTML=`${ic('phone')}<span>${esc(gcName(GC.chat))} · ${ids.length}</span>`;
 }
@@ -2376,7 +2507,7 @@ async function voiceJoin(sid,cid){
   if(CALL){toast('Сначала заверши звонок');return}
   if(VC&&VC.cid===cid)return;
   if(VC)voiceLeave();
-  VC={sid,cid,state:'connecting',mute:false,deaf:false,peers:new Map(),speaking:new Set()};
+  VC={sid,cid,state:'connecting',mute:false,deaf:false,peers:new Map(),speaking:new Set(),t0:Date.now()};
   renderSide();
   try{VC.local=await navigator.mediaDevices.getUserMedia({audio:AUDIO})}
   catch(e){toast(e.name==='NotAllowedError'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Не удалось включить микрофон');VC=null;renderSide();return}
@@ -2607,7 +2738,7 @@ async function scStart(){
   if(!SC){SC&&0;return}
   const t=SC.stream.getVideoTracks()[0];
   if(SC.M){
-    SC.fx=new SC.M.FX(t,{mirror:SC.facing==='user',max:isLite()?960:1280,fps:isLite()?24:30});scApply();
+    SC.fx=new SC.M.FX(t,{mirror:SC.facing==='user',max:isLite()?960:1280,fps:isLite()?24:30,noStream:true});scApply();
     view.innerHTML='';SC.fx.cv.className='scam-canvas';view.appendChild(SC.fx.cv);
   }else{
     view.innerHTML='<video class="scam-canvas" autoplay playsinline muted></video>';const v=view.firstChild;v.srcObject=SC.stream;v.play().catch(()=>{});
@@ -3188,16 +3319,20 @@ document.addEventListener('click',async e=>{
     case 'spk-loud':SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();closeLayer();toast(SPK.loud?'🔊 Громкая связь: звук собеседника громче':'Обычная громкость');if(CALL)renderCall();if(GC)gcRender();break;
     case 'c-screen':toggleScreen();break;
     case 'c-min':CALL.min=true;renderCall();break;
+    case 'c-pop':callPop(false);break;
     case 'c-max':CALL.min=false;renderCall();break;
     case 'theme':store.set('theme',el.dataset.v);applyTheme();settingsSheet();break;
     case 'wall':store.set('wall',el.dataset.w);await IDB.del('wall:app');await applyAppWall();applyTheme();settingsSheet();break;
     case 'notif':if(Notification.permission==='granted')await pushTest();else await pushEnable();settingsSheet();break;
     case 'pushon':await pushEnable();break;
     case 'notifretry':closeLayer();await pushEnable();break;
-    case 'aisend':aiSend();break;
+    case 'aisend':AIbusy?aiStop():aiSend();break;
+    case 'airegen':aiSend(true);break;
+    case 'aisug':{const q=$('#aiq');if(q){q.value=el.textContent;aiSend()}break}
+    case 'aicopy':{const m=aiList()[+el.dataset.i];if(m&&navigator.clipboard)navigator.clipboard.writeText(m.t).then(()=>toast('Скопировано'),()=>{});break}
     case 'aipic':$('#aifile').click();break;
     case 'aiunpic':AIimg=null;aiRe();break;
-    case 'aiclear':AI=[];store.set('ai',[]);renderSide();break;
+    case 'aiclear':aiStop();AI=[];store.set('ai',[]);renderSide();break;
     case 'pushno':store.set('pushNo',Date.now());$('#pushask')&&$('#pushask').remove();break;
     case 'bubbles':S.bdraft=null;bubbleSheet();break;
     case 'bstyle':S.bdraft.s=el.dataset.v;bubbleSheet();break;

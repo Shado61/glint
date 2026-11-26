@@ -216,6 +216,32 @@ const MASKS=[
   {id:'thug',e:'🕶️',n:'Thug Life',m3:[{mdl:'glasses_thug',s:.108,t:[0,2.2,3.6],drop:true}]},
   {id:'clownhat',e:'🎪',n:'Колпак',m3:[{mdl:'clown_hat',s:4.3,t:[0,19.5,-2.5]}]},
   {id:'earrings',e:'💎',n:'Серьги',m3:[{mdl:'earring',s:.85,t:[8.1,-4.2,-1.8]},{mdl:'earring',s:.85,t:[-8.1,-4.2,-1.8]}]},
+  /* ---- TikTok / Snapchat beauty looks: smooth skin, bigger eyes, a finer nose and soft makeup ---- */
+  {id:'glow',e:'✨',n:'Бьюти',beauty:true,warp:'glow',hint:'Как в TikTok',
+    paint(x){for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.06,()=>{x.beginPath();x.ellipse(a,b-PS*.01,PS*.07,PS*.045,0,0,Math.PI*2)},'rgba(255,120,140,.28)')}
+      x.fillStyle='rgba(210,60,90,.32)';x.beginPath();R.lipsO.forEach((i,k)=>{const p=up(i);k?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])});x.closePath();x.fill();
+      soft(x,PS*.025,()=>{const [a,b]=up(6);x.beginPath();x.ellipse(a,b+PS*.04,PS*.012,PS*.08,0,0,Math.PI*2)},'rgba(255,255,255,.22)');
+      for(const i of [50,280]){const [a,b]=up(i);soft(x,PS*.03,()=>{x.beginPath();x.ellipse(a,b-PS*.03,PS*.035,PS*.018,0,0,Math.PI*2)},'rgba(255,250,240,.2)')}
+      holes(x,PS*.003)}},
+  {id:'glam2',e:'💋',n:'Гламур',beauty:true,warp:'glow',hint:'Моргни',
+    paint(x){
+      for(const e of [R.eyeR,R.eyeL]){soft(x,PS*.025,()=>polyP(x,grow(e,1.7)),'rgba(120,60,50,.38)');x.strokeStyle='rgba(15,10,12,.85)';x.lineWidth=PS*.006;x.beginPath();e.slice(8).concat([e[0]]).forEach((i,k)=>{const p=up(i);k?x.lineTo(p[0],p[1]-PS*.002):x.moveTo(p[0],p[1]-PS*.002)});x.stroke()}
+      for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.06,()=>{x.beginPath();x.ellipse(a+(i===205?-1:1)*PS*.02,b+PS*.01,PS*.06,PS*.03,i===205?.4:-.4,0,Math.PI*2)},'rgba(120,60,40,.22)')}
+      x.fillStyle='rgba(170,20,50,.6)';x.beginPath();R.lipsO.forEach((i,k)=>{const p=up(i);k?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])});x.closePath();x.fill();
+      soft(x,PS*.01,()=>{const [a,b]=up(14);x.beginPath();x.ellipse(a,b+PS*.012,PS*.02,PS*.006,0,0,Math.PI*2)},'rgba(255,255,255,.45)');
+      soft(x,PS*.025,()=>{const [a,b]=up(6);x.beginPath();x.ellipse(a,b+PS*.04,PS*.01,PS*.08,0,0,Math.PI*2)},'rgba(255,255,255,.28)');
+      holes(x,PS*.003)},
+    fx:{kind:'sparkle',from:'cheeks',on:b=>b[B.eyeBlinkLeft]>.5||b[B.eyeBlinkRight]>.5}},
+  {id:'gems',e:'💎',n:'Стразы',beauty:true,
+    paint(x){let seed=5;const rnd=()=>{seed=(seed*16807)%2147483647;return seed/2147483647};
+      for(const e of [R.eyeR,R.eyeL]){const lo=e.slice(0,9).map(up);lo.forEach((p,k)=>{if(k%2)return;const r=PS*(.007+rnd()*.006),cx=p[0],cy=p[1]+PS*.035+k*PS*.002;
+        const g=x.createRadialGradient(cx-r*.3,cy-r*.3,r*.1,cx,cy,r);g.addColorStop(0,'#fff');g.addColorStop(.5,['#9fe8ff','#ffb3f0','#d7c4ff'][k%3]);g.addColorStop(1,'rgba(120,120,200,.8)');x.fillStyle=g;x.beginPath();x.arc(cx,cy,r,0,Math.PI*2);x.fill()})}
+      for(const e of [R.eyeR,R.eyeL])soft(x,PS*.02,()=>polyP(x,grow(e,1.5)),'rgba(190,140,255,.25)');holes(x,PS*.003)},
+    fx:{kind:'sparkle',from:'eyes',on:()=>true,rate:4}},
+  {id:'butterflies',e:'🦋',n:'Бабочки',beauty:true,props:[{t:E('🦋'),at:[-6,9.5,1],w:4.5,h:4.5,r:.35},{t:E('🦋'),at:[5.5,11,0],w:3.6,h:3.6,r:-.3},{t:E('🦋'),at:[1,13,-.5],w:3,h:3,r:.1}],
+    fx:{kind:'butterfly',from:'head',on:()=>true,rate:2.5}},
+  {id:'sakura',e:'🌸',n:'Сакура',beauty:true,warp:'glow',paint(x){for(const i of [205,425]){const [a,b]=up(i);soft(x,PS*.05,()=>{x.beginPath();x.arc(a,b,PS*.05,0,Math.PI*2)},'rgba(255,140,170,.35)')}},
+    props:['🌸','🌸','🌷','🌸','🌸'].map((ch,i)=>({t:E(ch),at:[(i-2)*2.6+(i===2?0:.4),10.2-Math.pow(i-2,2)*.3,1-Math.abs(i-2)*.5],w:3.2,h:3.2})),fx:{kind:'petals',from:'screen',on:()=>true,rate:5}},
   /* ---- animals ---- */
   {id:'cat',e:'🐱',n:'Котик',
     paint(x){const [nx,ny]=up(4);x.fillStyle='#f08aa8';x.beginPath();x.moveTo(nx-PS*.03,ny-PS*.015);x.lineTo(nx+PS*.03,ny-PS*.015);x.lineTo(nx,ny+PS*.02);x.closePath();x.fill();
@@ -399,13 +425,17 @@ function Renderer(canvas){
   const mkTex=()=>{const t=gl.createTexture();gl.bindTexture(gl.TEXTURE_2D,t);for(const [k,v] of [[gl.TEXTURE_MIN_FILTER,gl.LINEAR],[gl.TEXTURE_MAG_FILTER,gl.LINEAR],[gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE],[gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE]])gl.texParameteri(gl.TEXTURE_2D,k,v);
     gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([0,0,0,0]));return t};
   const fbo=(w,h)=>{const t=mkTex();gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,w,h,0,gl.RGBA,gl.UNSIGNED_BYTE,null);const f=gl.createFramebuffer();gl.bindFramebuffer(gl.FRAMEBUFFER,f);gl.framebufferTexture2D(gl.FRAMEBUFFER,gl.COLOR_ATTACHMENT0,gl.TEXTURE_2D,t,0);gl.bindFramebuffer(gl.FRAMEBUFFER,null);return {t,f,w,h}};
-  const W=canvas.width,H=canvas.height;
+  let W=canvas.width,H=canvas.height;
   const T={vid:mkTex(),mask:mkTex(),bgi:mkTex()};const F={frame:fbo(W,H),small:fbo(Math.max(16,W>>3),Math.max(16,H>>3))};
   const texCache=new Map();
   const texOf=src=>{let t=texCache.get(src);if(t)return t;t=mkTex();gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,src);texCache.set(src,t);return t};
   function bindQuad(pr){gl.bindBuffer(gl.ARRAY_BUFFER,quad);gl.enableVertexAttribArray(pr.a.p);gl.vertexAttribPointer(pr.a.p,2,gl.FLOAT,false,0,0)}
   function unit(i,t,loc){gl.activeTexture(gl.TEXTURE0+i);gl.bindTexture(gl.TEXTURE_2D,t);gl.uniform1i(loc,i)}
   return {gl,W,H,
+    /* the camera turned (portrait ↔ landscape) or changed its size: new frame buffers of the right shape */
+    resize(w,h){if(w===W&&h===H)return;W=w;H=h;this.W=w;this.H=h;
+      for(const k of ['frame','small']){gl.deleteTexture(F[k].t);gl.deleteFramebuffer(F[k].f)}
+      F.frame=fbo(W,H);F.small=fbo(Math.max(16,W>>3),Math.max(16,H>>3))},
     video(src){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.vid);try{gl.texImage2D(gl.TEXTURE_2D,0,gl.RGB,gl.RGB,gl.UNSIGNED_BYTE,src);return true}catch(e){return false}},
     mask(m){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.mask);gl.pixelStorei(gl.UNPACK_ALIGNMENT,1);gl.texImage2D(gl.TEXTURE_2D,0,gl.LUMINANCE,m.w,m.h,0,gl.LUMINANCE,gl.UNSIGNED_BYTE,m.d);gl.pixelStorei(gl.UNPACK_ALIGNMENT,4)},
     bgImage(c){gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,T.bgi);gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,c)},
@@ -533,6 +563,7 @@ function warpPoints(kind,P){ /* P: pixel coordinates, changed in place */
   const fw=Math.hypot(P[454*2]-P[234*2],P[454*2+1]-P[234*2+1]);
   const eyes=k=>{for(const e of [R.eyeR,R.eyeL]){const c=avg(e);bulge(P,NV,c[0],c[1],fw*.24,k)}};
   if(kind==='bigeyes')eyes(.85);
+  else if(kind==='glow'){eyes(.32);const n=pt(4);bulge(P,NV,n[0],n[1],fw*.13,-.22);const m=avg(R.lipsO);bulge(P,NV,m[0],m[1],fw*.15,.08)}
   else if(kind==='baby'){eyes(.8);const n=pt(4);bulge(P,NV,n[0],n[1],fw*.15,-.3);const m=avg(R.lipsO);bulge(P,NV,m[0],m[1],fw*.17,-.28)}
   else if(kind==='hamster'){for(const i of [205,425]){const c=pt(i);bulge(P,NV,c[0],c[1],fw*.3,.55)}}
   else if(kind==='bignose'){const n=pt(4);bulge(P,NV,n[0],n[1],fw*.26,1.1)}
@@ -557,7 +588,9 @@ const PK={
   snow:{t:SP.dot,life:4,size:.035,speed:.25,fall:true,screen:true},
   rain:{t:()=>imgTex('drop.png'),life:1.1,size:.05,speed:1.5,spread:.1,fall:true},
   angry:{t:()=>E('💢')(),life:.8,size:.16,speed:.15,spread:2.4,up:true,grow:.4},
-  money:{t:()=>E('💸')(),life:3,size:.1,speed:.35,fall:true,screen:true,spin:true}
+  money:{t:()=>E('💸')(),life:3,size:.1,speed:.35,fall:true,screen:true,spin:true},
+  butterfly:{t:()=>E('🦋')(),life:2.6,size:.13,speed:.45,spread:2.6,up:true,wobble:true},
+  petals:{t:()=>E('🌸')(),life:3.5,size:.07,speed:.3,fall:true,screen:true,spin:true}
 };
 class Particles{
   constructor(){this.list=[];this.acc=0;this.rb=0}
@@ -612,7 +645,8 @@ class FX{
     this.r=Renderer(this.cv);
     if(!this.r)this.x2=this.cv.getContext('2d');
     this.fps=opts.fps||(LITE?20:30);
-    this.out=!this.still&&this.cv.captureStream?this.cv.captureStream(this.fps):null;
+    this.maxSide=maxSide;
+    this.out=!this.still&&!opts.noStream&&this.cv.captureStream?this.cv.captureStream(this.fps):null;
     this.sm=new Smooth(NV*2,LITE?1.2:1.6,8);this.face=null;this.parts=new Particles();this.last=performance.now();
     this.loop=this.loop.bind(this);
     if(!this.still){
@@ -641,11 +675,11 @@ class FX{
     const k=Math.min(1,(LITE?320:448)/Math.max(this.vw,this.vh)),w=Math.max(2,Math.round(this.vw*k)),h=Math.max(2,Math.round(this.vh*k));
     if(this.bg.id!=='none'&&!this.segging&&SG.w){this.segging=true;segment(this.v,w,h).then(r=>{this.segging=false;if(r&&r.mask&&this.alive)this.mask0=r.mask})}
     if(this.feeding||!this.needFace())return;
-    this.feeding=true;
+    this.feeding=true;const t0=performance.now();
     const r=await track(this.v,w,h);
     this.feeding=false;if(!this.alive||r===undefined)return;
     if(r&&r.lm){const t=performance.now(),xy=new Float32Array(NV*2);for(let i=0;i<NV;i++){xy[i*2]=r.lm[i*3];xy[i*2+1]=r.lm[i*3+1]}
-      const mat=r.mat?this.smoothMat(r.mat):null;this.face={xy:this.sm.run(xy,t),bs:r.bs,mat,t}}
+      const mat=r.mat?this.smoothMat(r.mat):null;this.lat=this.lat==null?t-t0:this.lat*.8+(t-t0)*.2;this.face={xy:this.sm.run(xy,t),dx:this.sm.dx,bs:r.bs,mat,t}}
     else if(r&&this.face&&performance.now()-this.face.t>350)this.face=null;
   }
   smoothMat(m){if(!this.mat||!this.face){this.mat=Float32Array.from(m);return this.mat}for(let i=0;i<16;i++)this.mat[i]+=(m[i]-this.mat[i])*.55;return this.mat}
@@ -654,9 +688,20 @@ class FX{
     if(this.v.requestVideoFrameCallback)this.v.requestVideoFrameCallback(this.loop);else this.timer=setTimeout(this.loop,1000/this.fps);
     this.tick();
   }
+  /* phones often say "1280×720" while the camera actually gives a portrait 720×1280 picture,
+     and the picture turns when the phone turns: the canvas always takes the real shape, so nothing is stretched */
+  fit(){
+    const vw=this.v.videoWidth,vh=this.v.videoHeight;if(!vw||!vh)return;
+    if(vw===this.vw&&vh===this.vh&&this.fitted)return;this.fitted=true;
+    const W=this.cv.width,H=this.cv.height;this.vw=vw;this.vh=vh;
+    if(Math.abs(vw/vh-W/H)<.01&&Math.max(W,H)>=Math.min(this.maxSide,Math.max(vw,vh))*.98)return;
+    const k=Math.min(1,this.maxSide/Math.max(vw,vh)),w=Math.round(vw*k)&~1,h=Math.round(vh*k)&~1;
+    this.cv.width=w;this.cv.height=h;if(this.r)this.r.resize(w,h);this.bgDrawn=false;this.mask0=null;
+  }
   tick(){
     const now=performance.now(),dt=Math.min(.1,(now-this.last)/1000);this.last=now;
     if(this.v.readyState<2)return;
+    if(!this.still)this.fit();
     this.feed();this.draw(dt);
   }
   draw(dt){
@@ -673,9 +718,12 @@ class FX{
     r.out(mir);
     const f=this.face,m=this.mask;
     if(f){
-      const P=new Float32Array(NV*2);for(let i=0;i<NV*2;i+=2){P[i]=f.xy[i]*W;P[i+1]=f.xy[i+1]*H}
+      /* the tracker answers a few frames late: the points are moved ahead along the face's own motion,
+         so masks stay glued to the face even when you turn quickly (like in Snapchat) */
+      const ahead=this.still?0:Math.min(.07,((this.lat||0)+performance.now()-f.t)/1000),tc=new Float32Array(NV*2);
+      for(let i=0;i<NV*2;i++){const d=f.dx?f.dx[i]*ahead:0;tc[i]=f.xy[i]+(d>.03?.03:d<-.03?-.03:d)}
+      const P=new Float32Array(NV*2);for(let i=0;i<NV*2;i+=2){P[i]=tc[i]*W;P[i+1]=tc[i+1]*H}
       const fw=Math.hypot(P[454*2]-P[234*2],P[454*2+1]-P[234*2+1]);
-      const tc=f.xy.slice(0,NV*2);
       if(m.warp){const Q=P.slice();warpPoints(m.warp,Q);for(let i=0;i<NV*2;i+=2){Q[i]/=W;Q[i+1]/=H}r.mesh('warp',Q,tc,mir)}
       if(this.beauty||m.beauty)r.mesh('beauty',tc,tc,mir,null,beautyMask());
       const pc=paintOf(m);if(pc)r.mesh('paint',tc,tc,mir,pc);

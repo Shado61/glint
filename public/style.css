@@ -928,6 +928,14 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 :root.light .ai-m.a{background:rgba(0,0,0,.06)}
 .ai-m.dots{display:flex;gap:4px}.ai-m.dots i{width:7px;height:7px;border-radius:50%;background:currentColor;opacity:.4;animation:aid 1s infinite}.ai-m.dots i:nth-child(2){animation-delay:.15s}.ai-m.dots i:nth-child(3){animation-delay:.3s}
 @keyframes aid{50%{opacity:1;transform:translateY(-3px)}}
+.ai-m.a{white-space:pre-wrap}.ai-m code{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;background:rgba(127,127,127,.18);padding:1px 5px;border-radius:6px}
+.ai-code{white-space:pre;overflow-x:auto;margin:6px 0;padding:10px 12px;border-radius:12px;background:rgba(0,0,0,.28);-webkit-overflow-scrolling:touch}.ai-code code{background:none;padding:0}.ai-code small{display:block;font-size:11px;opacity:.55;margin-bottom:4px}
+:root.light .ai-code{background:rgba(0,0,0,.07)}
+.ai-h{display:inline-block;font-size:15.5px;margin-top:4px}.ai-q{display:inline-block;border-left:3px solid var(--acc,#5b8cff);padding-left:8px;opacity:.85}.ai-m hr{border:0;border-top:1px solid rgba(127,127,127,.3);margin:6px 0}
+.ai-cur{display:inline-block;width:7px;height:15px;margin-left:2px;vertical-align:-2px;border-radius:2px;background:currentColor;opacity:.6;animation:aicur .8s steps(2) infinite}@keyframes aicur{50%{opacity:0}}
+.ai-tools{display:flex;gap:4px;margin:-4px 0 2px 6px}.ai-tools button{font-size:12px;color:var(--fg3);padding:3px 8px;border-radius:10px}.ai-tools button:active{background:rgba(127,127,127,.15)}
+.ai-stop{display:block;width:12px;height:12px;border-radius:3px;background:currentColor}
+.ai-sug{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-top:10px}.ai-sug .gbtn{font-size:13px;padding:7px 12px}
 .ai-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:40px 20px;color:var(--fg2)}.ai-empty small{color:var(--fg3)}
 .ai-in{position:absolute;left:10px;right:10px;max-width:520px;margin:0 auto;bottom:calc(84px + var(--safe-b));display:flex;align-items:flex-end;gap:6px;padding:6px 6px 6px 14px;border-radius:24px;z-index:6}
 .ai-in textarea{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--fg);font:inherit;font-size:15px;resize:none;max-height:120px;padding:8px 0}
@@ -1253,3 +1261,13 @@ textarea#admann{width:100%;resize:vertical;min-height:56px;font:inherit}
 .tr-row .bus-n,.tr-line .bus-n{flex:none;margin:0;min-width:58px;text-align:center}
 .tr-row .mid{flex:1;min-width:0}.tr-row b{display:block;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.tr-row small{display:block;font-size:12px;color:var(--fg2)}
 .tr-line{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:13px;flex-wrap:wrap}.tr-line span{flex:1;min-width:120px}.tr-line .gbtn{flex:none}
+
+/* ================= speed on phones =================
+   messages and rows far off screen are not drawn at all until you scroll to them;
+   the background blobs don't hold GPU memory where they don't move */
+@media (max-width:760px),(pointer:coarse){
+  .wall i{will-change:auto}
+  .msgs>.m{content-visibility:auto;contain-intrinsic-size:auto 64px}
+  .list>.row,.list .row.chat{content-visibility:auto;contain-intrinsic-size:auto 68px}
+}
+.ai-m{contain:content}
