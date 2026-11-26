@@ -900,7 +900,7 @@ body{background:#18191c}:root.light body{background:#dcdee2}
 /* blocking, admin, group & server photos */
 .blk-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 8px 8px 16px;pointer-events:auto;font-size:14px}
 .rbtn .srv-img,.join-card .rbtn .srv-img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block}
-.rbtn{overflow:hidden}
+.rbtn .srv-img{overflow:hidden}
 .adm-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:6px 0 10px}
 .adm-stats div{padding:10px;border-radius:14px;background:rgba(127,127,127,.12);text-align:center;display:flex;flex-direction:column}.adm-stats b{font-size:22px}.adm-stats small{color:var(--fg3);font-size:12px}
 .adm-list{margin-top:8px;max-height:min(55vh,520px);overflow-y:auto}
@@ -1077,3 +1077,14 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
   #side .list{padding-bottom:calc(76px + var(--cb))}
   .toast{bottom:calc(84px + var(--cb))}
 }
+
+/* ---------- phones: the message bar is a full-width bar at the very bottom, like the tab bar ---------- */
+@media (max-width:760px){
+  .main>.composer{left:0;right:0;bottom:0;padding:6px 6px calc(6px + var(--cb));gap:6px;
+    background:var(--glass);border-top:1px solid var(--edge2);box-shadow:0 -6px 20px -12px rgba(0,0,0,.5)}
+  .main>.composer .cbig{box-shadow:none}
+  .msgs{padding-bottom:calc(72px + var(--cb))}
+}
+/* unread counter on the Chats button above the servers: fully visible, never cut */
+.rbtn .badge{right:-7px;bottom:-7px;min-width:21px;height:21px;padding:0 5px;font-size:11.5px;font-weight:800;line-height:1;z-index:2;border:2.5px solid var(--rail-bg,#1a1b1e);box-shadow:0 2px 6px rgba(0,0,0,.35)}
+:root.light .rbtn .badge{border-color:#e9eef4}
