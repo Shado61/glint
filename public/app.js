@@ -1688,6 +1688,7 @@ function settingsSheet(){
     <div class="section-t set-sec">Чаты и стикеры</div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
+    ${SERVER_V&&MY_V&&SERVER_V!==MY_V&&SERVER_V!=='dev'?`<div class="set-row"><span class="mid"><b>⬆️ Есть обновление</b><small>Это окно открыто со старой версией. Нажмите, чтобы обновить</small></span><button class="gbtn primary" data-act="appupdate">Обновить</button></div>`:''}
     <div class="section-t set-sec">Звонки и звук</div>
     <div class="set-row"><span class="mid"><b>🎙 Микрофон и звук</b><small>Шумоподавление ${({off:'выкл',std:'обычное',strong:'сильное',max:'максимум'})[MIC.ns]||''}${MIC.gate?' · фон отсекается':''} · громкость собеседника ${Math.round(SPK.vol*100)}%</small></span><button class="gbtn" data-act="soundsheet">Настроить</button></div>
     <div class="section-t set-sec">Конфиденциальность</div>
@@ -1696,7 +1697,7 @@ function settingsSheet(){
       <label class="field" style="margin-top:10px"><span>Текущий пароль</span><input class="input" id="op" type="password" autocomplete="current-password"></label>
       <label class="field"><span>Новый пароль</span><input class="input" id="nwp" type="password" minlength="6" autocomplete="new-password"></label></details>
     <div class="section-t set-sec">Приложение</div>
-    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(SERVER_V||'—')}</small></span><button class="gbtn" data-act="install">Как?</button></div>
+    <div class="set-row"><span class="mid"><b>Приложение</b><small>Установи Manasenger на телефон или ПК · версия ${esc(MY_V||SERVER_V||'—')}${SERVER_V&&MY_V&&SERVER_V!==MY_V&&SERVER_V!=='dev'?` · <b style="color:#2bd47d">вышло обновление ${esc(SERVER_V)}</b>`:''}</small></span><button class="gbtn" data-act="install">Как?</button></div>
     <div class="set-row"><span class="mid"><b>Экономный режим</b><small>Для слабых телефонов: без анимаций и прозрачности, легче камера${LITE_AUTO?' · ваш телефон подходит под «Авто»':''}</small></span></div>
     <div class="seg" style="margin:-4px 0 8px">${[['auto','Авто'],['on','Вкл'],['off','Выкл']].map(([k,n])=>`<button class="${store.get('lite','auto')===k?'on':''}" data-act="lite" data-v="${k}">${n}</button>`).join('')}</div>
     <div class="btns"><button class="gbtn danger" data-act="logout">Выйти</button><button class="gbtn primary" data-act="saveprof">Сохранить</button></div>`);
@@ -3420,7 +3421,8 @@ document.addEventListener('click',async e=>{
     case 'dm':closeLayer();startDM(id);break;
     case 'newchat':newChatSheet(false);break;
     case 'newgroup':newChatSheet(true);break;
-    case 'settings':settingsSheet();break;
+    case 'settings':settingsSheet();checkVersion();break;
+    case 'appupdate':try{sessionStorage.removeItem('mn.upd')}catch(x){}updateNow();break;
     case 'info':infoSheet();break;
     case 'closemenu':closeLayer();break;
     case 'send':sendMsg();$('#txt')&&!touch&&$('#txt').focus();break;
