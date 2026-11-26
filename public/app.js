@@ -1825,8 +1825,10 @@ async function iceServers(){if(!ICE||Date.now()-ICE_AT>3*3600e3){try{const r=awa
    (GTCRN, or RNNoise on weaker phones) → voice gate (silence whenever you are not speaking: far-away voices,
    TV, keyboard and the room are cut) → gentle leveller → your volume. Works in calls, group calls, voice chats,
    voice messages and video circles. If anything is not supported, the plain microphone is used. */
-const MIC_DEF={ns:isLite()?'strong':'max',vol:1,gate:true,th:-46,ec:true,agc:true,dev:''};
+const MIC_DEF={ns:isLite()?'strong':'max',vol:1,gate:true,th:-50,adapt:true,margin:12,ec:true,agc:false,dev:''};
 const MIC=Object.assign({},MIC_DEF,store.get('mic',{}));
+/* v2 of the settings: the background is followed by itself; old saved values get the new defaults once */
+if(!store.get('micV2',false)){Object.assign(MIC,{adapt:true,margin:12,agc:false,th:Math.min(MIC.th,-50)});store.set('mic',MIC);store.set('micV2',true)}
 const AUDIO={};
 function micConstraints(){
   for(const k of Object.keys(AUDIO))delete AUDIO[k];
@@ -1858,9 +1860,16 @@ function micBin(name){
   return MICX.bins[name];
 }
 /* the neural noise remover for a level: max → GTCRN (best), strong → RNNoise (lighter) */
+async function micNS1(name){const c=MICX.ctx;
+  try{if(!await micMod(name))return null;const bin=await micBin(name);if(!bin)return null;
+    const n=new AudioWorkletNode(c,'@sapphi-red/web-noise-suppressor/'+name,{processorOptions:{maxChannels:1,wasmBinary:bin.slice(0)},channelCount:1,channelCountMode:'explicit'});n.kind=name;return n}catch(e){console.warn('[mic]',name,e);return null}}
+/* «Максимум»: two different neural networks one after another — GTCRN removes TV, music and noise, RNNoise cleans what is left */
 async function micNS(level){
+  if(level==='max'){const a=await micNS1('gtcrn'),b=await micNS1('rnnoise');
+    if(a&&b){a.connect(b);return {first:a,last:b,kind:'max',destroy(){try{a.destroy();b.destroy()}catch(e){}},disconnect(){try{a.disconnect();b.disconnect()}catch(e){}}}}
+    const one=a||b;return one?{first:one,last:one,kind:one.kind,destroy(){try{one.destroy()}catch(e){}},disconnect(){try{one.disconnect()}catch(e){}}}:null}
   const c=MICX.ctx;
-  for(const name of level==='max'?['gtcrn','rnnoise']:level==='strong'?['rnnoise']:[]){
+  for(const name of level==='strong'?['rnnoise']:[]){
     try{if(!await micMod(name))continue;const bin=await micBin(name);if(!bin)continue;
       const n=new AudioWorkletNode(c,'@sapphi-red/web-noise-suppressor/'+name,{processorOptions:{maxChannels:1,wasmBinary:bin.slice(0)},channelCount:1,channelCountMode:'explicit'});
       n.kind=name;return n}catch(e){console.warn('[mic]',name,e)}
@@ -1878,8 +1887,10 @@ async function micWrap(stream){
     ch.hp.type='highpass';ch.hp.frequency.value=90;ch.hp.Q.value=.7;
     ch.lp.type='lowpass';ch.lp.frequency.value=11000;
     ch.cmp.threshold.value=-24;ch.cmp.knee.value=12;ch.cmp.ratio.value=3;ch.cmp.attack.value=.005;ch.cmp.release.value=.2;
-    if(await micMod('gate')){ch.gate=new AudioWorkletNode(c,'mn-voice-gate',{processorOptions:{th:MIC.th,on:MIC.gate},channelCount:1,channelCountMode:'explicit'});
-      ch.gate.port.onmessage=e=>{ch.lvl=e.data.lvl;ch.open=e.data.open}}
+    if(await micMod('gate')){ch.gate=new AudioWorkletNode(c,'mn-voice-gate',{processorOptions:{th:MIC.th,on:MIC.gate,adapt:MIC.adapt,margin:MIC.margin,voice:store.get('micVoice',null)},channelCount:1,channelCountMode:'explicit'});
+      ch.gate.port.onmessage=e=>{const d=e.data;ch.lvl=d.lvl;ch.open=d.open;ch.floor=d.floor;ch.cut=d.cut;
+        /* the learned loudness of your voice is kept, so the next call starts already tuned to you */
+        if(d.voice!=null&&Date.now()-(MICX.vt||0)>5000){MICX.vt=Date.now();store.set('micVoice',Math.round(d.voice*10)/10)}}}
     ch.wire=async()=>{
       if(ch.busy){ch.again=true;return}ch.busy=true;try{await ch.wire1()}finally{ch.busy=false}if(ch.again){ch.again=false;ch.wire()}
     };
@@ -1888,11 +1899,11 @@ async function micWrap(stream){
       if((ch.ns&&ch.ns.lv)!==want){const old=ch.ns;ch.ns=want?await micNS(want):null;if(ch.ns)ch.ns.lv=want;
         try{ch.src.disconnect();ch.hp.disconnect();old&&old.disconnect()}catch(e){}
         if(old&&old.destroy)setTimeout(()=>{try{old.destroy()}catch(e){}},200);
-        let a=ch.src;a.connect(ch.hp);a=ch.hp;if(ch.ns){a.connect(ch.ns);a=ch.ns}
+        let a=ch.src;a.connect(ch.hp);a=ch.hp;if(ch.ns){a.connect(ch.ns.first||ch.ns);a=ch.ns.last||ch.ns}
         if(ch.gate){a.connect(ch.gate);a=ch.gate}
         a.connect(ch.lp)}
     };
-    ch.apply=()=>{ch.vol.gain.setTargetAtTime(MIC.vol,c.currentTime,.03);if(ch.gate)ch.gate.port.postMessage({th:MIC.th,on:MIC.gate});ch.wire()};
+    ch.apply=()=>{ch.vol.gain.setTargetAtTime(MIC.vol,c.currentTime,.03);if(ch.gate)ch.gate.port.postMessage({th:MIC.th,on:MIC.gate,adapt:MIC.adapt,margin:MIC.margin});ch.wire()};
     ch.lp.connect(ch.cmp);ch.cmp.connect(ch.vol);ch.vol.connect(ch.dst);ch.vol.gain.value=MIC.vol;
     await ch.wire();
     const t=ch.dst.stream.getAudioTracks()[0];if('contentHint' in t)t.contentHint='speech';
@@ -1932,7 +1943,7 @@ async function micTest(on){
   const b=$('#micTestB');if(b)b.textContent=MICT.st?'Остановить проверку':'Проверить микрофон';micMeter();
 }
 function micMeter(){cancelAnimationFrame(MICT.raf);const m=$('#micMeter');if(!m){if(MICT.st)micTest(false);return}
-  const ch=[...MICX.live][0];if(ch){const v=Math.max(0,Math.min(1,(ch.lvl+70)/60));m.style.setProperty('--v',v);m.style.setProperty('--t',Math.max(0,Math.min(1,(MIC.th+70)/60)));m.classList.toggle('open',!!ch.open);
+  const ch=[...MICX.live][0];if(ch){const v=Math.max(0,Math.min(1,(ch.lvl+70)/60));m.style.setProperty('--v',v);m.style.setProperty('--t',Math.max(0,Math.min(1,((ch.cut!=null?ch.cut:MIC.th)+70)/60)));m.classList.toggle('open',!!ch.open);
     const st=$('#micState');if(st)st.textContent=ch.open?'🟢 Слышно голос':'⚪ Тишина — фон отсекается'}
   else{m.style.setProperty('--v',0);m.style.setProperty('--t',Math.max(0,Math.min(1,(MIC.th+70)/60)));const st=$('#micState');if(st)st.textContent='Нажмите «Проверить микрофон» или начните звонок'}
   MICT.raf=requestAnimationFrame(micMeter)}
@@ -1947,8 +1958,10 @@ async function soundSheet(){
     ${tog('gate','Отсекать фон и чужие голоса','Звук идёт, только когда говорите вы. Тише порога — тишина')}
     <div class="set-row" style="display:block"><b>Чувствительность</b> <small class="mv">${MIC.th} дБ</small>
       <div class="mic-meter" id="micMeter"><i></i><b></b></div><small id="micState" class="hint" style="display:block;margin:4px 0"></small>
-      <input type="range" min="-70" max="-20" step="1" value="${MIC.th}" data-mic="th"><small class="hint">Левее — ловит и тихий голос. Правее — строже: если собеседник слышит людей рядом с вами, сдвиньте вправо, чтобы зелёная полоса порога была выше их голосов, но ниже вашего.</small>
+      <input type="range" min="-70" max="-20" step="1" value="${MIC.th}" data-mic="th"><small class="hint">Зелёная черта — граница: громче неё (ваш голос) проходит, тише — тишина. Черта сама поднимается, когда рядом шумит телевизор. Нажмите «Проверить микрофон» и скажите пару фраз — приложение подстроится под ваш голос.</small>
       <button class="gbtn" id="micTestB" data-act="mic-test" style="margin-top:8px">${MICT.st?'Остановить проверку':'Проверить микрофон'}</button></div>
+    ${tog('adapt','Отсекать телевизор и людей рядом','Приложение запоминает, как громко звучит ваш голос у микрофона. Всё, что заметно тише (телевизор в метре, разговоры в комнате), не слышно')}
+    ${MIC.adapt?`<div class="set-row" style="display:block"><b>Строгость</b> <small class="mv">${MIC.margin} дБ</small><input type="range" min="6" max="20" step="1" value="${MIC.margin}" data-mic="margin" style="direction:rtl"><small class="hint">Правее — строже: телевизор не слышно, даже если он громкий. Если у собеседника пропадают ваши тихие слова — сдвиньте левее или говорите ближе к микрофону.</small></div>`:''}
     <div class="set-row" style="display:block"><b>Громкость микрофона</b> <small class="mv">${pct(MIC.vol)}</small><input type="range" min="0.3" max="2.5" step="0.05" value="${MIC.vol}" data-mic="vol"></div>
     ${tog('ec','Эхоподавление','Собеседник не слышит сам себя из вашего динамика')}
     ${tog('agc','Автогромкость','Браузер сам выравнивает громкость голоса')}
@@ -3619,7 +3632,7 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"]'))e.stopImmediatePropagation()},true);
 document.addEventListener('input',e=>{const t=e.target;if(!t.dataset)return;
-  if(t.dataset.mic){MIC[t.dataset.mic]=+t.value;store.set('mic',MIC);MICX.live.forEach(ch=>ch.apply());const v=t.parentNode.querySelector('.mv');if(v)v.textContent=t.dataset.mic==='th'?t.value+' дБ':Math.round(t.value*100)+'%'}
+  if(t.dataset.mic){MIC[t.dataset.mic]=+t.value;store.set('mic',MIC);MICX.live.forEach(ch=>ch.apply());const v=t.parentNode.querySelector('.mv');if(v)v.textContent=t.dataset.mic==='vol'?Math.round(t.value*100)+'%':t.value+' дБ'}
   if(t.dataset.spk){SPK.vol=+t.value;store.set('spkVol',SPK.vol);applySpeaker();spkLevels();const v=t.parentNode.querySelector('.mv');if(v)v.textContent=Math.round(SPK.vol*100)+'%'}});
 document.addEventListener('input',e=>{if(e.target.id==='admq'){const q=e.target.value.toLowerCase();document.querySelectorAll('.adm-row').forEach(x=>x.style.display=x.dataset.q.includes(q)?'':'none')}});
 addEventListener('hashchange',()=>{if(hashTab())return;const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
