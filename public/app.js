@@ -4,6 +4,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const store={get(k,d){try{const v=localStorage.getItem('glint.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('glint.'+k,JSON.stringify(v))}catch(e){}}};
 const touch=matchMedia('(pointer:coarse)').matches;
+document.documentElement.classList.add(/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)?'ios':/Android/.test(navigator.userAgent)?'android':'desk');
 const mobile=()=>innerWidth<=760;
 
 /* ---------- icons ---------- */
@@ -686,10 +687,11 @@ async function openMap(){
       attributionControl:{compact:true},dragRotate:true,pitchWithRotate:true,touchPitch:true,fadeDuration:150,maxPitch:70,renderWorldCopies:false});
   }catch(e){$('#mapc').innerHTML='<div class="map-load">Карта не поддерживается на этом устройстве</div>';MAP=null;return}
   MAP.on('load',()=>{const l=$('#mapc .map-load');if(l)l.remove();mapDraw()});
-  MAP.on('click',()=>{if(mapSel){mapSel=null;mapBottom()}});
+  MAP.on('styledata',()=>{if(ROUTE&&ROUTE.geo&&!MAP.getSource('route'))routeLayer()});
+  MAP.on('click',()=>{if(mapSel&&!ROUTE){mapSel=null;mapBottom()}});
   if(!GEO.last&&navigator.geolocation&&store.get('geoAsked',false))navigator.geolocation.getCurrentPosition(p=>{GEO.last=p.coords;mapDraw()},()=>{},{maximumAge:60e3,timeout:15e3});
 }
-function closeMap(){if(!MAPV)return;const v=MAPV;MAPV=null;mapSel=null;v.classList.remove('on');setTimeout(()=>{if(MAP){MAP.remove();MAP=null}MK.clear();MEMK=null;v.remove()},220)}
+function closeMap(){if(!MAPV)return;const v=MAPV;MAPV=null;mapSel=null;ROUTE=null;v.classList.remove('on');setTimeout(()=>{if(MAP){MAP.remove();MAP=null}MK.clear();MEMK=null;v.remove()},220)}
 function fmEl(u,me){const d=document.createElement('div');d.className='fm'+(me?' me':'');d.style.setProperty('--c',u.color||'#5b8cff');
   d.innerHTML=me?'<i class="pulse"></i><i class="core"></i>':`<span class="fm-pin">${avatar(u,'s',false)}</span><span class="fm-n"></span>`;return d}
 function mapDraw(){
@@ -712,10 +714,16 @@ function mapDraw(){
 function mapBottom(){
   const el=$('#mapbot');if(!el)return;
   const ok=MAPD.friends.filter(f=>f.st==='ok'),p=myPos();
+  if(ROUTE&&ROUTE.id===mapSel){const f=ok.find(x=>x.user.id===ROUTE.id);if(f){
+    const M={car:['🚗','Авто'],foot:['🚶','Пешком'],bike:['🚲','Велосипед']};
+    el.innerHTML=`<div class="map-card">${avatar(f.user,'s',false)}<span class="mid"><b>${ROUTE.busy?'Строим маршрут…':ROUTE.err?esc(ROUTE.err):`${M[ROUTE.mode][0]} ${fmtDur(ROUTE.dur)} · ${fmtDist(ROUTE.dist/1000)}`}</b><small>до ${esc(nm(f.user))}${ROUTE.busy||ROUTE.err?'':' · прибытие в '+new Date(Date.now()+ROUTE.dur*1000).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}</small></span>
+      <button class="gbtn ic" data-act="maprouteoff" aria-label="Убрать маршрут">${ic('x')}</button></div>
+      <div class="seg map-modes">${Object.keys(M).map(k=>`<button class="${ROUTE.mode===k?'on':''}" data-act="maproute" data-id="${f.user.id}" data-mode="${k}">${M[k][0]} ${M[k][1]}</button>`).join('')}</div>
+      <div class="btns map-acts"><a class="gbtn" href="https://www.google.com/maps/dir/?api=1&origin=${ROUTE.a.lat},${ROUTE.a.lng}&destination=${ROUTE.b.lat},${ROUTE.b.lng}&travelmode=${ROUTE.mode==='car'?'driving':ROUTE.mode==='foot'?'walking':'bicycling'}" target="_blank" rel="noopener">Открыть в Google Картах</a></div>`;return}ROUTE=null}
   if(mapSel){const f=ok.find(x=>x.user.id===mapSel);if(f){
     el.innerHTML=`<div class="map-card">${avatar(f.user,'',true)}<span class="mid"><b>${esc(nm(f.user))}</b><small>${f.geo?`${ago(f.geo.ts)}${p?' · '+fmtDist(distKm(p,f.geo))+' от вас':''}`:'Сейчас не делится геопозицией'}</small></span>
       <button class="gbtn ic" data-act="mapdesel" aria-label="Назад">${ic('x')}</button></div>
-      <div class="btns map-acts"><button class="gbtn primary" data-act="mapmsg" data-id="${f.user.id}">${ic('chats')}Написать</button>${f.geo?`<button class="gbtn" data-act="mapgo" data-id="${f.user.id}">${ic('pin')}Показать</button>`:''}
+      <div class="btns map-acts"><button class="gbtn primary" data-act="mapmsg" data-id="${f.user.id}">${ic('chats')}Написать</button>${f.geo?`<button class="gbtn" data-act="maproute" data-id="${f.user.id}">${ic('locate')}Маршрут</button>`:''}
       <button class="gbtn" data-act="mapdel" data-id="${f.user.id}">Убрать</button></div>`;return}mapSel=null}
   const share=MAPD.sharing&&GEO.watch!=null;
   el.innerHTML=`<div class="map-share"><span class="mid"><b>${share?'Вы делитесь геопозицией':'Геопозиция скрыта'}</b><small>${share?'Её видят только друзья на карте':'Друзья не видят, где вы'}</small></span>
@@ -723,6 +731,35 @@ function mapBottom(){
     ${ok.length?`<div class="map-chips">${ok.map(f=>`<button class="map-chip ${f.geo?'':'off'}" data-act="mapgo" data-id="${f.user.id}">${avatar(f.user,'s',false)}<span><b>${esc(nm(f.user).split(' ')[0])}</b><small>${f.geo?(p?fmtDist(distKm(p,f.geo)):ago(f.geo.ts)):'скрыт'}</small></span></button>`).join('')}</div>`
       :`<button class="map-empty" data-act="mapadd">${ic('addUser')}<span><b>Добавьте друзей на карту</b><small>Вы будете видеть друг друга, когда оба согласитесь</small></span></button>`}`;
 }
+/* route to a friend: free OpenStreetMap routing (car, on foot, by bike), drawn as a line on the map */
+let ROUTE=null;
+const fmtDur=s=>{const m=Math.max(1,Math.round(s/60));return m<60?m+' мин':Math.floor(m/60)+' ч '+(m%60?m%60+' мин':'')};
+function routeLayer(){if(!MAP||!ROUTE||!ROUTE.geo||!MAP.isStyleLoaded())return;
+  const data={type:'Feature',geometry:ROUTE.geo,properties:{}};
+  if(MAP.getSource('route'))MAP.getSource('route').setData(data);
+  else{MAP.addSource('route',{type:'geojson',data});
+    MAP.addLayer({id:'route-case',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':'#ffffff','line-width':['interpolate',['linear'],['zoom'],10,6,16,14]}});
+    MAP.addLayer({id:'route',type:'line',source:'route',layout:{'line-cap':'round','line-join':'round'},paint:{'line-color':ROUTE.mode==='foot'?'#8e5bff':'#2f80ff','line-width':['interpolate',['linear'],['zoom'],10,3.5,16,9],...(ROUTE.mode==='foot'?{'line-dasharray':[1,1.6]}:{})}})}}
+function routeClear(){if(MAP){['route','route-case'].forEach(l=>{if(MAP.getLayer(l))MAP.removeLayer(l)});if(MAP.getSource('route'))MAP.removeSource('route')}}
+async function mapRoute(id,mode){
+  const f=MAPD.friends.find(x=>x.user.id===id);if(!f||!f.geo)return;
+  mode=mode||(ROUTE&&ROUTE.mode)||'car';
+  let a=myPos();
+  if(!a){if(!navigator.geolocation){toast('Не удалось определить, где вы');return}
+    store.set('geoAsked',true);toast('Определяем, где вы…',1500);
+    try{const p=await new Promise((ok,no)=>navigator.geolocation.getCurrentPosition(ok,no,{enableHighAccuracy:true,timeout:15e3,maximumAge:30e3}));GEO.last=p.coords;a=myPos();mapDraw()}
+    catch(e){toast('Разрешите доступ к геопозиции, чтобы построить маршрут',4000);return}}
+  const b={lat:f.geo.lat,lng:f.geo.lng};
+  routeClear();ROUTE={id,mode,a,b,busy:true};mapSel=id;mapBottom();
+  const prof={car:'routed-car',foot:'routed-foot',bike:'routed-bike'}[mode];
+  try{const r=await fetch(`https://routing.openstreetmap.de/${prof}/route/v1/driving/${a.lng},${a.lat};${b.lng},${b.lat}?overview=full&geometries=geojson`);
+    const j=await r.json();if(!ROUTE||ROUTE.id!==id||ROUTE.mode!==mode)return;
+    if(!j.routes||!j.routes.length)throw new Error('Маршрут не найден');
+    const rt=j.routes[0];Object.assign(ROUTE,{busy:false,geo:rt.geometry,dist:rt.distance,dur:rt.duration});
+    routeLayer();const cs=rt.geometry.coordinates,bb=cs.reduce((m,c)=>[Math.min(m[0],c[0]),Math.min(m[1],c[1]),Math.max(m[2],c[0]),Math.max(m[3],c[1])],[180,90,-180,-90]);
+    if(MAP)MAP.fitBounds([[bb[0],bb[1]],[bb[2],bb[3]]],{padding:{top:120,bottom:230,left:50,right:70},duration:900,pitch:0,bearing:0});
+  }catch(e){if(ROUTE&&ROUTE.id===id){ROUTE.busy=false;ROUTE.err=e.message&&/не найден/.test(e.message)?e.message:'Не получилось построить маршрут'}}
+  mapBottom()}
 function mapFocus(id){const f=MAPD.friends.find(x=>x.user.id===id);mapSel=id;mapDraw();
   if(f&&f.geo&&MAP)MAP.flyTo({center:[f.geo.lng,f.geo.lat],zoom:Math.max(MAP.getZoom(),15),speed:1.6,curve:1.4,essential:true})}
 function mapAddSheet(){
@@ -1188,6 +1225,11 @@ function connect(){
   WS.onclose=()=>{wsTry++;wsTimer=setTimeout(connect,Math.min(15000,600*2**Math.min(wsTry,5)))};
 }
 function wsSend(o){if(WS&&WS.readyState===1){WS.send(JSON.stringify(o));return true}return false}
+/* like Telegram's "fasterdom": many events in a row (a burst of messages, reactions, typing) are drawn once, in the next screen frame */
+const FQ={m:false,s:false,st:false,raf:0};
+function frameFlush(){FQ.raf=0;const m=FQ.m,sd=FQ.s,st=FQ.st;FQ.m=FQ.s=FQ.st=false;if(sd)renderSide();if(m)renderMsgs();if(st)renderStatus()}
+function frameSched(){if(!FQ.raf)FQ.raf=document.hidden?setTimeout(frameFlush,0)&&-1:requestAnimationFrame(frameFlush)}
+const frameMsgs=()=>{FQ.m=true;frameSched()},frameSide=()=>{FQ.s=true;frameSched()},frameStatus=()=>{FQ.st=true;frameSched()};
 function onWS(m){
   switch(m.t){
     case 'map':mapRefresh();return;
@@ -1206,28 +1248,28 @@ function onWS(m){
         if(!here){c.unread=(c.unread||0)+1;if(c.type!=='channel'&&!c.muted)beep([880,1320],.07,.03,.05)}
         if(c.type!=='channel'||(m.msg.text||'').includes('@'+S.me.username))notify(chatName(c),c.type!=='dm'?`${nm(S.users[m.msg.from])}: ${lastText(m.msg)}`:lastText(m.msg),m.chat,m.chat);
       }
-      if(S.cur===m.chat){renderMsgs(mine?true:undefined);renderStatus();markRead()}
-      renderSide();updateTitle();
+      if(S.cur===m.chat){renderMsgs(mine?true:undefined);frameStatus();markRead()}
+      frameSide();updateTitle();
       if(S.tab==='calls'&&m.msg.call)S.calls=null;
       return;
     }
     case 'ack':return;
-    case 'upd':{const l=S.msgs[m.chat];if(l){const i=l.findIndex(x=>x.id===m.msg.id);if(i>=0)l[i]=m.msg}const c=S.chats[m.chat];if(c&&c.last&&c.last.id===m.msg.id)c.last=m.msg;if(S.cur===m.chat)renderMsgs();renderSide();return}
-    case 'read':{const c=S.chats[m.chat];if(!c)return;c.read=c.read||{};c.read[m.user]=m.ts;if(S.cur===m.chat)renderMsgs();return}
+    case 'upd':{const l=S.msgs[m.chat];if(l){const i=l.findIndex(x=>x.id===m.msg.id);if(i>=0)l[i]=m.msg}const c=S.chats[m.chat];if(c&&c.last&&c.last.id===m.msg.id)c.last=m.msg;if(S.cur===m.chat)frameMsgs();frameSide();return}
+    case 'read':{const c=S.chats[m.chat];if(!c)return;c.read=c.read||{};c.read[m.user]=m.ts;if(S.cur===m.chat)frameMsgs();return}
     case 'typing':{
       const t=S.typing[m.chat]=S.typing[m.chat]||{};clearTimeout(t[m.user]);
-      t[m.user]=setTimeout(()=>{delete t[m.user];if(S.cur===m.chat)renderStatus();renderSide()},4000);
-      if(S.cur===m.chat)renderStatus();renderSide();return;
+      t[m.user]=setTimeout(()=>{delete t[m.user];if(S.cur===m.chat)frameStatus();frameSide()},4000);
+      if(S.cur===m.chat)frameStatus();frameSide();return;
     }
-    case 'user':{const ob=JSON.stringify((S.users[m.user.id]||{}).bubble||null);S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(m.user.id===S.me.id)S.me=S.users[m.user.id];renderSide();renderStatus();if(ob!==JSON.stringify(m.user.bubble||null))renderMsgs();return}
+    case 'user':{const ob=JSON.stringify((S.users[m.user.id]||{}).bubble||null);S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(m.user.id===S.me.id)S.me=S.users[m.user.id];frameSide();frameStatus();if(ob!==JSON.stringify(m.user.bubble||null))frameMsgs();return}
     case 'chat':{m.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));
-      if(!m.chat.members.includes(S.me.id)){delete S.chats[m.chat.id];if(S.cur===m.chat.id)closeChat();else renderSide();return}
+      if(!m.chat.members.includes(S.me.id)){delete S.chats[m.chat.id];if(S.cur===m.chat.id)closeChat();else frameSide();return}
       const was=S.chats[m.chat.id];S.chats[m.chat.id]=Object.assign(was||{},m.chat);if(!m.chat.streak)delete S.chats[m.chat.id].streak;
       if(m.chat.streak&&m.chat.streak.n>=3&&was&&(!was.streak||was.streak.n<m.chat.streak.n)&&m.chat.streak.today&&S.cur===m.chat.id)navigator.vibrate&&navigator.vibrate([20,40,20]);
-      renderSide();if(S.cur===m.chat.id){renderStatus();if(m.chat.pet&&!document.querySelector('.pet-btn'))renderMain();else refreshPetBtn()}return}
+      frameSide();if(S.cur===m.chat.id){frameStatus();if(m.chat.pet&&!document.querySelector('.pet-btn'))renderMain();else refreshPetBtn()}return}
     case 'banned':{S.banned=true;try{WS.onclose=null;WS.close()}catch(e){}$('#app').innerHTML=`<div class="auth"><div class="card glass empty"><b>⛔ Аккаунт заблокирован</b>${esc(m.reason||'Администратор заблокировал этот аккаунт')}</div></div>`;return}
     case 'error':{
-      if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);renderMsgs()}}
+      if(m.cid){const l=S.msgs[S.cur];if(l){const i=l.findIndex(x=>x.id===m.cid);if(i>=0)l.splice(i,1);frameMsgs()}}
       toast(m.error);if(CALL&&CALL.state==='calling'&&!CALL.id)hangup(true);return;
     }
     case 'call-started':case 'call-incoming':case 'call-accepted':case 'call-end':case 'rtc':case 'call-waiting':case 'call-reached':return onCallMsg(m);
@@ -1236,25 +1278,25 @@ function onWS(m){
       m.users.forEach(u=>S.users[u.id]=Object.assign(S.users[u.id]||{},u));S.servers[m.server.id]=m.server;
       if(m.removed&&S.cur===m.removed){delete S.chats[m.removed];closeChat()}
       if(m.removed&&VC&&VC.cid===m.removed)voiceLeave(true);
-      renderSide();if(S.chats[S.cur]&&S.chats[S.cur].server===m.server.id)renderStatus();return;
+      frameSide();if(S.chats[S.cur]&&S.chats[S.cur].server===m.server.id)frameStatus();return;
     }
     case 'server-gone':{
       const g=S.servers[m.server];delete S.servers[m.server];
       if(g)g.channels.forEach(ch=>delete S.chats[ch.id]);
       if(VC&&VC.sid===m.server)voiceLeave(true);
       if(S.view===m.server)S.view='home';
-      if(S.cur&&!S.chats[S.cur])closeChat();else renderSide();return;
+      if(S.cur&&!S.chats[S.cur])closeChat();else frameSide();return;
     }
     case 'voice':{const g=S.servers[m.server];if(!g)return;const ch=g.channels.find(x=>x.id===m.channel);if(ch)ch.users=m.users;
       if(VW&&VC&&m.channel===VC.cid&&!m.users.some(x=>x.id===VW.uid&&x.screen)){voiceWatch(null);toast('Демонстрация экрана закончилась')}
-      renderSide();return}
+      frameSide();return}
     case 'vjoined':case 'vrtc':case 'vpeer-left':case 'vkicked':return onVoiceMsg(m);
-    case 'stars':S.stars=new Set(m.stars);if(S.cur)renderMsgs();return;
+    case 'stars':S.stars=new Set(m.stars);if(S.cur)frameMsgs();return;
     case 'pat':if(S.cur===m.chat){petPat(false);if(!$('#petHearts'))toast(`${nm(S.users[m.user])} погладил(а) ${(S.chats[m.chat].pet||{}).name||'Серийчика'} 💗`)}return;
     case 'fwd-ok':return;
     case 'pack':{const i=S.packs.findIndex(p=>p.id===m.pack.id);if(i>=0){S.packs[i]=m.pack;renderStickers()}return}
-    case 'story':{S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(!S.stories.some(x=>x.id===m.story.id))S.stories.push(m.story);renderSide();return}
-    case 'story-gone':S.stories=S.stories.filter(x=>x.id!==m.id);renderSide();return;
+    case 'story':{S.users[m.user.id]=Object.assign(S.users[m.user.id]||{},m.user);if(!S.stories.some(x=>x.id===m.story.id))S.stories.push(m.story);frameSide();return}
+    case 'story-gone':S.stories=S.stories.filter(x=>x.id!==m.id);frameSide();return;
     case 'story-views':{const st=S.stories.find(x=>x.id===m.id);if(st)st.views=m.views;const v=$('#sv-views');if(v&&SV&&SV.cur&&SV.cur.id===m.id)v.textContent=m.views;return}
   }
 }
@@ -2652,6 +2694,8 @@ document.addEventListener('click',async e=>{
     case 'mapclose':closeMap();break;
     case 'mapadd':mapAddSheet();break;
     case 'mapdesel':mapSel=null;mapDraw();break;
+    case 'maproute':mapRoute(id,el.dataset.mode);break;
+    case 'maprouteoff':routeClear();ROUTE=null;mapBottom();break;
     case 'mapgo':mapFocus(id);break;
     case 'mapmsg':closeMap();startDM(id);break;
     case 'mapinv':case 'mapacc':{try{MAPD=await api(a==='mapacc'?'/api/map/accept':'/api/map/invite',{userId:id});toast(a==='mapacc'?'Теперь вы видите друг друга на карте':'Приглашение отправлено');mapAddSheet();mapDraw();renderSide()}catch(err){toast(err.message)}break}

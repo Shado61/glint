@@ -1010,3 +1010,32 @@ html{touch-action:manipulation}
 @keyframes mepulse{0%{transform:scale(.4);opacity:1}100%{transform:scale(1.4);opacity:0}}
 .maplibregl-ctrl-bottom-right{bottom:calc(120px + var(--safe-b))!important}
 .maplibregl-ctrl-attrib{font-size:10px}
+
+/* ---------- message bar right at the bottom of the screen (like Telegram) ---------- */
+:root{--cb:var(--safe-b)}
+html.ios{--cb:max(0px,calc(var(--safe-b) - 14px))}
+html.android{--cb:min(var(--safe-b),8px)}
+html.kb{--cb:0px}
+@media (max-width:760px){
+  .composer{bottom:calc(6px + var(--cb));left:6px;right:6px}
+  .msgs{padding-bottom:calc(76px + var(--cb))}
+  .tabbar{bottom:calc(8px + var(--cb))}
+}
+/* no scroll bars on phones, like in Telegram */
+@media (pointer:coarse){.msgs,#side .list,.list{scrollbar-width:none}.msgs::-webkit-scrollbar,#side .list::-webkit-scrollbar,.list::-webkit-scrollbar{display:none}}
+/* route to a friend */
+.map-modes{margin-top:10px}.map-modes button{font-size:13px;white-space:nowrap;padding:0 6px}
+.map-acts a.gbtn{flex:1;justify-content:center;text-decoration:none}
+
+/* ---------- text never sticks out of its frame ---------- */
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
+.bub,.bub .tx{overflow-wrap:anywhere;word-break:break-word;min-width:0}
+.row .mid,.row .top,.row .sub,.chat-h .who,.chat-h .who>span,.map-card .mid,.set-row .mid,.ctx-bar .mid{min-width:0}
+.row .nm,.row .sub,.row .top>span,.map-chip b,.map-chip small,.map-title b,.map-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge,.tab-badge,.rbtn .badge,.time,.meta,.seen small,.day,.cnt{white-space:nowrap;font-variant-numeric:tabular-nums}
+.badge{max-width:46px;overflow:hidden}
+.gbtn{min-width:0;max-width:100%}
+.gbtn>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btns{flex-wrap:wrap}
+.sheet{overflow-wrap:anywhere}
+.field input,.input{min-width:0;max-width:100%}
