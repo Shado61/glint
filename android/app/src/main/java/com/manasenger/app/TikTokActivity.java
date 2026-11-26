@@ -76,14 +76,25 @@ public class TikTokActivity extends Activity {
         ws.setAllowFileAccess(false);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true);
+        // look like ordinary mobile Chrome, not an app's built-in browser: TikTok nags built-in browsers to install the app
+        ws.setUserAgentString(ws.getUserAgentString().replace("; wv", "").replace(" Version/4.0", ""));
+        ws.setSupportMultipleWindows(false);
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                Uri u = r.getUrl();
-                String s = u.getScheme();
-                if ("https".equals(s) || "http".equals(s)) return false;
-                return true; // "open in the TikTok app" links and other schemes stay out
+                return blocked(r.getUrl()); // stays inside Manasenger, never jumps to Play Market or the TikTok app
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView v, String url) {
+                return blocked(Uri.parse(url));
+            }
+
+            @Override
+            public void onPageFinished(WebView v, String url) {
+                v.evaluateJavascript(NO_APP_PROMPTS, null);
             }
         });
         root.addView(web, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -128,6 +139,25 @@ public class TikTokActivity extends Activity {
 
         open(getIntent());
     }
+
+    /** "download TikTok" / "open in the app" links: Play Market, app stores, app links, intent:// and other schemes */
+    private static boolean blocked(Uri u) {
+        String s = u.getScheme(), h = u.getHost() == null ? "" : u.getHost().toLowerCase(), p = u.getPath() == null ? "" : u.getPath().toLowerCase();
+        if (!"https".equals(s) && !"http".equals(s)) return true;
+        if (h.equals("play.google.com") || h.equals("market.android.com") || h.equals("apps.apple.com") || h.equals("itunes.apple.com")) return true;
+        if (h.endsWith(".onelink.me") || h.endsWith(".app.link") || h.endsWith(".page.link") || h.equals("app.tiktok.com")) return true;
+        if (h.endsWith("tiktok.com") && (p.startsWith("/download") || p.startsWith("/app/"))) return true;
+        return false;
+    }
+
+    /** keeps TikTok's own pages from sending you away: blocks store/app redirects and hides "get the app" pop-ups */
+    private static final String NO_APP_PROMPTS = "(function(){if(window.__mnNoApp)return;window.__mnNoApp=1;"
+            + "var bad=function(u){u=String(u||'');return /^(intent|market|snssdk\\d*|tiktok|musically|aweme):|play\\.google\\.com|onelink\\.me|app\\.link|apps\\.apple\\.com/i.test(u)};"
+            + "var o=window.open;window.open=function(u){if(bad(u))return null;return o.apply(window,arguments)};"
+            + "try{var a=Location.prototype.assign,r=Location.prototype.replace;Location.prototype.assign=function(u){if(!bad(u))a.call(this,u)};Location.prototype.replace=function(u){if(!bad(u))r.call(this,u)}}catch(e){}"
+            + "document.addEventListener('click',function(e){var x=e.target&&e.target.closest&&e.target.closest('a[href]');if(x&&bad(x.href)){e.preventDefault();e.stopPropagation()}},true);"
+            + "var st=document.createElement('style');st.textContent='[class*=\"DivOpenApp\"],[class*=\"OpenAppButton\"],[class*=\"DownloadApp\"],[class*=\"AppDownload\"],[class*=\"GuideDownload\"],[data-e2e*=\"open-app\"],[data-e2e*=\"download\"]{display:none!important}';"
+            + "(document.head||document.documentElement).appendChild(st)})();";
 
     private void open(Intent i) {
         Uri d = i == null ? null : i.getData();

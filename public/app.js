@@ -652,7 +652,7 @@ async function ttInfo(u){if(TTQ.has(u))return;TTQ.add(u);
   try{const id=await ttId(u),r=await api('/api/tiktok/meta?id='+id);TTI.set(u,r)}catch(e){TTI.set(u,{})}
   document.querySelectorAll('.ttcard').forEach(b=>{if(b.dataset.u===u){const t=document.createElement('div');t.innerHTML=ttCard(u);b.replaceWith(t.firstChild)}})}
 async function ttId(u){const m=/tiktok\.com\/(?:@[\w.-]+\/video|embed(?:\/v2)?|player\/v1|v)\/(\d{8,25})/.exec(u);if(m)return m[1];return (await api('/api/tiktok?u='+encodeURIComponent(u))).id}
-const ttFrame=id=>`<iframe class="ttframe" src="https://www.tiktok.com/player/v1/${id}?autoplay=1&music_info=1&description=1&rel=0&native_context_menu=0" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+const ttFrame=id=>`<iframe class="ttframe" src="https://www.tiktok.com/player/v1/${id}?autoplay=1&music_info=1&description=1&rel=0&native_context_menu=0" sandbox="allow-scripts allow-same-origin allow-presentation" allow="autoplay; fullscreen; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
 async function ttPlay(u){
   let el=$('#ttview');if(!el){el=document.createElement('div');el.id='ttview';el.className='ttview';el.setAttribute('role','dialog');document.body.appendChild(el)}
   const bar=`<div class="tt-bar"><button class="gbtn" data-act="ttext" data-u="${esc(u)}">Открыть полностью</button><button class="gbtn ic" data-act="ttclose" aria-label="Закрыть">${ic('x')}</button></div>`;
