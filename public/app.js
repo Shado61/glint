@@ -6,6 +6,9 @@ const store={get(k,d){try{const v=localStorage.getItem('glint.'+k);return v==nul
 const touch=matchMedia('(pointer:coarse)').matches;
 document.documentElement.classList.add(/iPhone|iPad|iPod/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1)?'ios':/Android/.test(navigator.userAgent)?'android':'desk');
 const mobile=()=>innerWidth<=760;
+/* the iPhone version: lean and fast — no friends map and no AI tab (they keep GPS, timers and a heavy map library busy);
+   everything else is the same app */
+const IOS=document.documentElement.classList.contains('ios');
 
 /* ---------- icons ---------- */
 const P={
@@ -60,6 +63,7 @@ const P={
   signal:'<path d="M3 20h2M8 20v-4M13 20v-8M18 20V8"/>',
   pin:'<path d="M12 22s7-6.1 7-12a7 7 0 0 0-14 0c0 5.9 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6"/>',
   locate:'<path d="m3 11 19-9-9 19-2-8-8-2Z"/>',
+  pad:'<rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M15 21v-6.5l5-1.5V19"/><circle cx="14" cy="21" r="1"/><circle cx="19" cy="19" r="1"/>',
   layers:'<path d="m12 2 10 5-10 5L2 7l10-5Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>'
 };
 const ic=(n,cls='ico')=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -73,7 +77,7 @@ const S={me:null,chats:{},users:{},msgs:{},more:{},cur:null,tab:'chats',q:'',fou
 const LITE_AUTO=(navigator.deviceMemory&&navigator.deviceMemory<=(/Android/.test(navigator.userAgent)?3:2))||(navigator.hardwareConcurrency&&navigator.hardwareConcurrency<=2)||(navigator.connection&&navigator.connection.saveData);
 const isLite=()=>{const v=store.get('lite','auto');return v==='on'||(v==='auto'&&!!LITE_AUTO)};
 document.documentElement.classList.toggle('lite',isLite());
-const WIN=isLite()?50:matchMedia('(pointer:coarse)').matches?80:120; /* messages kept on screen at once; older ones appear on demand */
+const WIN=isLite()?50:IOS?60:matchMedia('(pointer:coarse)').matches?80:120; /* messages kept on screen at once; older ones appear on demand */
 
 /* ---------- helpers ---------- */
 async function api(path,body){
@@ -87,13 +91,13 @@ let tt;function toast(t,ms){const e=$('#toast');e.textContent=t;e.classList.add(
 const initials=n=>String(n||'?').trim().split(/\s+/).map(w=>Array.from(w).find(ch=>/[\p{L}\p{N}]/u.test(ch))).filter(Boolean).slice(0,2).join('').toUpperCase()||'?';
 function avatar(u,size='',dot=true){
   if(!u)return `<span class="ava ${size}">?</span>`;
-  return `<span class="ava ${size}" style="--c:${esc(u.color||'#5b8cff')}">${u.avatar?`<img src="${esc(u.avatar)}" alt="" decoding="async" loading="lazy">`:esc(initials(nm(u)))}${dot&&u.online?'<i class="dot"></i>':''}</span>`;
+  return `<span class="ava ${size}" style="--c:${esc(u.color||'#5b8cff')}">${u.avatar?`<img decoding="async" src="${esc(u.avatar)}" alt="" decoding="async" loading="lazy">`:esc(initials(nm(u)))}${dot&&u.online?'<i class="dot"></i>':''}</span>`;
 }
 function chatAvatar(c,size){
   if(c.type==='dm')return avatar(peerOf(c),size);
   if(c.type==='self')return `<span class="ava ${size} self">${ic('book')}</span>`;
-  if(c.type==='channel'){const g=S.servers[c.server]||{};return `<span class="ava ${size}" style="--c:${esc(g.color||'#5f8cc0')}">${g.avatar?`<img src="${esc(g.avatar)}" alt="" loading="lazy">`:'#'}</span>`}
-  return `<span class="ava ${size}" style="--c:${esc(c.color||'#9b6bff')}">${c.avatar?`<img src="${esc(c.avatar)}" alt="" loading="lazy">`:esc(initials(c.name))}</span>`;
+  if(c.type==='channel'){const g=S.servers[c.server]||{};return `<span class="ava ${size}" style="--c:${esc(g.color||'#5f8cc0')}">${g.avatar?`<img decoding="async" src="${esc(g.avatar)}" alt="" loading="lazy">`:'#'}</span>`}
+  return `<span class="ava ${size}" style="--c:${esc(c.color||'#9b6bff')}">${c.avatar?`<img decoding="async" src="${esc(c.avatar)}" alt="" loading="lazy">`:esc(initials(c.name))}</span>`;
 }
 const peerOf=c=>S.users[c.members.find(m=>m!==S.me.id)]||{name:'Удалённый аккаунт',color:'#777',username:''};
 /* the name you saved a person under in contacts, otherwise their own name */
@@ -266,7 +270,7 @@ let authMode='login';
 function viewAuth(){
   $('#app').className='auth';
   $('#app').innerHTML=`<form class="card glass" id="authForm" autocomplete="on">
-    <img class="logo" src="/icon-192.png" alt="">
+    <img decoding="async" class="logo" src="/icon-192.png" alt="">
     <h1>Manasenger</h1><p>Сообщения, звонки, серверы и стикеры</p>
     <div class="seg" role="tablist"><button type="button" class="${authMode==='login'?'on':''}" data-act="amode" data-m="login">Вход</button><button type="button" class="${authMode==='reg'?'on':''}" data-act="amode" data-m="reg">Регистрация</button></div>
     ${authMode==='reg'?`<label class="field"><span>Имя</span><input class="input" name="name" maxlength="40" placeholder="Как тебя зовут" autocomplete="name"></label>`:''}
@@ -383,7 +387,7 @@ function pushSetup(){
 /* the server sends notifications only while Manasenger is not on screen */
 const sendVis=()=>wsSend({t:'vis',v:!document.hidden&&document.hasFocus()});
 ['visibilitychange','focus','blur'].forEach(ev=>(ev==='visibilitychange'?document:window).addEventListener(ev,sendVis));
-function setMe(r){if('ann' in r)showAnn(r.ann);setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
+function setMe(r){if('ann' in r)showAnn(r.ann);if(!IOS)setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
 function renderShell(){
   $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
   renderRail();renderSide();renderMain();
@@ -409,8 +413,8 @@ function renderSideNow(){
       <button class="${S.tab==='chats'?'on':''}" data-act="tab" data-t="chats">${ic('chats')}<span>Чаты</span></button>
       <button class="${S.tab==='contacts'?'on':''}" data-act="tab" data-t="contacts">${ic('contact')}<span>Контакты</span></button>
       <button class="${S.tab==='calls'?'on':''}" data-act="tab" data-t="calls">${ic('calls')}<span>Звонки</span></button>
-      <button data-act="map">${ic('pin')}<span>Карта</span>${mapBadge()}</button>
-      <button class="${S.tab==='ai'?'on':''}" data-act="tab" data-t="ai"><span class="tt-ic">✦</span><span>ИИ</span></button>
+      ${IOS?'':`<button data-act="map">${ic('pin')}<span>Карта</span>${mapBadge()}</button>
+      <button class="${S.tab==='ai'?'on':''}" data-act="tab" data-t="ai"><span class="tt-ic">✦</span><span>ИИ</span></button>`}
       <button data-act="settings">${S.me.avatar?avatar(S.me,'xs',false):ic('gear')}<span>Профиль</span></button></nav>${voicePanelHTML()}`;
   if(keep){const i=$('#q');i.focus();i.setSelectionRange(i.value.length,i.value.length)}
   const l=$('#list');
@@ -584,12 +588,12 @@ function msgHTML(c,m,prev,next){
   else if(m.once)inner=onceHTML(m,me)+(m.text?`<span class="txt">${linkify(m.text)}</span>`:'')+meta;
   else if(m.sticker){
     const re2=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
-    return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:''}${fwd}<img class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
+    return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:''}${fwd}<img decoding="async" class="stk" src="${esc(m.sticker)}" alt="Стикер" loading="lazy" decoding="async">${meta}${re2}</div></div>`;
   }
   else if(m.media&&m.media.k==='round'){ /* video circle: no bubble, just the circle */
     const md=m.media,src=md.local||md.url,re3=m.react&&Object.keys(m.react).length?`<div class="reacts">${Object.entries(m.react).map(([e,l])=>`<button class="${l.includes(S.me.id)?'mine':''}" data-act="react" data-id="${m.id}" data-e="${esc(e)}">${reKey(e)}${l.length>1?' '+l.length:''}</button>`).join('')}</div>`:'';
     return `<div class="m ${me?'me':''} tail" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub stkb rndb" data-act="msg" data-id="${m.id}">${grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}</div>`:''}${fwd}
-      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="" decoding="async">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="metadata" disablepictureinpicture></video><svg class="rring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
+      <div class="rnd ${m.pending?'up':''} ${md.mirror?'mir':''}" data-act="rnd" data-id="${m.id}">${md.poster||md.posterLocal?`<img decoding="async" class="rnd-p" src="${esc(md.posterLocal||md.poster)}" alt="" decoding="async">`:''}<video src="${esc(src)}" playsinline webkit-playsinline muted loop preload="metadata" disablepictureinpicture></video><svg class="rring" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48"/></svg>
       <span class="rnd-t">${m.pending?`<i class="spin"></i>${md.progress||0}%`:clock(md.dur)}</span><span class="rnd-snd">${ic('vol')}</span></div>${meta}${re3}</div></div>`;
   }
   else if(m.call){
@@ -598,11 +602,11 @@ function msgHTML(c,m,prev,next){
       <span><b>${m.call.group?'Групповой':out?'Исходящий':'Входящий'} ${m.call.kind==='video'?'видеозвонок':'звонок'}</b><br><small style="opacity:.75">${m.call.group?(m.call.dur?durText(m.call.dur):'Никто не ответил'):miss?(out?'Без ответа':'Пропущенный'):durText(m.call.dur)} · ${tm(m.ts)}</small></span></div></div>`;
   }else{
     inner=(grp&&!me&&head?`<div class="au" style="color:${esc(u.color)}">${esc(nm(u))}${(c.titles||{})[u.id]?` <span class="mtitle">${esc(c.titles[u.id])}</span>`:''}</div>`:'')+fwd+
-      (m.story?`<div class="story-ref"><img src="${esc(m.story.img)}" alt="" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
+      (m.story?`<div class="story-ref"><img decoding="async" src="${esc(m.story.img)}" alt="" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('gone')"><span>${me?'Вы ответили на историю':'Ответ на вашу историю'}</span></div>`:'')+
       (m.reply?`<button class="rq" data-act="jump" data-id="${esc(m.reply.id)}"><b>${esc(nm(S.users[m.reply.from]))}</b><span>${esc(m.reply.text)}</span></button>`:'')+
-      (m.img?`<img class="pic" src="${esc(m.img)}" alt="Фото" data-act="zoom" loading="lazy" decoding="async">`:'')+
+      (m.img?`<img decoding="async" class="pic" src="${esc(m.img)}" alt="Фото" data-act="zoom" loading="lazy" decoding="async">`:'')+
       (m.media&&m.media.k==='voice'?voiceHTML(m):'')+
-      (m.media&&m.media.k==='video'?`<button class="vidm ${m.pending?'up':''}" data-act="playvid" data-id="${m.id}" style="${m.media.w&&m.media.h?`aspect-ratio:${m.media.w}/${m.media.h}`:''}">${m.media.poster||m.media.posterLocal?`<img src="${esc(m.media.posterLocal||m.media.poster)}" alt="" loading="lazy" decoding="async">`:'<video src="'+esc(m.media.local||m.media.url)+'#t=0.5" preload="metadata" muted playsinline></video>'}
+      (m.media&&m.media.k==='video'?`<button class="vidm ${m.pending?'up':''}" data-act="playvid" data-id="${m.id}" style="${m.media.w&&m.media.h?`aspect-ratio:${m.media.w}/${m.media.h}`:''}">${m.media.poster||m.media.posterLocal?`<img decoding="async" src="${esc(m.media.posterLocal||m.media.poster)}" alt="" loading="lazy" decoding="async">`:'<video src="'+esc(m.media.local||m.media.url)+'#t=0.5" preload="metadata" muted playsinline></video>'}
         <span class="vid-play">${m.pending?`<i class="spin"></i>`:'▶'}</span><span class="vid-t">${m.pending?(m.media.progress||0)+'%':clock(m.media.dur)}</span></button>`:'')+
       (m.text?`<span class="tx">${linkify(m.text)}</span>`:'')+meta;
   }
@@ -611,7 +615,7 @@ function msgHTML(c,m,prev,next){
   return `<div class="m ${me?'me':''} ${tail?'tail':''}" data-id="${m.id}">${grp&&!me?avatar(u,'xs',false):''}<div class="bub${bb.cls}" data-act="msg" data-id="${m.id}">${bb.fr}${inner}${re}</div></div>`;
 }
 /* reactions: an emoji, or "img:" + a sticker picture */
-const reKey=e=>e.startsWith('img:')?`<img class="re-img" src="${esc(e.slice(4))}" alt="стикер" loading="lazy">`:esc(e);
+const reKey=e=>e.startsWith('img:')?`<img decoding="async" class="re-img" src="${esc(e.slice(4))}" alt="стикер" loading="lazy">`:esc(e);
 const QUICK=['❤️','👍','😂','😮','😢','🔥','👏','🥰'];
 const quickRe=()=>{const r=store.get('recentRe',[]);return [...new Set(r.concat(QUICK))].slice(0,6)};
 function useRe(e){if(e.startsWith('s:'))return;const r=store.get('recentRe',[]).filter(x=>x!==e);r.unshift(e);store.set('recentRe',r.slice(0,12))}
@@ -629,7 +633,7 @@ const emoList=str=>{try{return [...new Intl.Segmenter('ru',{granularity:'graphem
 function reactSheet(id,tab){
   S.reTab=tab||S.reTab||'Смайлы';
   const tabs=Object.keys(EMO).concat(S.packs.length?['Стикеры']:[]);
-  const body=S.reTab==='Стикеры'?S.packs.map(p=>`<div class="section-t">${esc(p.name)}</div><div class="re-stk">${p.stickers.map(x=>`<button data-act="react" data-id="${id}" data-e="s:${p.id}:${x.id}"><img src="${esc(x.img)}" alt="" loading="lazy"></button>`).join('')||'<div class="empty" style="padding:10px">Пусто</div>'}</div>`).join('')
+  const body=S.reTab==='Стикеры'?S.packs.map(p=>`<div class="section-t">${esc(p.name)}</div><div class="re-stk">${p.stickers.map(x=>`<button data-act="react" data-id="${id}" data-e="s:${p.id}:${x.id}"><img decoding="async" src="${esc(x.img)}" alt="" loading="lazy"></button>`).join('')||'<div class="empty" style="padding:10px">Пусто</div>'}</div>`).join('')
     :`<div class="re-grid">${emoList(EMO[S.reTab]).map(e=>`<button data-act="react" data-id="${id}" data-e="${esc(e)}">${e}</button>`).join('')}</div>`;
   sheet(`<h2>Реакция</h2><div class="re-tabs">${tabs.map(t=>`<button class="${S.reTab===t?'on':''}" data-act="retab" data-id="${id}" data-v="${esc(t)}">${t==='Стикеры'?'🎨 Стикеры':t}</button>`).join('')}</div><div class="re-body">${body}</div>`);
 }
@@ -676,7 +680,7 @@ async function onceOpen(id){
   try{window.mnDesktop&&window.mnDesktop.protect&&window.mnDesktop.protect(true)}catch(e){}
   OV={id};const el=document.createElement('div');el.id='oncev';el.className='oncev';
   const no='oncontextmenu="return false" draggable="false"';
-  const body=r.k==='photo'?`<img src="${r.url}" alt="" ${no}>`
+  const body=r.k==='photo'?`<img decoding="async" src="${r.url}" alt="" ${no}>`
     :r.k==='voice'?`<div class="ov-voice"><div class="ov-ic">🎤</div><div class="ov-bar"><i id="ovp"></i></div><audio src="${r.url}" autoplay></audio></div>`
     :`<video class="${r.k==='round'?'ov-round':''}" src="${r.url}" autoplay playsinline ${r.k==='video'?'controls':''} controlslist="nodownload noplaybackrate" disablepictureinpicture disableremoteplayback ${no}></video>`;
   el.innerHTML=`<div class="ov-top"><span>🔥 Одноразовое ${ONCE_K[r.k][1].toLowerCase()} — исчезнет после просмотра${window.mnDesktop&&window.mnDesktop.protect?' · скриншот не сохранится':''}</span><button class="gbtn ic" data-act="onceclose" aria-label="Закрыть">${ic('x')}</button></div><div class="ov-body">${body}</div>`;
@@ -725,7 +729,7 @@ function linkify(t){
 /* #tab/chats etc. — opens a tab from a link */
 function hashTab(){const m=/^#tab\/(chats|contacts|calls|ai|settings)$/.exec(location.hash);if(!m||!S.me)return false;
   history.replaceState(null,'',location.pathname);if(m[1]==='settings'){if(S.cur)closeChat();settingsSheet();return true}
-  if(S.cur&&mobile())closeChat();S.tab=m[1];S.q='';if(S.tab==='calls')S.calls=null;renderSide();return true}
+  if(S.cur&&mobile())closeChat();S.tab=IOS&&m[1]==='ai'?'chats':m[1];S.q='';if(S.tab==='calls')S.calls=null;renderSide();return true}
 
 /* ================= calls keep going when you leave the app =================
    While a call, a group call or a server voice chat is on: an "ongoing call" notification in the phone
@@ -1184,11 +1188,11 @@ function aiMd(t){
   }).join('');
 }
 function aiMsgs(){const l=aiList();
-  return l.length?l.map((m,i)=>`<div class="ai-m ${m.r==='a'?'a':'u'}"${m.live?' id="ailive"':''}>${m.img||m.th?`<img class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?aiMd(m.t)+(m.live?'<i class="ai-cur"></i>':''):esc(m.t)}</div>${m.r==='a'&&!m.live&&m.t?`<div class="ai-tools"><button data-act="aicopy" data-i="${i}">Копировать</button>${i===l.length-1&&!AIbusy?`<button data-act="airegen">Ответить заново</button>`:''}</div>`:''}`).join('')+(AIbusy&&!(l[l.length-1]||{}).live?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
+  return l.length?l.map((m,i)=>`<div class="ai-m ${m.r==='a'?'a':'u'}"${m.live?' id="ailive"':''}>${m.img||m.th?`<img decoding="async" class="ai-pic" src="${m.img||m.th}" alt="">`:''}${m.r==='a'?aiMd(m.t)+(m.live?'<i class="ai-cur"></i>':''):esc(m.t)}</div>${m.r==='a'&&!m.live&&m.t?`<div class="ai-tools"><button data-act="aicopy" data-i="${i}">Копировать</button>${i===l.length-1&&!AIbusy?`<button data-act="airegen">Ответить заново</button>`:''}</div>`:''}`).join('')+(AIbusy&&!(l[l.length-1]||{}).live?'<div class="ai-m a dots"><i></i><i></i><i></i></div>':'')
     :`<div class="ai-empty"><span class="tt-logo big">✦</span><b>Спросите что угодно</b><small>Помощь с учёбой, текстами, переводом, кодом, идеями, свежими новостями — бесплатно, прямо в Manasenger. Можно прикрепить фото.</small>
       <div class="ai-sug">${['Объясни тему по физике простыми словами','Придумай подпись к фото','Переведи текст на английский','Составь план на неделю'].map(x=>`<button class="gbtn" data-act="aisug">${x}</button>`).join('')}</div></div>`}
 function aiHTML(){return `<div class="ai-box"><div class="ai-msgs" id="aimsgs">${aiMsgs()}</div>
-  ${AIimg?`<div class="ai-att"><img src="${AIimg}" alt=""><button class="x" data-act="aiunpic" aria-label="Убрать фото">${ic('x')}</button></div>`:''}<div class="ai-in glass"><button class="x" data-act="aipic" title="Фото" aria-label="Прикрепить фото">${ic('image')}</button><input type="file" id="aifile" accept="image/*" hidden><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="${AIbusy?'Остановить':'Отправить'}">${AIbusy?'<i class="ai-stop"></i>':ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
+  ${AIimg?`<div class="ai-att"><img decoding="async" src="${AIimg}" alt=""><button class="x" data-act="aiunpic" aria-label="Убрать фото">${ic('x')}</button></div>`:''}<div class="ai-in glass"><button class="x" data-act="aipic" title="Фото" aria-label="Прикрепить фото">${ic('image')}</button><input type="file" id="aifile" accept="image/*" hidden><textarea id="aiq" rows="1" placeholder="Сообщение для ИИ" maxlength="4000"></textarea><button class="sendb" data-act="aisend" aria-label="${AIbusy?'Остановить':'Отправить'}">${AIbusy?'<i class="ai-stop"></i>':ic('send')}</button>${aiList().length?`<button class="x" data-act="aiclear" title="Новый разговор" aria-label="Новый разговор">${ic('x')}</button>`:''}</div></div>`}
 /* shrinks a picture so it is quick to send (and small to keep on the phone) */
 function picScale(src,max,q){return new Promise(ok=>{const im=new Image();im.onload=()=>{const k=Math.min(1,max/Math.max(im.width,im.height)),c=document.createElement('canvas');
   c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);ok(c.toDataURL('image/jpeg',q))};im.onerror=()=>ok(null);im.src=src})}
@@ -1691,6 +1695,7 @@ function settingsSheet(){
     ${SERVER_V&&MY_V&&SERVER_V!==MY_V&&SERVER_V!=='dev'?`<div class="set-row"><span class="mid"><b>⬆️ Есть обновление</b><small>Это окно открыто со старой версией. Нажмите, чтобы обновить</small></span><button class="gbtn primary" data-act="appupdate">Обновить</button></div>`:''}
     <div class="section-t set-sec">Звонки и звук</div>
     <div class="set-row"><span class="mid"><b>🎙 Микрофон и звук</b><small>Шумоподавление ${({off:'выкл',std:'обычное',strong:'сильное',max:'максимум'})[MIC.ns]||''}${MIC.gate?' · фон отсекается':''} · громкость собеседника ${Math.round(SPK.vol*100)}%</small></span><button class="gbtn" data-act="soundsheet">Настроить</button></div>
+    <div class="set-row"><span class="mid"><b>🎛 Саундпад</b><small>Смешные звуки в звонках и голосовых чатах · своих звуков: ${PAD.own.length}</small></span><button class="gbtn" data-act="c-pad">Открыть</button></div>
     <div class="section-t set-sec">Конфиденциальность</div>
     <div class="set-row"><span class="mid"><b>Заблокированные</b><small>${(me.blocked||[]).length?(me.blocked.length+' чел. — не могут вам писать и звонить'):'Никого'}</small></span>${(me.blocked||[]).length?'<button class="gbtn" data-act="blocklist">Список</button>':''}</div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
@@ -1741,7 +1746,7 @@ function frameSched(){if(!FQ.raf)FQ.raf=document.hidden?setTimeout(frameFlush,0)
 const frameMsgs=()=>{FQ.m=true;frameSched()},frameSide=()=>{FQ.s=true;frameSched()},frameStatus=()=>{FQ.st=true;frameSched()};
 function onWS(m){
   switch(m.t){
-    case 'map':mapRefresh();return;
+    case 'map':if(!IOS)mapRefresh();return;
     case 'mapLoc':{const f=MAPD.friends.find(x=>x.user.id===m.id);if(f){f.geo=m.geo;if(MAPV)mapDraw()}return}
     case 'msg':{
       const c=S.chats[m.chat];if(!c)return;
@@ -1878,8 +1883,8 @@ async function micNS(level){
   return null;
 }
 /* wraps a camera/microphone stream: its sound is replaced by the cleaned one; video tracks stay as they are */
-async function micWrap(stream){
-  const raw=stream&&stream.getAudioTracks()[0];if(!raw||MIC.ns==='off'&&!MIC.gate&&MIC.vol===1)return stream;
+async function micWrap(stream,force){
+  const raw=stream&&stream.getAudioTracks()[0];if(!raw||(!force&&MIC.ns==='off'&&!MIC.gate&&MIC.vol===1))return stream;
   try{
     const c=await micCtx();if(!c)return stream;
     if(c.state!=='running'){c.resume().catch(()=>{});await new Promise(k=>setTimeout(k,250))}
@@ -1984,6 +1989,139 @@ async function micReopen(){
     const old=ch.raw,os=ch.src;ch.raw=nr;ch.src=MICX.ctx.createMediaStreamSource(new MediaStream([nr]));
     try{os.disconnect()}catch(e){}ch.src.connect(ch.hp);old.stop()}catch(e){}}
 }
+/* ================= soundpad: funny sounds in calls, group calls and voice chats =================
+   A sound goes straight into what the others hear — after the noise remover and the voice gate, so it is never cut —
+   and quietly into your own speaker. The built-in sounds are synthesized right here (nothing to download);
+   your own sounds (mp3, m4a, wav…) are kept on this device. */
+const PAD={vol:+store.get('padVol',.8)||.8,me:store.get('padMe',true)!==false,bufs:{},live:new Set(),edit:false,own:store.get('padOwn',[]),told:0};
+if(!Array.isArray(PAD.own))PAD.own=[];
+const PAD_SND=[['horn','📯','Дудка'],['rim','🥁','Ба-дум-тсс'],['sad','🎺','Грустный тромбон'],['boing','🌀','Боинг'],
+  ['fart','💨','Пук'],['quack','🦆','Кря'],['clap','👏','Аплодисменты'],['crick','🦗','Сверчки'],
+  ['drum','🪘','Барабанная дробь'],['cash','💰','Касса'],['siren','🚨','Сирена'],['pew','⚡','Пиу-пиу'],
+  ['up','⬆️','Свисток вверх'],['down','⬇️','Свисток вниз'],['pop','🫧','Чпок'],['gong','🔔','Гонг'],['scratch','💿','Скретч'],['wow','😮','Вау']];
+const PAD_LEN={horn:1.2,rim:1.3,sad:2.5,boing:1,fart:1.15,quack:.65,clap:2.5,crick:2.3,drum:3.1,cash:1.4,siren:2.3,pew:.65,up:.95,down:.95,pop:.22,gong:3,scratch:.8,wow:1.6};
+function padSynth(id){
+  const sr=44100,O=window.OfflineAudioContext||window.webkitOfflineAudioContext;if(!O)return Promise.resolve(null);
+  const c=new O(1,Math.ceil(sr*(PAD_LEN[id]||1)),sr),out=c.createDynamicsCompressor(),master=c.createGain();
+  out.threshold.value=-12;out.knee.value=6;out.ratio.value=8;out.attack.value=.002;out.release.value=.1;master.gain.value=.9;out.connect(master);master.connect(c.destination);
+  const NB=c.createBuffer(1,sr*2,sr);{const d=NB.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}
+  /* G: a volume envelope (attack, hold, release); O1: a tone; N: noise; F: a filter */
+  const G=(t,a,h,r,v,dst)=>{const g=c.createGain();g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+a);g.gain.setValueAtTime(v,t+a+h);g.gain.exponentialRampToValueAtTime(.0001,t+a+h+r);g.connect(dst||out);return g};
+  const O1=(type,f,t,dur,dst)=>{const o=c.createOscillator();o.type=type;o.frequency.setValueAtTime(f,t);o.connect(dst);o.start(t);o.stop(t+dur+.05);return o};
+  const N=(t,dur,dst)=>{const s=c.createBufferSource();s.buffer=NB;s.loop=true;s.connect(dst);s.start(t,Math.random()*1.5);s.stop(t+dur+.05);return s};
+  const F=(type,f,q,dst)=>{const b=c.createBiquadFilter();b.type=type;b.frequency.setValueAtTime(f,0);if(q!=null)b.Q.value=q;b.connect(dst||out);return b};
+  const LFO=(param,f,depth,t0,t1)=>{const l=c.createOscillator(),g=c.createGain();l.frequency.value=f;g.gain.value=depth;l.connect(g);g.connect(param);l.start(t0);l.stop(t1);return {l,g}};
+  const snare=(t,v)=>{N(t,.12,F('bandpass',1900,.8,G(t,.001,0,.11,v)));O1('triangle',190,t,.08,G(t,.001,0,.07,v*.7))};
+  const tom=(t,f0,f1,v)=>{const o=O1('sine',f0,t,.35,G(t,.003,.02,.3,v));o.frequency.exponentialRampToValueAtTime(f1,t+.3)};
+  const cym=(t,d,v)=>N(t,d,F('highpass',6500,.5,G(t,.002,0,d,v)));
+  switch(id){
+    case 'horn':[[0,.16],[.21,.16],[.42,.62]].forEach(([t,d])=>{const b=F('peaking',1800,1,G(t,.015,d,.08,.3));b.gain.value=8;
+      [466,470,233.5].forEach((f,i)=>{const o=O1(i<2?'sawtooth':'square',f*.94,t,d+.1,b);o.frequency.linearRampToValueAtTime(f,t+.04)})});break;
+    case 'rim':tom(0,190,120,.9);tom(.17,140,85,.9);snare(.42,.8);cym(.42,.75,.5);break;
+    case 'sad':{const lp=F('lowpass',1400,1.5);[[0,392,.42],[.48,370,.42],[.96,349,.42],[1.44,330,.95]].forEach(([t,f,d],i)=>{
+      const o=O1('sawtooth',f*1.03,t,d+.1,G(t,.03,d-.08,.12,.4,lp));o.frequency.exponentialRampToValueAtTime(f,t+.08);
+      if(i===3){o.frequency.setValueAtTime(f,t+.3);o.frequency.linearRampToValueAtTime(f*.93,t+d);LFO(o.frequency,5.5,9,t+.15,t+d+.1)}});break}
+    case 'boing':{const o=O1('triangle',180,0,.9,G(0,.005,.05,.8,.5));o.frequency.linearRampToValueAtTime(260,.8);
+      const m=LFO(o.frequency,16,110,0,.9);m.l.frequency.setValueAtTime(16,0);m.l.frequency.linearRampToValueAtTime(9,.85);m.g.gain.setValueAtTime(110,0);m.g.gain.exponentialRampToValueAtTime(5,.85);break}
+    case 'up':case 'down':{const o=O1('sine',id==='up'?380:1900,0,.85,G(0,.02,.62,.15,.4));o.frequency.exponentialRampToValueAtTime(id==='up'?1900:300,.75);LFO(o.frequency,7,18,0,.85);break}
+    case 'fart':{const g=G(0,.02,.6,.38,.75,F('lowpass',520,2)),o=O1('sawtooth',95,0,1.05,g),curve=new Float32Array(64);let f=95;
+      for(let i=0;i<64;i++){f+=(Math.random()-.5)*18;f=Math.max(60,Math.min(140,f));curve[i]=f*(i<40?1+i/120:1.33-(i-40)/90)}
+      o.frequency.setValueCurveAtTime(curve,.01,.95);LFO(g.gain,24,.35,0,1);N(0,.95,F('bandpass',180,1,G(0,.02,.5,.4,.35)));break}
+    case 'quack':[0,.3].forEach(t=>{const o=O1('sawtooth',560,t,.25,F('bandpass',1150,3,G(t,.01,.1,.1,.9)));o.frequency.exponentialRampToValueAtTime(380,t+.2);o.connect(F('bandpass',2600,4,G(t,.01,.1,.1,.35)))});break;
+    case 'clap':for(let t=0;t<2.3;t+=.012+Math.random()*.03){const v=.35*Math.min(1,t/.35,(2.4-t)/.7)*(.5+Math.random()*.5);N(t,.05,F('bandpass',900+Math.random()*1800,1.2,G(t,.001,.003,.045,v)))}break;
+    case 'crick':for(let b=0;b<4;b++)for(let k=0;k<3;k++){const t=.1+b*.52+k*.055;O1('sine',4400+b*40,t,.05,G(t,.004,.02,.02,.22));O1('sine',8800,t,.05,G(t,.004,.02,.02,.04))}break;
+    case 'drum':{for(let t=0;t<1.8;t+=.055)snare(t,.18+.5*t/1.8);tom(1.85,110,60,1);cym(1.85,1.2,.55);break}
+    case 'cash':N(0,.06,F('highpass',2500,.7,G(0,.001,.01,.05,.6)));N(.09,.05,F('highpass',3000,.7,G(.09,.001,.01,.04,.4)));
+      [2637,3520,5274,7040].forEach((f,i)=>O1('sine',f,.16,1.1,G(.16,.002,.02,1-i*.15,.22/(i+1))));break;
+    case 'siren':{const o=O1('sawtooth',650,0,2.2,G(0,.05,1.95,.15,.3,F('lowpass',2600,.7)));[.5,1,1.5,2].forEach((t,i)=>o.frequency.linearRampToValueAtTime(i%2?650:1250,t));break}
+    case 'pew':[0,.3].forEach(t=>{const o=O1('square',1600,t,.28,F('lowpass',3500,.7,G(t,.002,.02,.22,.25)));o.frequency.exponentialRampToValueAtTime(180,t+.24)});break;
+    case 'pop':{const o=O1('sine',280,0,.12,G(0,.001,.01,.08,.7));o.frequency.exponentialRampToValueAtTime(1100,.05);N(0,.02,F('highpass',3000,.7,G(0,.0005,.002,.015,.4)));break}
+    case 'gong':[[110,1],[155.6,.6],[207,.5],[262,.35],[330,.3],[412,.2],[523,.12]].forEach(([f,v],i)=>{O1('sine',f,0,2.95,G(0,.005,.05,2.8-i*.25,v*.32));O1('sine',f*1.004,0,2.95,G(0,.005,.05,2.6-i*.25,v*.12))});
+      N(0,.3,F('lowpass',900,.7,G(0,.002,.02,.25,.4)));break;
+    case 'scratch':[[0,.3,1],[.34,.36,0]].forEach(([t,d,up])=>{const b=F('bandpass',up?300:2600,4,G(t,.01,d-.06,.05,1.4));b.frequency.setValueAtTime(up?300:2600,t);b.frequency.exponentialRampToValueAtTime(up?2600:250,t+d);N(t,d,b);
+      const o=O1('sawtooth',up?90:300,t,d,F('lowpass',900,1,G(t,.01,d-.06,.05,.25)));o.frequency.exponentialRampToValueAtTime(up?300:80,t+d)});break;
+    case 'wow':{const f1=F('bandpass',320,5,G(0,.06,.9,.3,1.6)),f2=F('bandpass',700,6,G(0,.06,.9,.3,.8)),o=O1('sawtooth',170,0,1.3,f1);o.connect(f2);
+      o.frequency.linearRampToValueAtTime(240,.35);o.frequency.linearRampToValueAtTime(150,1.2);
+      f1.frequency.linearRampToValueAtTime(650,.35);f1.frequency.linearRampToValueAtTime(380,1.2);f2.frequency.linearRampToValueAtTime(1100,.35);f2.frequency.linearRampToValueAtTime(750,1.2);
+      LFO(o.frequency,5,6,.4,1.3);break}
+  }
+  return new Promise(ok=>{c.oncomplete=e=>ok(e.renderedBuffer);try{const p=c.startRendering();if(p&&p.then)p.then(ok,()=>ok(null))}catch(e){ok(null)}});
+}
+function padDecode(ab){const c=MICX.ctx||ac();if(!c)return Promise.resolve(null);
+  return new Promise(ok=>{try{const r=c.decodeAudioData(ab,ok,()=>ok(null));if(r&&r.then)r.then(ok,()=>ok(null))}catch(e){ok(null)}})}
+function padBuf(id){
+  if(!PAD.bufs[id]){const p=id[0]==='u'?IDB.get('pad:'+id).then(ab=>ab?padDecode(ab.slice(0)):null):padSynth(id);
+    PAD.bufs[id]=p.then(b=>{if(!b)delete PAD.bufs[id];return b},()=>{delete PAD.bufs[id];return null})}
+  return PAD.bufs[id];
+}
+const padLive=()=>!!((CALL&&CALL.state==='active'&&CALL.local)||(GC&&GC.local)||(VC&&VC.local));
+const padMicOn=()=>CALL?CALL.mic:GC?GC.mic:VC?!VC.mute:true;
+/* the sound needs the cleaned-microphone chain; if the call went out with the plain microphone, it is wrapped now
+   and the new track quietly replaces the old one (the others notice nothing) */
+async function padEnsure(){
+  const st=CALL&&CALL.local||GC&&GC.local||VC&&VC.local,t=st&&st.getAudioTracks()[0];if(!t)return null;if(t._mn)return t._mn;
+  const w=await micWrap(st,true),a=w.getAudioTracks()[0];if(!a||!a._mn)return null;
+  if(CALL&&CALL.local===st){a.enabled=CALL.mic;CALL.local=w;if(CALL.va)CALL.va.sender.replaceTrack(a).catch(()=>{})}
+  else if(GC&&GC.local===st){a.enabled=GC.mic;GC.local=w;GC.peers.forEach(p=>{if(p.as)p.as.replaceTrack(a).catch(()=>{})})}
+  else if(VC&&VC.local===st){a.enabled=!VC.mute;VC.local=w;VC.peers.forEach(p=>{const s=p.pc.getSenders().find(x=>x.track&&x.track.kind==='audio');if(s)s.replaceTrack(a).catch(()=>{})})}
+  else return null;
+  return a._mn;
+}
+async function padPlay(id){
+  const ctx=await micCtx()||ac();if(!ctx)return toast('Этот браузер не умеет проигрывать звуки');
+  if(ctx.state!=='running')ctx.resume().catch(()=>{});
+  const buf=await padBuf(id);if(!buf)return toast('Не удалось открыть звук');
+  const live=padLive();let ch=null;
+  if(live){ch=await padEnsure();if(!ch)toast('Не получилось подключить звук к звонку — слышите только вы')}
+  if(PAD.live.size>=4){const o=PAD.live.values().next().value;try{o.stop()}catch(e){}PAD.live.delete(o)}
+  const src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=buf;g.gain.value=PAD.vol;src.connect(g);
+  if(ch&&ch.dst.context===ctx){if(!ch.pad){ch.pad=ctx.createGain();ch.pad.connect(ch.dst)}g.connect(ch.pad)}
+  let mon=null;if(!live||PAD.me||!ch){mon=ctx.createGain();mon.gain.value=live&&ch?.45:1;g.connect(mon);mon.connect(ctx.destination)}
+  src.onended=()=>{PAD.live.delete(src);try{g.disconnect();if(mon)mon.disconnect()}catch(e){}};
+  src.start();try{src.stop(ctx.currentTime+30)}catch(e){}
+  PAD.live.add(src);
+  if(live&&ch){padTell(id);if(!padMicOn())toast('🎙 Микрофон выключен — собеседники не услышат звук')}
+}
+function padStop(){PAD.live.forEach(s=>{try{s.stop()}catch(e){}});PAD.live.clear()}
+/* the others get a small note who played what */
+function padTell(id){const now=Date.now();if(now-PAD.told<1200)return;PAD.told=now;
+  const s=PAD_SND.find(x=>x[0]===id),o=PAD.own.find(x=>x.id===id),d={pad:(s?s[1]+' '+s[2]:o?o.e+' '+o.name:'🎵').slice(0,40)};
+  if(CALL&&CALL.id)wsSend({t:'rtc',callId:CALL.id,data:d});
+  else if(GC)GC.peers.forEach((p,uid)=>wsSend({t:'grtc',to:uid,data:d}));
+  else if(VC)VC.peers.forEach((p,uid)=>wsSend({t:'vrtc',to:uid,data:d}));
+}
+function padHeard(uid,label){const u=uid&&S.users[uid];toast(`🔊 ${u?nm(u):'Собеседник'}: ${String(label).slice(0,40)}`,1800)}
+function padSaveOwn(){store.set('padOwn',PAD.own)}
+function padAdd(){const f=document.createElement('input');f.type='file';f.accept='audio/*,.mp3,.m4a,.wav,.ogg,.aac,.opus,.caf';f.onchange=()=>{if(f.files[0])padAddFile(f.files[0])};f.click()}
+async function padAddFile(file){
+  if(PAD.own.length>=40)return toast('Уже 40 своих звуков — удалите ненужные');
+  if(file.size>10e6)return toast('Файл слишком большой — до 10 МБ');
+  let ab;try{ab=await file.arrayBuffer()}catch(e){return toast('Не удалось прочитать файл')}
+  await micCtx();const b=await padDecode(ab.slice(0));
+  if(!b)return toast('Не получилось открыть этот звук. Подойдут mp3, m4a, wav');
+  const id='u'+Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+  try{await IDB.set('pad:'+id,ab)}catch(e){return toast('Не удалось сохранить звук на телефоне')}
+  PAD.own.push({id,name:(file.name||'').replace(/\.[a-z0-9]+$/i,'').replace(/[_-]+/g,' ').trim().slice(0,24)||'Мой звук',e:'🎵'});padSaveOwn();
+  PAD.bufs[id]=Promise.resolve(b);
+  toast(b.duration>30?'Звук добавлен. В звонке прозвучат первые 30 секунд':'Звук добавлен');padSheet();
+}
+function padSheet(){
+  const live=padLive();
+  const key=(id,e,n,own)=>`<button class="pad-k${own?' own':''}${PAD.edit&&own?' ed':''}" data-act="${PAD.edit&&own?'pad-edit':'pad-play'}" data-id="${esc(id)}"><span class="pe">${esc(e)}</span><span class="pn">${esc(n)}</span></button>`;
+  sheet(`<h2>🎛 Саундпад</h2><p class="sub">${live?'Нажмите — звук услышат все в звонке':'Нажмите, чтобы послушать. Во время звонка звук услышат все'}</p>
+    <div class="pad-grid">${PAD_SND.map(([id,e,n])=>key(id,e,n)).join('')}</div>
+    <div class="section-t set-sec">Мои звуки</div>
+    <div class="pad-grid">${PAD.own.map(s=>key(s.id,s.e,s.name,true)).join('')}<button class="pad-k add" data-act="pad-add"><span class="pe">＋</span><span class="pn">Свой звук</span></button></div>
+    ${PAD.own.length?`<button class="gbtn" data-act="pad-editmode" style="margin-top:8px">${PAD.edit?'✓ Готово':'✎ Переименовать или удалить'}</button>`:'<p class="hint">Добавьте свой звук из файлов телефона: mp3, m4a или wav. Он хранится только на этом устройстве.</p>'}
+    <div class="set-row" style="display:block;margin-top:10px"><b>Громкость звуков</b> <small class="mv">${Math.round(PAD.vol*100)}%</small><input type="range" min="0.1" max="1.5" step="0.05" value="${PAD.vol}" data-pad="vol"></div>
+    <div class="set-row"><span class="mid"><b>Слышать самому</b><small>Звук играет и у вас, потише</small></span><button class="gbtn ${PAD.me?'primary':''}" data-act="pad-me">${PAD.me?'Вкл':'Выкл'}</button></div>
+    <div class="btns" style="margin-top:10px"><button class="gbtn" data-act="pad-stop">⏹ Тишина</button><button class="gbtn primary" data-act="closemenu">Готово</button></div>`);
+}
+function padEditSheet(id){const s=PAD.own.find(x=>x.id===id);if(!s)return;
+  sheet(`<h2>Свой звук</h2>
+    <label class="field"><span>Название</span><input class="input" id="padNm" maxlength="24" value="${esc(s.name)}"></label>
+    <label class="field"><span>Значок (эмодзи)</span><input class="input" id="padEm" maxlength="8" value="${esc(s.e)}"></label>
+    <div class="btns"><button class="gbtn danger" data-act="pad-del" data-id="${esc(id)}">Удалить</button><button class="gbtn" data-act="pad-play" data-id="${esc(id)}">▶︎</button><button class="gbtn primary" data-act="pad-save" data-id="${esc(id)}">Сохранить</button></div>`)}
 
 const camC=(facing)=>(isLite()||(touch&&GC&&GC.peers.size>2))?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:(touch?{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}}:{facingMode:facing||'user',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30}});
 async function getMedia(video){
@@ -2000,15 +2138,34 @@ async function getMedia(video){
   st.getVideoTracks().forEach(t=>{if('contentHint' in t)t.contentHint='motion'});
   return st;
 }
-/* voice: Opus at up to 64 kbit/s, with forward error correction so short network hiccups are not heard */
+/* voice: Opus at 48 kbit/s (full-band, clean), with forward error correction so short network hiccups are not heard.
+   On top of that every packet also carries a copy of the previous one (RED, RFC 2198 — what Google Meet and Jitsi use):
+   a lost packet is rebuilt from the next one, so even 20–30 % loss on mobile internet sounds whole. */
 function tuneSdp(sdp,kbps){
   const m=/a=rtpmap:(\d+) opus\/48000/i.exec(sdp);if(!m)return sdp;const pt=m[1];
-  const extra=`maxaveragebitrate=${(kbps||64)*1000};useinbandfec=1;stereo=0;maxplaybackrate=48000`;
+  const extra=`maxaveragebitrate=${(kbps||48)*1000};useinbandfec=1;usedtx=0;stereo=0;maxplaybackrate=48000`;
   const re=new RegExp(`a=fmtp:${pt} ([^\\r\\n]*)`);
-  if(re.test(sdp))return sdp.replace(re,(all,p)=>`a=fmtp:${pt} `+p.split(';').filter(x=>!/^(maxaveragebitrate|useinbandfec|stereo|maxplaybackrate)=/.test(x.trim())).concat(extra).join(';'));
+  if(re.test(sdp))return sdp.replace(re,(all,p)=>`a=fmtp:${pt} `+p.split(';').filter(x=>!/^(maxaveragebitrate|useinbandfec|usedtx|stereo|maxplaybackrate)=/.test(x.trim())).concat(extra).join(';'));
   return sdp.replace(m[0],m[0]+`\r\na=fmtp:${pt} ${extra}`);
 }
 async function setLocal(pc,desc,kbps){await pc.setLocalDescription({type:desc.type,sdp:tuneSdp(desc.sdp,kbps)})}
+/* RED first, then Opus: the browser then sends every voice packet twice (the fresh one + the previous one).
+   A side that cannot do RED simply gets plain Opus — nothing breaks. */
+let AUDIO_CODECS=null;
+function redFirst(pc){
+  try{if(!RTCRtpReceiver.getCapabilities||!('setCodecPreferences' in RTCRtpTransceiver.prototype))return;
+    if(!AUDIO_CODECS){const cs=RTCRtpReceiver.getCapabilities('audio').codecs,snd=(RTCRtpSender.getCapabilities&&RTCRtpSender.getCapabilities('audio').codecs)||cs;
+      const canRed=snd.some(c=>/audio\/red/i.test(c.mimeType))&&cs.some(c=>/audio\/red/i.test(c.mimeType));
+      const rank=c=>/audio\/red/i.test(c.mimeType)?(canRed?0:5):/opus/i.test(c.mimeType)?1:/CN|telephone-event/i.test(c.mimeType)?3:2;
+      AUDIO_CODECS=cs.slice().sort((a,b)=>rank(a)-rank(b))}
+    pc.getTransceivers().forEach(t=>{const k=(t.receiver&&t.receiver.track&&t.receiver.track.kind)||(t.sender&&t.sender.track&&t.sender.track.kind);
+      if(k==='audio'&&!t.stopped){try{t.setCodecPreferences(AUDIO_CODECS)}catch(e){}}});
+  }catch(e){}
+}
+const mkOffer=(pc,o)=>{redFirst(pc);return pc.createOffer(o)};
+const mkAnswer=pc=>{redFirst(pc);return pc.createAnswer()};
+/* the receiving side: a slightly deeper jitter buffer on a shaky network, so the voice never stutters */
+function jitterFor(pc,bad){try{pc.getReceivers().forEach(r=>{if(r.track&&r.track.kind==='audio'){if('jitterBufferTarget' in r)r.jitterBufferTarget=bad?160:null;else if('playoutDelayHint' in r)r.playoutDelayHint=bad?.16:null}})}catch(e){}}
 /* weak phones encode H.264 in hardware, which is much lighter than doing VP8 in software */
 function preferCodecs(tv){
   try{
@@ -2050,7 +2207,7 @@ async function makePC(){
   /* reconnection: the caller restarts the network path; the other side asks the caller to do it */
   pc.onnegotiationneeded=async()=>{
     if(!CALL||CALL.dir!=='out'||!CALL.negotiated||CALL.pc!==pc)return;
-    try{const o=await pc.createOffer({iceRestart:true});await setLocal(pc,o);wsSend({t:'rtc',callId:CALL.id,data:{sdp:pc.localDescription.toJSON()}})}catch(e){}
+    try{const o=await mkOffer(pc,{iceRestart:true});await setLocal(pc,o);wsSend({t:'rtc',callId:CALL.id,data:{sdp:pc.localDescription.toJSON()}})}catch(e){}
   };
   /* never connected: the two networks cannot reach each other directly */
   clearTimeout(CALL.connT);CALL.connT=setTimeout(()=>{if(CALL&&CALL.pc===pc&&!CALL.started){toast(ICE_RELAY?'Не удалось соединиться. Проверьте интернет у обоих и позвоните ещё раз':'Не удалось соединиться: сети не пускают звонок напрямую. Нужен сервер-посредник (TURN) — см. настройки сервера',6000);hangup()}},30000);
@@ -2123,12 +2280,14 @@ function tuneSenders(){
   const bad=CALL.q==='bad',mid=CALL.q==='mid',lite=isLite();
   const e=p.encodings[0];
   if(CALL.screen){e.maxBitrate=bad?1000e3:mid?2500e3:lite?2500e3:5000e3;e.maxFramerate=bad?12:mid?20:30;e.scaleResolutionDownBy=1}
-  else{e.maxBitrate=bad?350e3:mid?900e3:lite?1200e3:touch?2500e3:3500e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2:1}
+  else{e.maxBitrate=bad?250e3:mid?900e3:lite?1200e3:touch?2500e3:3500e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2.5:1}
   e.priority='high';
   /* on a weak network keep the picture smooth (lower sharpness) instead of freezing */
   p.degradationPreference=CALL.screen?'maintain-resolution':bad?'maintain-framerate':'balanced';
   sd.setParameters(p).catch(()=>{});
-  if(CALL.va){const ap=CALL.va.sender.getParameters();if(ap.encodings&&ap.encodings[0]){ap.encodings[0].maxBitrate=bad?24e3:64e3;ap.encodings[0].priority='high';ap.encodings[0].networkPriority='high';CALL.va.sender.setParameters(ap).catch(()=>{})}}
+  /* the voice always goes first: on a weak network the picture gives way, the voice keeps enough room for itself and its copy */
+  jitterFor(CALL.pc,bad);
+  if(CALL.va){const ap=CALL.va.sender.getParameters();if(ap.encodings&&ap.encodings[0]){ap.encodings[0].maxBitrate=bad?28e3:mid?36e3:48e3;ap.encodings[0].priority='high';ap.encodings[0].networkPriority='high';CALL.va.sender.setParameters(ap).catch(()=>{})}}
 }
 /* every 2 seconds: round-trip time and lost packets → connection bars and video quality */
 function startStats(){
@@ -2180,7 +2339,7 @@ async function onCallMsg(m){
   if(m.t==='call-accepted'){
     stopRing();CALL.state='connecting';renderCall();
     await makePC();attachLocal();
-    const offer=await CALL.pc.createOffer();await setLocal(CALL.pc,offer);
+    const offer=await mkOffer(CALL.pc);await setLocal(CALL.pc,offer);
     wsSend({t:'rtc',callId:CALL.id,data:{sdp:CALL.pc.localDescription.toJSON()}});return;
   }
   if(m.t==='call-end'){
@@ -2193,13 +2352,14 @@ async function onCallMsg(m){
     try{
       if(d.sdp){
         await pc.setRemoteDescription(d.sdp);
-        if(d.sdp.type==='offer'){attachLocal();const ans=await pc.createAnswer();await setLocal(pc,ans);wsSend({t:'rtc',callId:CALL.id,data:{sdp:pc.localDescription.toJSON()}})}
+        if(d.sdp.type==='offer'){attachLocal();const ans=await mkAnswer(pc);await setLocal(pc,ans);wsSend({t:'rtc',callId:CALL.id,data:{sdp:pc.localDescription.toJSON()}})}
         else CALL.negotiated=true;
         for(const c of CALL.pending.splice(0))await pc.addIceCandidate(c).catch(()=>{});
       }else if(d.cand){
         if(pc.remoteDescription)await pc.addIceCandidate(d.cand).catch(()=>{});else CALL.pending.push(d.cand);
       }else if(d.restart){if(CALL.dir==='out'){try{pc.restartIce()}catch(e){}}}
       else if(d.state){CALL.rs=Object.assign(CALL.rs,d.state);renderCall()}
+      else if(d.pad)padHeard(CALL.peer&&CALL.peer.id,d.pad);
     }catch(e){console.error(e)}
   }
 }
@@ -2357,7 +2517,7 @@ function pickSource(){
   return new Promise(async(ok)=>{
     let list=[];try{list=await window.mnDesktop.sources()}catch(e){}
     if(!list.length){ok(null);return}
-    const card=x=>`<button class="src" data-act="srcpick" data-id="${esc(x.id)}">${x.thumb?`<img src="${x.thumb}" alt="">`:'<span class="nothumb"></span>'}<span class="srcn">${x.icon?`<img class="srci" src="${x.icon}" alt="">`:''}${esc(x.screen?(x.name.replace(/^Screen\s*/i,'Экран ')||'Весь экран'):x.name)}</span></button>`;
+    const card=x=>`<button class="src" data-act="srcpick" data-id="${esc(x.id)}">${x.thumb?`<img decoding="async" src="${x.thumb}" alt="">`:'<span class="nothumb"></span>'}<span class="srcn">${x.icon?`<img decoding="async" class="srci" src="${x.icon}" alt="">`:''}${esc(x.screen?(x.name.replace(/^Screen\s*/i,'Экран ')||'Весь экран'):x.name)}</span></button>`;
     S.srcPick=id=>{S.srcPick=null;closeLayer();ok(id)};
     sheet(`<h2>Что показать?</h2>
       <div class="section-t">Весь экран</div><div class="srcs">${list.filter(x=>x.screen).map(card).join('')}</div>
@@ -2415,6 +2575,7 @@ function renderCall(){
      btn('c-cam',CALL.cam?'video':'videoOff',CALL.cam?'':'off','',CALL.cam?'Выключить камеру':'Включить камеру')+
      btn('c-spk',SPK.loud?'vol':'vol',SPK.loud?'on':'','',SPK.loud?'Громкая связь включена':'Динамик и громкая связь')+
      btn('c-fx','mask',fxIsOn?'on':'','','Маски и фильтры')+
+     btn('c-pad','pad','','','Саундпад — смешные звуки')+
      (touch&&CALL.cam?btn('c-flip','flip','','','Сменить камеру'):'')+
      (canShare()?btn('c-screen','screen',CALL.screen?'on':'','',CALL.screen?'Остановить демонстрацию':'Демонстрация экрана'):'')+
      (st==='active'?btn('c-pop','pip','','','Окно поверх других приложений'):'')+
@@ -2466,7 +2627,7 @@ function renderRail(){
   el.innerHTML=`<button class="rbtn home ${S.view==='home'?'on':''}" data-act="view" data-v="home" title="Личные сообщения" aria-label="Личные сообщения">${ic('home')}${homeUnread?`<span class="badge">${homeUnread>99?'99+':homeUnread}</span>`:''}</button>
     <span class="sep"></span>
     ${list.map(g=>{const u=serverUnread(g),inV=VC&&VC.sid===g.id;
-      return `<button class="rbtn ${S.view===g.id?'on':''} ${u?'unread':''}" style="--c:${esc(g.color)}" data-act="view" data-v="${g.id}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.avatar?`<img class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}${inV?`<span class="vdot">${ic('vol')}</span>`:''}</button>`}).join('')}
+      return `<button class="rbtn ${S.view===g.id?'on':''} ${u?'unread':''}" style="--c:${esc(g.color)}" data-act="view" data-v="${g.id}" title="${esc(g.name)}" aria-label="${esc(g.name)}">${g.avatar?`<img decoding="async" class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}${inV?`<span class="vdot">${ic('vol')}</span>`:''}</button>`}).join('')}
     <button class="rbtn add" data-act="addserver" title="Создать или войти на сервер" aria-label="Добавить сервер">${ic('plus')}</button>`;
 }
 function serverSideHTML(g){
@@ -2488,6 +2649,7 @@ function voicePanelHTML(){
   const g=S.servers[VC.sid],ch=g&&g.channels.find(x=>x.id===VC.cid);
   return `<div class="vpanel glass"><span class="mid"><b>${VC.state==='on'?'Голосовая связь':'Подключение…'}</b><small>${esc(ch?ch.name:'')} · ${esc(g?g.name:'')}</small></span>
     <button class="gbtn ic ${VC.mute?'off':''}" data-act="vmute" title="${VC.mute?'Включить микрофон':'Выключить микрофон'}" aria-label="Микрофон">${ic(VC.mute?'micOff':'mic')}</button>
+    <button class="gbtn ic" data-act="c-pad" title="Саундпад — смешные звуки" aria-label="Саундпад">${ic('pad')}</button>
     <button class="gbtn ic ${VC.deaf?'off':''}" data-act="vdeaf" title="${VC.deaf?'Включить звук':'Выключить звук'}" aria-label="Звук">${ic(VC.deaf?'deafOff':'deaf')}</button>
     ${canShare()?`<button class="gbtn ic ${VC.screen?'on':''}" data-act="vscreen" title="${VC.screen?'Остановить демонстрацию':'Показать экран'}" aria-label="Демонстрация экрана">${ic('screen')}</button>`:''}
     <button class="gbtn ic danger" data-act="vleave" title="Отключиться" aria-label="Отключиться">${ic('end')}</button></div>`;
@@ -2518,7 +2680,7 @@ function inviteSheet(g){
 }
 function serverSheet(g){
   const own=g.owner===S.me.id;
-  sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(g.color)}">${g.avatar?`<img class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}</div>${own?`<div class="btns" style="justify-content:center;margin-top:8px"><button class="gbtn" data-act="srvava" data-id="${g.id}">${ic('image')}Сменить фото сервера</button>${g.avatar?`<button class="gbtn" data-act="srvavadel" data-id="${g.id}">Убрать</button>`:''}</div>`:''}</div>
+  sheet(`<div class="join-card"><div class="rbtn" style="--c:${esc(g.color)}">${g.avatar?`<img decoding="async" class="srv-img" src="${esc(g.avatar)}" alt="">`:esc(initials(g.name))}</div>${own?`<div class="btns" style="justify-content:center;margin-top:8px"><button class="gbtn" data-act="srvava" data-id="${g.id}">${ic('image')}Сменить фото сервера</button>${g.avatar?`<button class="gbtn" data-act="srvavadel" data-id="${g.id}">Убрать</button>`:''}</div>`:''}</div>
     ${own?`<label class="field"><span>Название</span><input class="input" id="srvname" maxlength="40" value="${esc(g.name)}"></label>`:`<h2 style="text-align:center">${esc(g.name)}</h2>`}
     ${own?`<div class="section-t" style="padding-left:4px">Каналы</div>${g.channels.map(ch=>`<div class="set-row"><span class="mid">${ch.type==='voice'?'🔊 ':'# '}${esc(ch.name)}</span><button class="gbtn ic" data-act="delch" data-id="${ch.id}" title="Удалить канал" aria-label="Удалить канал">${ic('trash')}</button></div>`).join('')}`:''}
     <div class="section-t" style="padding-left:4px">Участники · ${g.members.length}</div>
@@ -2582,7 +2744,7 @@ async function gcPeer(uid,offer){
     if(e.track.kind==='audio'){if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}p.audio.srcObject=new MediaStream([e.track]);p.audio.play().catch(()=>{});setTimeout(applySpeaker,200)}
     e.track.onunmute=()=>gcRender();gcRender()};
   pc.onconnectionstatechange=()=>{if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}if(pc.connectionState==='connected')gcTune();gcRender()};
-  if(offer){const o=await pc.createOffer();await setLocal(pc,o);wsSend({t:'grtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
+  if(offer){const o=await mkOffer(pc);await setLocal(pc,o);wsSend({t:'grtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
   return p;
 }
 async function onGroupMsg(m){
@@ -2609,10 +2771,10 @@ async function onGroupMsg(m){
         await p.pc.setRemoteDescription(d.sdp);
         if(d.sdp.type==='offer'){
           p.pc.getTransceivers().forEach(tr=>{tr.direction='sendrecv';const k=tr.receiver.track&&tr.receiver.track.kind;if(k==='audio'&&!p.as){p.as=tr.sender;tr.sender.replaceTrack(GC.local.getAudioTracks()[0]||null)}if(k==='video'&&!p.vs){p.vs=tr.sender;tr.sender.replaceTrack(gcOutVideo())}});
-          const a=await p.pc.createAnswer();await setLocal(p.pc,a);wsSend({t:'grtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
+          const a=await mkAnswer(p.pc);await setLocal(p.pc,a);wsSend({t:'grtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
         }
         for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
-      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}
+      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.pad)padHeard(m.from,d.pad);
     }catch(e){console.error(e)}
   }
 }
@@ -2678,6 +2840,7 @@ function gcRender(){
     ${GC.cam&&touch?`<button class="cbtn" data-act="gc-flip" aria-label="Другая камера">${ic('flip')}</button>`:''}
     ${canScreen?`<button class="cbtn ${GC.screen?'on':''}" data-act="gc-screen" aria-label="Экран">${ic('screen')}</button>`:''}
     <button class="cbtn ${SPK.loud?'on':''}" data-act="c-spk" aria-label="Динамик">${ic('vol')}</button>
+    <button class="cbtn" data-act="c-pad" aria-label="Саундпад" title="Саундпад — смешные звуки">${ic('pad')}</button>
     <button class="cbtn" data-act="c-pop" aria-label="Окно поверх" title="Окно поверх других приложений">${ic('pip')}</button>
     <button class="cbtn end" data-act="gc-end" aria-label="Выйти из звонка">${ic('end')}</button>`;
   el.querySelector('.gc-pill').innerHTML=`${ic('phone')}<span>${esc(gcName(GC.chat))} · ${ids.length}</span>`;
@@ -2744,7 +2907,7 @@ async function voicePeer(uid,offer){
     watchLevel(uid,st);
   };
   pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected'&&VC&&VC.state!=='on'){VC.state='on';renderSide()}if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}};
-  if(offer){const o=await pc.createOffer();await setLocal(pc,o,48);wsSend({t:'vrtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
+  if(offer){const o=await mkOffer(pc);await setLocal(pc,o,48);wsSend({t:'vrtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
   return p;
 }
 async function onVoiceMsg(m){
@@ -2758,11 +2921,11 @@ async function onVoiceMsg(m){
       if(d.sdp){
         if(!p)p=await voicePeer(m.from,false);
         await p.pc.setRemoteDescription(d.sdp);
-        if(d.sdp.type==='offer'){const a=await p.pc.createAnswer();await setLocal(p.pc,a,48);wsSend({t:'vrtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
+        if(d.sdp.type==='offer'){const a=await mkAnswer(p.pc);await setLocal(p.pc,a,48);wsSend({t:'vrtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
           /* I'm showing my screen and this person joined later: send it to them too */
           if(VC.screen&&VC.screenTrack&&!p.ss)setTimeout(()=>{if(VC&&VC.screen&&!p.ss){p.ss=p.pc.addTrack(VC.screenTrack,VC.screenStream);voiceRenego(p)}},300)}
         for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
-      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}
+      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.pad)padHeard(m.from,d.pad);
     }catch(e){console.error(e)}
   }
 }
@@ -2786,7 +2949,7 @@ function watchLevel(uid,stream){
   },150);
 }
 /* screen sharing in a voice channel */
-async function voiceRenego(p){try{const o=await p.pc.createOffer();await setLocal(p.pc,o,48);wsSend({t:'vrtc',to:p.uid,data:{sdp:p.pc.localDescription.toJSON()}})}catch(e){console.error(e)}}
+async function voiceRenego(p){try{const o=await mkOffer(p.pc);await setLocal(p.pc,o,48);wsSend({t:'vrtc',to:p.uid,data:{sdp:p.pc.localDescription.toJSON()}})}catch(e){console.error(e)}}
 async function voiceScreen(){
   if(!VC)return;
   if(VC.screen){
@@ -2861,7 +3024,7 @@ function svList(){return SV?SV.groups.get(SV.order[SV.ui])||[]:[]}
 function svShow(){
   if(!SV)return;const l=svList(),st=l[SV.si];if(!st){svClose();return}
   SV.cur=st;const u=S.users[st.user]||{},mine=st.user===S.me.id;
-  SV.el.innerHTML=`<div class="sv-bg" style="background-image:url('${esc(st.img)}')"></div><img class="sv-img" src="${esc(st.img)}" alt="История">
+  SV.el.innerHTML=`<div class="sv-bg" style="background-image:url('${esc(st.img)}')"></div><img decoding="async" class="sv-img" src="${esc(st.img)}" alt="История">
     <div class="sv-top"><div class="sv-bars">${l.map((x,i)=>`<i><b style="width:${i<SV.si?100:0}%"></b></i>`).join('')}</div>
       <div class="sv-head">${avatar(u,'s',false)}<b>${esc(mine?'Ваша история':nm(u))}</b><small>${agoText(st.ts)}</small><span style="flex:1"></span>
       ${mine?`<button class="sv-x" data-sv="del" aria-label="Удалить историю">${ic('trash')}</button>`:''}<button class="sv-x" data-sv="close" aria-label="Закрыть">${ic('x')}</button></div></div>
@@ -3122,16 +3285,16 @@ function renderStickers(){
     const list=cat==='Недавние'?(rec.length?rec:emoList(EMO['Смайлы']).slice(0,40)):emoList(EMO[cat]);
     el.innerHTML=`<div class="stk-panel glass"><div class="emo-cats">${cats.map(k=>`<button class="${k===cat?'on':''}" data-act="emocat" data-v="${esc(k)}">${{'Недавние':'🕘','Смайлы':'😀','Жесты':'👋','Сердечки':'❤️','Праздник':'🎉','Еда':'🍔','Животные':'🐶','Флаги':'🏳️'}[k]||'•'}</button>`).join('')}</div>
       <div class="emo-grid">${list.map(e=>`<button data-act="emoins" data-e="${esc(e)}">${e}</button>`).join('')}</div>
-      <div class="stk-tabs"><button class="on" data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}<button data-act="newpack" title="Новый набор" aria-label="Новый набор">${ic('plus')}</button></div></div>`;
+      <div class="stk-tabs"><button class="on" data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img decoding="async" src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}<button data-act="newpack" title="Новый набор" aria-label="Новый набор">${ic('plus')}</button></div></div>`;
     return;
   }
   const p=curPack();
   const grid=!p?`<div class="stk-empty"><b>Своих стикеров пока нет</b><span>Сделай набор из фото в галерее и делись им с друзьями</span><button class="gbtn primary" data-act="newpack">${ic('plus')}Создать набор</button></div>`
     :`<div class="stk-grid">${p.mine?`<button class="stk-add" data-act="stknew" title="Сделать стикер из фото">${ic('plus')}<small>Из фото</small></button>`:''}
-      ${p.stickers.map(x=>`<button class="stk-it" data-act="stksend" data-id="${x.id}" data-pack="${p.id}" data-stk="${x.id}" title="Отправить"><img src="${esc(x.img)}" alt="Стикер" loading="lazy" decoding="async"></button>`).join('')}
+      ${p.stickers.map(x=>`<button class="stk-it" data-act="stksend" data-id="${x.id}" data-pack="${p.id}" data-stk="${x.id}" title="Отправить"><img decoding="async" src="${esc(x.img)}" alt="Стикер" loading="lazy" decoding="async"></button>`).join('')}
       ${!p.stickers.length&&!p.mine?'<div class="stk-empty"><span>В наборе пока пусто</span></div>':''}</div>`;
   el.innerHTML=`<div class="stk-panel glass">${grid}
-    <div class="stk-tabs"><button data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button class="${p&&x.id===p.id?'on':''}" data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}
+    <div class="stk-tabs"><button data-act="pktab" data-id="emoji" title="Эмодзи">😀</button>${S.packs.map(x=>`<button class="${p&&x.id===p.id?'on':''}" data-act="pktab" data-id="${x.id}" title="${esc(x.name)}">${x.stickers[0]?`<img decoding="async" src="${esc(x.stickers[0].img)}" alt="" loading="lazy">`:`<span>${esc(initials(x.name))}</span>`}</button>`).join('')}
       <button data-act="newpack" title="Новый набор" aria-label="Новый набор">${ic('plus')}</button>${p?`<button data-act="pkset" data-id="${p.id}" title="Настройки набора" aria-label="Настройки набора">${ic('gear')}</button>`:''}</div></div>`;
 }
 function sendSticker(pack,id){
@@ -3163,14 +3326,14 @@ async function packPreview(id){
   try{
     const r=await api('/api/packs/get?id='+encodeURIComponent(id)),p=r.pack;
     sheet(`<h2>${esc(p.name)}</h2><p class="sub">Набор стикеров · ${p.stickers.length} шт. · автор: ${esc(p.ownerName)}</p>
-      <div class="stk-grid prev">${p.stickers.map(x=>`<span class="stk-it"><img src="${esc(x.img)}" alt="" loading="lazy"></span>`).join('')||'<div class="empty">Пока пусто</div>'}</div>
+      <div class="stk-grid prev">${p.stickers.map(x=>`<span class="stk-it"><img decoding="async" src="${esc(x.img)}" alt="" loading="lazy"></span>`).join('')||'<div class="empty">Пока пусто</div>'}</div>
       <div class="btns">${r.have?`<button class="gbtn" data-act="closemenu">У тебя уже есть этот набор</button>`:`<button class="gbtn" data-act="closemenu">Закрыть</button><button class="gbtn primary" data-act="pkinstall" data-id="${p.id}">${ic('plus')}Добавить набор</button>`}</div>`);
   }catch(e){toast(e.message)}
 }
 function saveStickerSheet(msgId){
   const own=S.packs.filter(p=>p.mine);
   sheet(`<h2>В какой набор?</h2><p class="sub">Стикер появится в выбранном наборе</p>
-    ${own.map(p=>`<button class="row" data-act="stkto" data-pack="${p.id}" data-id="${msgId}"><span class="ava s" style="--c:#4f74a3">${p.stickers[0]?`<img src="${esc(p.stickers[0].img)}" alt="">`:esc(initials(p.name))}</span><span class="mid"><span class="nm">${esc(p.name)}</span><span class="sub"><span class="lm">${p.stickers.length} шт.</span></span></span></button>`).join('')}
+    ${own.map(p=>`<button class="row" data-act="stkto" data-pack="${p.id}" data-id="${msgId}"><span class="ava s" style="--c:#4f74a3">${p.stickers[0]?`<img decoding="async" src="${esc(p.stickers[0].img)}" alt="">`:esc(initials(p.name))}</span><span class="mid"><span class="nm">${esc(p.name)}</span><span class="sub"><span class="lm">${p.stickers.length} шт.</span></span></span></button>`).join('')}
     <button class="row" data-act="stkto" data-pack="" data-id="${msgId}"><span class="ava s add">${ic('plus')}</span><span class="mid"><span class="nm">Новый набор «Мои стикеры»</span></span></button>`);
 }
 
@@ -3348,7 +3511,7 @@ new MutationObserver(queueSync).observe($('#layer'),{childList:true});
       }
     }
     else if(mode==='tabs'&&Math.abs(dx)>80&&Math.abs(dx)>Math.abs(dy)*2){
-      const tabs=['chats','contacts','calls','ai'],i=tabs.indexOf(S.tab),j=i+(dx<0?1:-1);
+      const tabs=IOS?['chats','contacts','calls']:['chats','contacts','calls','ai'],i=tabs.indexOf(S.tab),j=i+(dx<0?1:-1);
       if(i>=0&&j>=0&&j<tabs.length){S.tab=tabs[j];S.q='';if(S.tab==='calls')S.calls=null;renderSide();navigator.vibrate&&navigator.vibrate(5)}
     }
     mode=null;el=null;bub=null;
@@ -3393,7 +3556,7 @@ document.addEventListener('click',async e=>{
     case 'vleave':voiceLeave();break;
     case 'vmute':voiceMute();break;
     case 'vdeaf':voiceDeaf();break;
-    case 'map':openMap();break;
+    case 'map':if(!IOS)openMap();break;
     case 'mapclose':closeMap();break;
     case 'maptr':trToggle();break;
     case 'troff':trClose();break;
@@ -3415,7 +3578,7 @@ document.addEventListener('click',async e=>{
       if(GEO.last)go(GEO.last);else if(navigator.geolocation){store.set('geoAsked',true);navigator.geolocation.getCurrentPosition(p=>go(p.coords),()=>toast('Не удалось определить, где вы. Разрешите доступ к геопозиции'),{enableHighAccuracy:true,timeout:15e3,maximumAge:30e3})}break}
     case 'mapstyle':{const ks=Object.keys(MAP_STYLES),cur=store.get('mapStyle','liberty'),nx=ks[(ks.indexOf(cur)+1)%ks.length];store.set('mapStyle',nx);if(MAP)MAP.setStyle(MAP_STYLES[nx][1]);toast('Карта: '+MAP_STYLES[nx][0],1500);break}
     case 'map3d':{if(!MAP)break;const up=MAP.getPitch()<20;MAP.easeTo({pitch:up?60:0,bearing:up?-20:0,zoom:up?Math.max(MAP.getZoom(),16):MAP.getZoom(),duration:700});el.classList.toggle('on',up);break}
-    case 'tab':S.tab=el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
+    case 'tab':S.tab=IOS&&el.dataset.t==='ai'?'chats':el.dataset.t;S.q='';if(S.tab==='calls')S.calls=null;renderSide();break;
     case 'open':closeLayer();openChat(id);break;
     case 'back':closeChat(true);break;
     case 'dm':closeLayer();startDM(id);break;
@@ -3429,7 +3592,7 @@ document.addEventListener('click',async e=>{
     case 'attach':$('#file').click();break;
     case 'older':loadOlder();break;
     case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="onceopen"]'))break;msgMenu(id,e.clientX,e.clientY);break;
-    case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img src="${esc(el.src)}" alt=""></div>`;break}
+    case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img decoding="async" src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}
     case 'react':wsSend({t:'react',chat:S.cur,id,emoji:el.dataset.e});useRe(el.dataset.e);closeLayer();navigator.vibrate&&navigator.vibrate(8);break;
     case 'remore':reactSheet(id);break;
@@ -3524,6 +3687,15 @@ document.addEventListener('click',async e=>{
     case 'spk-out':SPK.sink=el.dataset.id;applySpeaker();soundSheet();break;
     case 'spk-loud':SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();spkLevels();soundSheet();if(CALL)renderCall();if(GC)gcRender();break;
     case 'soundsheet':soundSheet();break;
+    case 'c-pad':PAD.edit=false;padSheet();break;
+    case 'pad-play':padPlay(id);navigator.vibrate&&navigator.vibrate(8);{const k=el;k.classList.remove('hit');void k.offsetWidth;k.classList.add('hit')}break;
+    case 'pad-add':padAdd();break;
+    case 'pad-editmode':PAD.edit=!PAD.edit;padSheet();break;
+    case 'pad-edit':padEditSheet(id);break;
+    case 'pad-save':{const s=PAD.own.find(x=>x.id===id);if(s){s.name=($('#padNm').value.trim()||s.name).slice(0,24);s.e=[...($('#padEm').value.trim()||s.e)].slice(0,2).join('');padSaveOwn()}padSheet();break}
+    case 'pad-del':{if(!el.dataset.sure){el.dataset.sure=1;el.textContent='Точно удалить?';return}PAD.own=PAD.own.filter(x=>x.id!==id);padSaveOwn();delete PAD.bufs[id];IDB.del('pad:'+id);if(!PAD.own.length)PAD.edit=false;padSheet();break}
+    case 'pad-me':PAD.me=!PAD.me;store.set('padMe',PAD.me);padSheet();break;
+    case 'pad-stop':padStop();break;
     case 'mic-ns':MIC.ns=el.dataset.v;micSave();micRecon();soundSheet();break;
     case 'mic-tog':{const k=el.dataset.k;MIC[k]=!MIC[k];micSave();if(k==='ec'||k==='agc')micRecon();soundSheet();break}
     case 'mic-dev':MIC.dev=el.dataset.id;micSave();micReopen();soundSheet();break;
@@ -3635,6 +3807,7 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"]'))e.stopImmediatePropagation()},true);
 document.addEventListener('input',e=>{const t=e.target;if(!t.dataset)return;
   if(t.dataset.mic){MIC[t.dataset.mic]=+t.value;store.set('mic',MIC);MICX.live.forEach(ch=>ch.apply());const v=t.parentNode.querySelector('.mv');if(v)v.textContent=t.dataset.mic==='vol'?Math.round(t.value*100)+'%':t.value+' дБ'}
+  if(t.dataset.pad){PAD.vol=+t.value;store.set('padVol',PAD.vol);const v=t.parentNode.querySelector('.mv');if(v)v.textContent=Math.round(PAD.vol*100)+'%'}
   if(t.dataset.spk){SPK.vol=+t.value;store.set('spkVol',SPK.vol);applySpeaker();spkLevels();const v=t.parentNode.querySelector('.mv');if(v)v.textContent=Math.round(SPK.vol*100)+'%'}});
 document.addEventListener('input',e=>{if(e.target.id==='admq'){const q=e.target.value.toLowerCase();document.querySelectorAll('.adm-row').forEach(x=>x.style.display=x.dataset.q.includes(q)?'':'none')}});
 addEventListener('hashchange',()=>{if(hashTab())return;const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
@@ -3687,6 +3860,9 @@ checkVersion();setInterval(checkVersion,5*60e3);document.addEventListener('visib
 boot();
 /* while a list is scrolling, decorative animations rest so every frame goes to the scroll itself */
 (function(){let t=0;const root=document.documentElement;
-  document.addEventListener('scroll',()=>{if(!t)root.classList.add('scrolling');clearTimeout(t);t=setTimeout(()=>{t=0;root.classList.remove('scrolling')},140)},{capture:true,passive:true});
+  let box=null;
+  document.addEventListener('scroll',e=>{const b=e.target&&e.target.classList?e.target:root;
+    if(b!==box){if(box)box.classList.remove('scrolling');box=b;b.classList.add('scrolling')}
+    clearTimeout(t);t=setTimeout(()=>{if(box)box.classList.remove('scrolling');box=null},140)},{capture:true,passive:true});
 })();
 
