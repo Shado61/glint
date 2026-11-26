@@ -1410,6 +1410,8 @@ const REC={
       this.stream=await navigator.mediaDevices.getUserMedia(kind==='round'?{audio:AUDIO,video:isLite()?{facingMode:'user',width:{ideal:480},height:{ideal:480},aspectRatio:{ideal:1},frameRate:{ideal:30,max:30}}:{facingMode:'user',width:{ideal:720},height:{ideal:720},aspectRatio:{ideal:1},frameRate:{ideal:30,max:30},resizeMode:{ideal:'crop-and-scale'}}}:{audio:AUDIO});
     }catch(e){this.on=false;toast(e.name==='NotAllowedError'?'Нет доступа к '+(kind==='round'?'камере':'микрофону')+'. Разреши его в настройках браузера.':'Не удалось включить '+(kind==='round'?'камеру':'микрофон'));return}
     if(!this.on){this.stream.getTracks().forEach(t=>t.stop());return} /* released before the microphone was ready */
+    this.stream=await micWrap(this.stream);
+    if(!this.on){this.stream.getTracks().forEach(t=>t.stop());return}
     let rec=this.stream;
     if(kind==='round'){
       /* the camera is recorded as it is (drawing it through a canvas records black on many Android phones);
@@ -1423,7 +1425,7 @@ const REC={
     /* the sound goes through a small studio chain: rumble filter, compressor and a bit of gain —
        the voice is louder, even and clear, without wind and hum (only when the audio engine is running) */
     this.fx=null;
-    if(a&&a.state==='running'&&a.createMediaStreamDestination){try{
+    if(!this.stream._mn&&a&&a.state==='running'&&a.createMediaStreamDestination){try{
       const src=a.createMediaStreamSource(this.stream),hp=a.createBiquadFilter(),pres=a.createBiquadFilter(),cmp=a.createDynamicsCompressor(),g=a.createGain(),dst=a.createMediaStreamDestination();
       hp.type='highpass';hp.frequency.value=85;hp.Q.value=.7;
       pres.type='peaking';pres.frequency.value=3200;pres.Q.value=.9;pres.gain.value=3; /* clearer speech */
@@ -1472,7 +1474,7 @@ const REC={
 (function(){
   let hold=null,sx=0,sy=0,pid=null,started=false;
   document.addEventListener('pointerdown',e=>{
-    const b=e.target.closest('#recb');if(!b)return;e.preventDefault();sx=e.clientX;sy=e.clientY;pid=e.pointerId;started=false;
+    const b=e.target.closest('#recb');if(!b)return;e.preventDefault();micCtx();sx=e.clientX;sy=e.clientY;pid=e.pointerId;started=false;
     try{b.setPointerCapture(e.pointerId)}catch(x){}
     hold=setTimeout(()=>{hold=null;started=true;REC.start(S.recKind||'voice')},220);
   });
@@ -1686,6 +1688,8 @@ function settingsSheet(){
     <div class="section-t set-sec">Чаты и стикеры</div>
     <div class="set-row"><span class="mid"><b>Стикеры</b><small>${S.packs.length} набор(ов)</small></span><button class="gbtn" data-act="newpack">${ic('plus')}Набор</button></div>
     <div class="set-row"><span class="mid"><b>Уведомления</b><small>${np==='granted'?'включены — сообщения и звонки придут, даже когда Manasenger закрыт':np==='denied'?'запрещены в браузере':np==='unsupported'?'не поддерживаются':'выключены'}</small></span>${np!=='denied'&&np!=='unsupported'?`<button class="gbtn" data-act="notif">${np==='granted'?'Проверить':'Включить'}</button>`:''}</div>
+    <div class="section-t set-sec">Звонки и звук</div>
+    <div class="set-row"><span class="mid"><b>🎙 Микрофон и звук</b><small>Шумоподавление ${({off:'выкл',std:'обычное',strong:'сильное',max:'максимум'})[MIC.ns]||''}${MIC.gate?' · фон отсекается':''} · громкость собеседника ${Math.round(SPK.vol*100)}%</small></span><button class="gbtn" data-act="soundsheet">Настроить</button></div>
     <div class="section-t set-sec">Конфиденциальность</div>
     <div class="set-row"><span class="mid"><b>Заблокированные</b><small>${(me.blocked||[]).length?(me.blocked.length+' чел. — не могут вам писать и звонить'):'Никого'}</small></span>${(me.blocked||[]).length?'<button class="gbtn" data-act="blocklist">Список</button>':''}</div>
     <details class="set-row" style="display:block"><summary style="cursor:pointer;font-weight:600">Сменить пароль</summary>
@@ -1816,7 +1820,157 @@ let CALL=null,ICE=null;
 /* call servers, with fresh relay passwords every few hours */
 let ICE_AT=0,ICE_RELAY=false;
 async function iceServers(){if(!ICE||Date.now()-ICE_AT>3*3600e3){try{const r=await api('/api/ice');ICE=r.iceServers;ICE_RELAY=!!r.relay;ICE_AT=Date.now()}catch(e){ICE=ICE||[{urls:'stun:stun.l.google.com:19302'}]}}return ICE}
-const AUDIO={echoCancellation:true,noiseSuppression:true,autoGainControl:true,channelCount:{ideal:1},sampleRate:{ideal:48000}};
+/* ================= microphone: noise suppression and settings =================
+   The voice goes: microphone (with the browser's echo cancelling) → rumble filter → neural noise removal
+   (GTCRN, or RNNoise on weaker phones) → voice gate (silence whenever you are not speaking: far-away voices,
+   TV, keyboard and the room are cut) → gentle leveller → your volume. Works in calls, group calls, voice chats,
+   voice messages and video circles. If anything is not supported, the plain microphone is used. */
+const MIC_DEF={ns:isLite()?'strong':'max',vol:1,gate:true,th:-46,ec:true,agc:true,dev:''};
+const MIC=Object.assign({},MIC_DEF,store.get('mic',{}));
+const AUDIO={};
+function micConstraints(){
+  for(const k of Object.keys(AUDIO))delete AUDIO[k];
+  Object.assign(AUDIO,{echoCancellation:MIC.ec,noiseSuppression:MIC.ns!=='off',autoGainControl:MIC.agc,channelCount:{ideal:1},sampleRate:{ideal:48000}});
+  if(MIC.ns==='max')AUDIO.voiceIsolation=true; /* where the system has its own voice isolation (some Chrome/Mac), it is used too */
+  if(MIC.dev)AUDIO.deviceId={ideal:MIC.dev};
+}
+micConstraints();
+function micSave(){store.set('mic',MIC);micConstraints();MICX.live.forEach(ch=>ch.apply())}
+const MICX={ctx:null,mods:{},bins:{},live:new Set()};
+async function micCtx(){
+  if(MICX.ctx&&MICX.ctx.state!=='closed')return MICX.ctx;
+  const A=window.AudioContext||window.webkitAudioContext;if(!A||!window.AudioWorkletNode)return null;
+  try{MICX.ctx=new A({sampleRate:48000,latencyHint:'interactive'})}catch(e){try{MICX.ctx=new A({latencyHint:'interactive'})}catch(e2){return null}}
+  const c=MICX.ctx;c.resume().catch(()=>{}); /* called right inside the tap: iPhone lets the audio engine start only then */
+  c.onstatechange=()=>{if(c.state==='suspended'||c.state==='interrupted')c.resume().catch(()=>{})};
+  document.addEventListener('visibilitychange',()=>{if(c.state!=='running')c.resume().catch(()=>{})});
+  return c;
+}
+async function micMod(name){
+  const c=await micCtx();if(!c)return false;
+  if(!MICX.mods[name])MICX.mods[name]=c.audioWorklet.addModule('/vendor/ns/'+name+'.js').then(()=>true,()=>false);
+  return MICX.mods[name];
+}
+function micBin(name){
+  if(!MICX.bins[name]){let url='/vendor/ns/'+name+'.wasm';
+    if(name==='rnnoise'){try{if(WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])))url='/vendor/ns/rnnoise_simd.wasm'}catch(e){}}
+    MICX.bins[name]=fetch(url).then(r=>r.ok?r.arrayBuffer():null).catch(()=>null)}
+  return MICX.bins[name];
+}
+/* the neural noise remover for a level: max → GTCRN (best), strong → RNNoise (lighter) */
+async function micNS(level){
+  const c=MICX.ctx;
+  for(const name of level==='max'?['gtcrn','rnnoise']:level==='strong'?['rnnoise']:[]){
+    try{if(!await micMod(name))continue;const bin=await micBin(name);if(!bin)continue;
+      const n=new AudioWorkletNode(c,'@sapphi-red/web-noise-suppressor/'+name,{processorOptions:{maxChannels:1,wasmBinary:bin.slice(0)},channelCount:1,channelCountMode:'explicit'});
+      n.kind=name;return n}catch(e){console.warn('[mic]',name,e)}
+  }
+  return null;
+}
+/* wraps a camera/microphone stream: its sound is replaced by the cleaned one; video tracks stay as they are */
+async function micWrap(stream){
+  const raw=stream&&stream.getAudioTracks()[0];if(!raw||MIC.ns==='off'&&!MIC.gate&&MIC.vol===1)return stream;
+  try{
+    const c=await micCtx();if(!c)return stream;
+    if(c.state!=='running'){c.resume().catch(()=>{});await new Promise(k=>setTimeout(k,250))}
+    if(c.state!=='running')return stream; /* the audio engine is asleep (iPhone before a tap): plain microphone, never silence */
+    const ch={raw,src:c.createMediaStreamSource(new MediaStream([raw])),hp:c.createBiquadFilter(),lp:c.createBiquadFilter(),cmp:c.createDynamicsCompressor(),vol:c.createGain(),dst:c.createMediaStreamDestination(),ns:null,gate:null,lvl:-100,open:false};
+    ch.hp.type='highpass';ch.hp.frequency.value=90;ch.hp.Q.value=.7;
+    ch.lp.type='lowpass';ch.lp.frequency.value=11000;
+    ch.cmp.threshold.value=-24;ch.cmp.knee.value=12;ch.cmp.ratio.value=3;ch.cmp.attack.value=.005;ch.cmp.release.value=.2;
+    if(await micMod('gate')){ch.gate=new AudioWorkletNode(c,'mn-voice-gate',{processorOptions:{th:MIC.th,on:MIC.gate},channelCount:1,channelCountMode:'explicit'});
+      ch.gate.port.onmessage=e=>{ch.lvl=e.data.lvl;ch.open=e.data.open}}
+    ch.wire=async()=>{
+      if(ch.busy){ch.again=true;return}ch.busy=true;try{await ch.wire1()}finally{ch.busy=false}if(ch.again){ch.again=false;ch.wire()}
+    };
+    ch.wire1=async()=>{
+      const want=MIC.ns==='strong'||MIC.ns==='max'?MIC.ns:'';
+      if((ch.ns&&ch.ns.lv)!==want){const old=ch.ns;ch.ns=want?await micNS(want):null;if(ch.ns)ch.ns.lv=want;
+        try{ch.src.disconnect();ch.hp.disconnect();old&&old.disconnect()}catch(e){}
+        if(old&&old.destroy)setTimeout(()=>{try{old.destroy()}catch(e){}},200);
+        let a=ch.src;a.connect(ch.hp);a=ch.hp;if(ch.ns){a.connect(ch.ns);a=ch.ns}
+        if(ch.gate){a.connect(ch.gate);a=ch.gate}
+        a.connect(ch.lp)}
+    };
+    ch.apply=()=>{ch.vol.gain.setTargetAtTime(MIC.vol,c.currentTime,.03);if(ch.gate)ch.gate.port.postMessage({th:MIC.th,on:MIC.gate});ch.wire()};
+    ch.lp.connect(ch.cmp);ch.cmp.connect(ch.vol);ch.vol.connect(ch.dst);ch.vol.gain.value=MIC.vol;
+    await ch.wire();
+    const t=ch.dst.stream.getAudioTracks()[0];if('contentHint' in t)t.contentHint='speech';
+    const stop=t.stop.bind(t);
+    t.stop=()=>{stop();ch.raw.stop();MICX.live.delete(ch);setTimeout(()=>{try{ch.src.disconnect();ch.vol.disconnect();ch.ns&&ch.ns.destroy&&ch.ns.destroy()}catch(e){}},100)};
+    ch.raw.addEventListener('ended',()=>{try{t.dispatchEvent(new Event('ended'))}catch(e){}});
+    t._mn=ch;MICX.live.add(ch);
+    const out=new MediaStream([t].concat(stream.getVideoTracks()));out._mn=ch;return out;
+  }catch(e){console.warn('[mic]',e);return stream}
+}
+/* ================= who is speaking in a call: a green glow around them =================
+   every 0.1 s the loudness of each voice is measured; a voice above the threshold lights up for a moment
+   (your own glow follows the noise gate, so background noise never lights you up) */
+const SPKD={t:0,an:new Map()};
+function spkAn(key,st){let x=SPKD.an.get(key);if(x&&x.st===st)return x;const a=ac();if(!a||!st||!st.getAudioTracks().length)return null;
+  try{if(x)x.src.disconnect();const src=a.createMediaStreamSource(st),an=a.createAnalyser();an.fftSize=512;src.connect(an);
+    x={st,src,an,buf:new Float32Array(512),hold:0};SPKD.an.set(key,x);return x}catch(e){return null}}
+function spkOn(x,now){if(!x)return false;x.an.getFloatTimeDomainData(x.buf);let s=0;for(let i=0;i<x.buf.length;i++)s+=x.buf[i]*x.buf[i];
+  if(10*Math.log10(s/x.buf.length+1e-12)>-48)x.hold=now+350;return now<x.hold}
+function meSpeaking(st,on,now){if(!on||!st)return false;const t=st.getAudioTracks()[0];if(!t||!t.enabled)return false;
+  if(t._mn){if(t._mn.open&&t._mn.lvl>MIC.th)SPKD.me=now+300;return now<(SPKD.me||0)}return spkOn(spkAn('me',st),now)}
+function spkTick(){
+  const now=performance.now(),seen=new Set();
+  if(CALL&&CALL.state==='active'){const el=$('#callEl');seen.add('c');seen.add('me');
+    if(el){el.classList.toggle('rspk',spkOn(spkAn('c',CALL.remote),now));el.classList.toggle('mspk',meSpeaking(CALL.local,CALL.mic,now))}}
+  if(GC&&GC.tiles){seen.add('me');GC.peers.forEach((p,id)=>{const st=p.audio&&p.audio.srcObject;seen.add('g'+id);const t=GC.tiles.get(id);if(t)t.classList.toggle('spk',spkOn(spkAn('g'+id,st),now))});
+    const t=GC.tiles.get(S.me.id);if(t)t.classList.toggle('spk',meSpeaking(GC.local,GC.mic,now))}
+  SPKD.an.forEach((x,k)=>{if(!seen.has(k)){try{x.src.disconnect()}catch(e){}SPKD.an.delete(k)}});
+  if(!seen.size){clearInterval(SPKD.t);SPKD.t=0}
+}
+function spkWatch(){if(!SPKD.t)SPKD.t=setInterval(spkTick,100)}
+/* «Микрофон и звук»: noise suppression, voice gate, microphone and speaker volume, devices, a live level meter */
+const MICT={st:null,raf:0};
+async function micTest(on){
+  if(MICT.st){MICT.st.getTracks().forEach(t=>t.stop());MICT.st=null}
+  if(on){try{const s=await navigator.mediaDevices.getUserMedia({audio:AUDIO});MICT.st=await micWrap(s)}catch(e){toast('Нет доступа к микрофону')}}
+  const b=$('#micTestB');if(b)b.textContent=MICT.st?'Остановить проверку':'Проверить микрофон';micMeter();
+}
+function micMeter(){cancelAnimationFrame(MICT.raf);const m=$('#micMeter');if(!m){if(MICT.st)micTest(false);return}
+  const ch=[...MICX.live][0];if(ch){const v=Math.max(0,Math.min(1,(ch.lvl+70)/60));m.style.setProperty('--v',v);m.style.setProperty('--t',Math.max(0,Math.min(1,(MIC.th+70)/60)));m.classList.toggle('open',!!ch.open);
+    const st=$('#micState');if(st)st.textContent=ch.open?'🟢 Слышно голос':'⚪ Тишина — фон отсекается'}
+  else{m.style.setProperty('--v',0);m.style.setProperty('--t',Math.max(0,Math.min(1,(MIC.th+70)/60)));const st=$('#micState');if(st)st.textContent='Нажмите «Проверить микрофон» или начните звонок'}
+  MICT.raf=requestAnimationFrame(micMeter)}
+async function soundSheet(){
+  let ins=[],outs=[];try{const d=await navigator.mediaDevices.enumerateDevices();ins=d.filter(x=>x.kind==='audioinput'&&x.deviceId&&x.deviceId!=='communications');outs=d.filter(x=>x.kind==='audiooutput'&&x.deviceId!=='communications')}catch(e){}
+  const canOut=outs.length>1&&('setSinkId' in HTMLMediaElement.prototype),pct=v=>Math.round(v*100)+'%';
+  const tog=(k,b,sm)=>`<div class="set-row"><span class="mid"><b>${b}</b><small>${sm}</small></span><button class="gbtn ${MIC[k]?'primary':''}" data-act="mic-tog" data-k="${k}">${MIC[k]?'Вкл':'Выкл'}</button></div>`;
+  sheet(`<h2>🎙 Микрофон и звук</h2>
+    <div class="section-t set-sec">Шумоподавление</div>
+    <div class="seg mic-seg">${[['off','Выкл'],['std','Обычное'],['strong','Сильное'],['max','Максимум']].map(([k,n])=>`<button class="${MIC.ns===k?'on':''}" data-act="mic-ns" data-v="${k}">${n}</button>`).join('')}</div>
+    <p class="hint">${MIC.ns==='max'?'Нейросеть убирает всё, кроме вашего голоса: шум улицы, музыку, клавиатуру, гул, эхо комнаты, а вместе с «отсечкой фона» — и чужие голоса вдалеке.':MIC.ns==='strong'?'Нейросеть полегче — для слабых телефонов. Убирает шумы, гул и клавиатуру.':MIC.ns==='std'?'Встроенное шумоподавление браузера.':'Микрофон как есть, без обработки.'}</p>
+    ${tog('gate','Отсекать фон и чужие голоса','Звук идёт, только когда говорите вы. Тише порога — тишина')}
+    <div class="set-row" style="display:block"><b>Чувствительность</b> <small class="mv">${MIC.th} дБ</small>
+      <div class="mic-meter" id="micMeter"><i></i><b></b></div><small id="micState" class="hint" style="display:block;margin:4px 0"></small>
+      <input type="range" min="-70" max="-20" step="1" value="${MIC.th}" data-mic="th"><small class="hint">Левее — ловит и тихий голос. Правее — строже: если собеседник слышит людей рядом с вами, сдвиньте вправо, чтобы зелёная полоса порога была выше их голосов, но ниже вашего.</small>
+      <button class="gbtn" id="micTestB" data-act="mic-test" style="margin-top:8px">${MICT.st?'Остановить проверку':'Проверить микрофон'}</button></div>
+    <div class="set-row" style="display:block"><b>Громкость микрофона</b> <small class="mv">${pct(MIC.vol)}</small><input type="range" min="0.3" max="2.5" step="0.05" value="${MIC.vol}" data-mic="vol"></div>
+    ${tog('ec','Эхоподавление','Собеседник не слышит сам себя из вашего динамика')}
+    ${tog('agc','Автогромкость','Браузер сам выравнивает громкость голоса')}
+    ${ins.length>1?`<div class="section-t set-sec">Микрофон</div>${ins.map(d=>`<button class="row" data-act="mic-dev" data-id="${esc(d.deviceId)}"><span class="mid"><span class="nm">${esc(d.label||'Микрофон')}</span></span>${(MIC.dev||'default')===d.deviceId?ic('check'):''}</button>`).join('')}`:''}
+    <div class="section-t set-sec">Собеседник</div>
+    <div class="set-row" style="display:block"><b>Громкость собеседника</b> <small class="mv">${pct(SPK.vol)}</small><input type="range" min="0.5" max="4" step="0.1" value="${SPK.vol}" data-spk="vol"></div>
+    <div class="set-row"><span class="mid"><b>Громкая связь</b><small>Голос чётче и громче, без хрипа</small></span><button class="gbtn ${SPK.loud?'primary':''}" data-act="spk-loud">${SPK.loud?'Вкл':'Выкл'}</button></div>
+    ${canOut?`<div class="section-t set-sec">Куда выводить звук</div>${outs.map(d=>`<button class="row" data-act="spk-out" data-id="${esc(d.deviceId)}"><span class="mid"><span class="nm">${esc(d.label||(d.deviceId==='default'?'По умолчанию':'Устройство'))}</span></span>${((SPK.sink||'default')===d.deviceId)?ic('check'):''}</button>`).join('')}`:''}
+    ${document.documentElement.classList.contains('ios')?'<p class="hint">На iPhone можно включить ещё и системную «Изоляцию голоса»: во время звонка откройте Пункт управления → «Режим микрофона».</p>':''}
+    <div class="btns" style="margin-top:10px"><button class="gbtn" data-act="mic-reset">Сбросить</button><button class="gbtn primary" data-act="closemenu">Готово</button></div>`);
+  micMeter();
+}
+/* a changed microphone or echo / auto-volume setting during a call: a new microphone goes into the same chain,
+   the other side does not notice anything */
+/* echo, auto-volume and the browser's own noise suppression change on the running microphone */
+function micRecon(){MICX.live.forEach(ch=>{try{ch.raw.applyConstraints({echoCancellation:MIC.ec,noiseSuppression:MIC.ns!=='off',autoGainControl:MIC.agc}).catch(()=>{})}catch(e){}})}
+async function micReopen(){
+  for(const ch of MICX.live){try{const s=await navigator.mediaDevices.getUserMedia({audio:AUDIO});const nr=s.getAudioTracks()[0];
+    const old=ch.raw,os=ch.src;ch.raw=nr;ch.src=MICX.ctx.createMediaStreamSource(new MediaStream([nr]));
+    try{os.disconnect()}catch(e){}ch.src.connect(ch.hp);old.stop()}catch(e){}}
+}
+
 const camC=(facing)=>(isLite()||(touch&&GC&&GC.peers.size>2))?{facingMode:facing||'user',width:{ideal:640},height:{ideal:480},frameRate:{ideal:24,max:24}}:(touch?{facingMode:facing||'user',width:{ideal:1280},height:{ideal:720},frameRate:{ideal:30,max:30}}:{facingMode:facing||'user',width:{ideal:1920},height:{ideal:1080},frameRate:{ideal:30,max:30}});
 async function getMedia(video){
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('Браузер не даёт доступ к микрофону. Открой сайт по https.');
@@ -1827,6 +1981,7 @@ async function getMedia(video){
     if(!st){try{st=await navigator.mediaDevices.getUserMedia({audio:true,video:!!video})}catch(e3){}}
     if(!st)throw new Error(e.name==='NotAllowedError'?'Нет доступа к микрофону/камере. Разреши его в настройках браузера.':'Не удалось включить микрофон: '+e.message);
   }
+  st=await micWrap(st);
   st.getAudioTracks().forEach(t=>{if('contentHint' in t)t.contentHint='speech'});
   st.getVideoTracks().forEach(t=>{if('contentHint' in t)t.contentHint='motion'});
   return st;
@@ -1850,6 +2005,7 @@ function preferCodecs(tv){
   }catch(e){}
 }
 async function startCall(chatId,kind){
+  micCtx();
   if(CALL){toast('Ты уже в звонке');return}
   if(VC){toast('Сначала выйди из голосового канала');return}
   if(GC){toast('Сначала выйди из группового звонка');return}
@@ -1907,12 +2063,12 @@ function restartIce(){
 /* ---------- speaker: where the call sound goes (speakers, headphones…) and "loud" mode ----------
    Loud mode sends the other side's voice through a volume boost with a limiter, so it is louder but never crackles. */
 /* loud mode is on by default on Android and computers (iPhone plays calls through its own path, there it stays an option) */
-const SPK={loud:store.get('loud',!document.documentElement.classList.contains('ios')),sink:store.get('sink',''),ctx:null,nodes:new Map()};
+const SPK={loud:store.get('loud',!document.documentElement.classList.contains('ios')),vol:+store.get('spkVol',1)||1,sink:store.get('sink',''),ctx:null,nodes:new Map()};
 function callStreams(){const l=[];if(CALL&&CALL.remote)l.push(['c',CALL.remote,$('#ra')]);if(GC)GC.peers.forEach((p,id)=>{if(p.audio&&p.audio.srcObject)l.push(['g'+id,p.audio.srcObject,p.audio])});return l}
 function applySpeaker(){
   store.set('sink',SPK.sink);
   const list=callStreams();
-  if(SPK.loud&&list.length&&(window.AudioContext||window.webkitAudioContext)){
+  if((SPK.loud||SPK.vol!==1)&&list.length&&(window.AudioContext||window.webkitAudioContext)){
     if(!SPK.ctx){const A=window.AudioContext||window.webkitAudioContext;SPK.ctx=new A({latencyHint:'interactive'});
       /* voice → clarity (presence boost) → compressor (quiet words come up) → gain → limiter (loud, but never crackles) */
       const c=SPK.ctx,eq=c.createBiquadFilter(),cmp=c.createDynamicsCompressor(),g=c.createGain(),lim=c.createDynamicsCompressor();
@@ -1920,7 +2076,8 @@ function applySpeaker(){
       cmp.threshold.value=-30;cmp.knee.value=8;cmp.ratio.value=4;cmp.attack.value=.003;cmp.release.value=.2;
       g.gain.value=3.4;
       lim.threshold.value=-1.5;lim.knee.value=0;lim.ratio.value=20;lim.attack.value=.001;lim.release.value=.08;
-      eq.connect(cmp);cmp.connect(g);g.connect(lim);lim.connect(c.destination);SPK.gain=eq;SPK.comp=lim}
+      eq.connect(cmp);cmp.connect(g);g.connect(lim);lim.connect(c.destination);SPK.gain=eq;SPK.comp=lim;SPK.eq=eq;SPK.cmp=cmp;SPK.g=g}
+    spkLevels();
     SPK.ctx.resume().catch(()=>{});
     if(SPK.sink&&SPK.ctx.setSinkId)SPK.ctx.setSinkId(SPK.sink).catch(()=>{});
     for(const [k,st,el] of list){
@@ -1933,7 +2090,11 @@ function applySpeaker(){
     for(const [k,st,el] of list)if(el){el.muted=false;if(SPK.sink&&el.setSinkId)el.setSinkId(SPK.sink).catch(()=>{});el.play().catch(()=>{})}
   }
 }
-async function speakerSheet(){
+/* loud mode = clarity + leveller + boost; the volume slider multiplies on top (0.5× … 4×), the limiter keeps it clean */
+function spkLevels(){if(!SPK.ctx||!SPK.g)return;const t=SPK.ctx.currentTime;
+  SPK.eq.gain.setTargetAtTime(SPK.loud?4:0,t,.05);SPK.cmp.ratio.setTargetAtTime(SPK.loud?4:1,t,.05);SPK.g.gain.setTargetAtTime((SPK.loud?3.4:1)*SPK.vol,t,.05)}
+async function speakerSheet(){soundSheet()}
+async function speakerSheetOld(){
   let outs=[];try{outs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==='audiooutput'&&d.deviceId!=='communications')}catch(e){}
   const canPick=outs.length>1&&('setSinkId' in HTMLMediaElement.prototype);
   if(!canPick){SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();toast(SPK.loud?'🔊 Громкая связь включена':'Обычная громкость');if(CALL)renderCall();if(GC)gcRender();return}
@@ -2222,7 +2383,7 @@ function attachRemote(){
   if(v&&v.srcObject!==CALL.remote){v.srcObject=CALL.remote;v.play().catch(()=>{})}
 }
 function renderCall(){
-  if(!CALL)return;queueSync();
+  if(!CALL)return;queueSync();spkWatch();
   let el=$('#callEl');
   if(CALL.min){if(el)el.style.display='none';renderMini();return}
   const mc=$('#miniCall');if(mc)mc.remove();
@@ -2366,6 +2527,7 @@ function newChannelSheet(type){
 let GC=null;
 const gcName=id=>{const c=S.chats[id];return c?chatName(c):'Звонок'};
 async function gcStart(chatId,kind){
+  micCtx();
   if(CALL||VC){toast('Сначала заверши другой звонок');return}
   if(GC){if(GC.chat===chatId){GC.min=false;gcRender();return}gcLeave()}
   gcRingClose();stopRing();
@@ -2376,6 +2538,7 @@ async function gcStart(chatId,kind){
     if(g.cam){try{g.local=await navigator.mediaDevices.getUserMedia({audio:AUDIO});g.cam=false;toast('Камера недоступна — звонок без видео')}catch(e2){}}
     if(!g.local){toast(e.name==='NotAllowedError'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Не удалось включить микрофон');if(GC===g){GC=null;gcRender()}return}
   }
+  g.local=await micWrap(g.local);
   if(GC!==g){g.local.getTracks().forEach(t=>t.stop());return}
   const vt=g.local.getVideoTracks()[0];if(vt&&'contentHint' in vt)vt.contentHint='motion';
   if(!wsSend({t:'gcall',chat:chatId,kind,cam:g.cam,mic:true})){toast('Нет связи');gcLeave(true);return}
@@ -2473,6 +2636,7 @@ function gcTile(uid){
 function gcRender(){
   let el=$('#gcall');
   if(!GC){if(el)el.remove();return}
+  spkWatch();
   if(!el){el=document.createElement('div');el.id='gcall';document.body.appendChild(el);
     el.innerHTML=`<div class="gc-top"><button class="gbtn ic" data-act="gc-min" aria-label="Свернуть">${ic('back')}</button><span class="mid"><b class="gc-name"></b><small class="gc-st"></small></span></div><div class="ggrid"></div><div class="gc-bar glass pill"></div><button class="gc-pill glass pill" data-act="gc-max"></button>`;
     GC.clock=setInterval(()=>{const s=el.querySelector('.gc-st');if(s&&GC&&GC.t0)s.textContent=gcStatus()},1000)}
@@ -2529,6 +2693,7 @@ function desktopAttention(){try{window.mnDesktop&&window.mnDesktop.attention()}c
 addEventListener('pagehide',()=>{if(GC)wsSend({t:'gleave'})});
 let VC=null;
 async function voiceJoin(sid,cid){
+  micCtx();
   if(CALL){toast('Сначала заверши звонок');return}
   if(VC&&VC.cid===cid)return;
   if(VC)voiceLeave();
@@ -2536,7 +2701,8 @@ async function voiceJoin(sid,cid){
   renderSide();
   try{VC.local=await navigator.mediaDevices.getUserMedia({audio:AUDIO})}
   catch(e){toast(e.name==='NotAllowedError'?'Нет доступа к микрофону. Разреши его в настройках браузера.':'Не удалось включить микрофон');VC=null;renderSide();return}
-  if(!VC||VC.cid!==cid){return}
+  if(!VC||VC.cid!==cid)return;
+  {const raw=VC.local,w=await micWrap(raw);if(!VC||VC.cid!==cid){w.getTracks().forEach(t=>t.stop());return}VC.local=w}
   watchLevel(S.me.id,VC.local);
   if(!wsSend({t:'vjoin',channel:cid})){toast('Нет связи с сервером');voiceLeave(true);return}
   beep([523,784],.09,.02,.05);
@@ -3333,15 +3499,21 @@ document.addEventListener('click',async e=>{
     case 'gr-yes':if(GR){const g=GR;gcRingClose();if(S.chats[g.chat]&&S.cur!==g.chat){if(S.chats[g.chat].server)S.view=S.chats[g.chat].server;openChat(g.chat)}gcStart(g.chat,g.kind)}break;
     case 'gr-no':gcRingClose();break;
     case 'callu':startCall(el.dataset.chat,el.dataset.k);break;
-    case 'c-accept':acceptCall();break;
+    case 'c-accept':micCtx();acceptCall();break;
     case 'c-reject':hangup();break;
     case 'c-end':hangup();break;
     case 'c-mic':toggleMic();break;
     case 'c-cam':toggleCam();break;
     case 'c-flip':flipCam();break;
     case 'c-spk':speakerSheet();break;
-    case 'spk-out':SPK.sink=el.dataset.id;applySpeaker();speakerSheet();break;
-    case 'spk-loud':SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();closeLayer();toast(SPK.loud?'🔊 Громкая связь: звук собеседника громче':'Обычная громкость');if(CALL)renderCall();if(GC)gcRender();break;
+    case 'spk-out':SPK.sink=el.dataset.id;applySpeaker();soundSheet();break;
+    case 'spk-loud':SPK.loud=!SPK.loud;store.set('loud',SPK.loud);applySpeaker();spkLevels();soundSheet();if(CALL)renderCall();if(GC)gcRender();break;
+    case 'soundsheet':soundSheet();break;
+    case 'mic-ns':MIC.ns=el.dataset.v;micSave();micRecon();soundSheet();break;
+    case 'mic-tog':{const k=el.dataset.k;MIC[k]=!MIC[k];micSave();if(k==='ec'||k==='agc')micRecon();soundSheet();break}
+    case 'mic-dev':MIC.dev=el.dataset.id;micSave();micReopen();soundSheet();break;
+    case 'mic-test':micTest(!MICT.st);break;
+    case 'mic-reset':Object.assign(MIC,MIC_DEF);micSave();micReopen();SPK.vol=1;store.set('spkVol',1);applySpeaker();spkLevels();soundSheet();break;
     case 'c-screen':toggleScreen();break;
     case 'c-min':CALL.min=true;renderCall();break;
     case 'c-pop':callPop(false);break;
@@ -3446,6 +3618,9 @@ document.addEventListener('touchstart',e=>{const sk=e.target.closest('[data-stk]
 ['touchend','touchmove','touchcancel'].forEach(ev=>document.addEventListener(ev,()=>clearTimeout(lpT),{passive:true}));
 /* on phones a short tap on a bubble does nothing; the menu is on long press */
 if(touch)document.addEventListener('click',e=>{if(e.target.closest('[data-act="msg"]')&&!e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="react"],[data-act="vplay"],[data-act="vseek"],[data-act="vspeed"],[data-act="rnd"],[data-act="playvid"],[data-act="onceopen"]'))e.stopImmediatePropagation()},true);
+document.addEventListener('input',e=>{const t=e.target;if(!t.dataset)return;
+  if(t.dataset.mic){MIC[t.dataset.mic]=+t.value;store.set('mic',MIC);MICX.live.forEach(ch=>ch.apply());const v=t.parentNode.querySelector('.mv');if(v)v.textContent=t.dataset.mic==='th'?t.value+' дБ':Math.round(t.value*100)+'%'}
+  if(t.dataset.spk){SPK.vol=+t.value;store.set('spkVol',SPK.vol);applySpeaker();spkLevels();const v=t.parentNode.querySelector('.mv');if(v)v.textContent=Math.round(SPK.vol*100)+'%'}});
 document.addEventListener('input',e=>{if(e.target.id==='admq'){const q=e.target.value.toLowerCase();document.querySelectorAll('.adm-row').forEach(x=>x.style.display=x.dataset.q.includes(q)?'':'none')}});
 addEventListener('hashchange',()=>{if(hashTab())return;const jm=/^#join\/([\w-]{4,20})$/.exec(location.hash);if(jm&&S.me){history.replaceState(null,'',location.pathname);joinSheet(jm[1])}
   const pm=/^#pack\/(p[\w-]{4,20})$/.exec(location.hash);if(pm&&S.me){history.replaceState(null,'',location.pathname);packPreview(pm[1])}});

@@ -1298,3 +1298,17 @@ button,a,[data-act],.row,.gbtn,.cbtn{touch-action:manipulation;-webkit-tap-highl
 :root.ios.light:not(.lite) .chat-h,:root.ios.light:not(.lite) .comp-in,:root.ios.light:not(.lite) .tabbar,:root.ios.light:not(.lite) .sheet,:root.ios.light:not(.lite) .ctx-bar{background:rgba(248,248,250,.97)}
 :root.ios .bub,:root.ios .glass,:root.ios .gbtn,:root.ios .ava{box-shadow:none!important}
 .scrolling .pet-svg *,.scrolling .pet-fx *,.scrolling .gdot,.scrolling .fm .pulse{animation-play-state:paused!important}
+
+/* microphone settings: level meter with the gate threshold */
+.mic-seg{margin:4px 0 6px}.mic-seg button{flex:1;font-size:13px}
+.mic-meter{position:relative;height:10px;border-radius:6px;background:rgba(127,127,127,.22);overflow:hidden;margin:10px 0 2px}
+.mic-meter i{position:absolute;left:0;top:0;bottom:0;width:calc(var(--v,0)*100%);background:#8a93a3;border-radius:6px;transition:width .06s linear}
+.mic-meter.open i{background:#2bd47d}
+.mic-meter b{position:absolute;top:-2px;bottom:-2px;left:calc(var(--t,.4)*100%);width:3px;border-radius:2px;background:#2bd47d;box-shadow:0 0 0 1px rgba(0,0,0,.3)}
+.set-row .mv{float:right;color:var(--fg3);font-weight:600}
+/* who is speaking in a call: a green glow around them */
+.call .center .ava,#rv,#lv,.gtile{transition:box-shadow .15s ease-out}
+.call.rspk .center .ava{box-shadow:0 0 0 4px #2bd47d,0 0 28px 6px rgba(43,212,125,.55)!important}
+.call.rspk #rv{box-shadow:inset 0 0 0 4px #2bd47d}
+.call.mspk #lv{box-shadow:0 0 0 3px #2bd47d,0 0 18px 2px rgba(43,212,125,.6)}
+.gtile.spk{box-shadow:0 0 0 3px #2bd47d,0 0 22px 3px rgba(43,212,125,.5)!important}
