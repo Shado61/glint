@@ -42,6 +42,10 @@ self.addEventListener('push',e=>{
 self.addEventListener('notificationclick',e=>{
   const d=e.notification.data||{},act=e.action;e.notification.close();
   e.waitUntil((async()=>{
+    /* the "call is going on" notification: back to the call, or hang up */
+    if(d.type==='live'){const ws=await windows();const w=ws[0];
+      if(act==='hangup'){if(w)w.postMessage({t:'live-hangup'});return}
+      if(w){try{await w.focus()}catch(x){}return}await self.clients.openWindow('/');return}
     if(d.type==='gcall'&&act==='decline')return;
     if(d.type==='call'&&act==='decline'){
       await fetch('/api/call/reject',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({callId:d.callId})}).catch(()=>{});

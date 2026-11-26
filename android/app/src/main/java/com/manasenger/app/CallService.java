@@ -29,6 +29,31 @@ public class CallService extends DelegationService {
     @SuppressLint("MissingPermission")
     @Override
     public boolean onNotifyNotificationWithChannel(String platformTag, int platformId, Notification notification, String channelName) {
+        if (Build.VERSION.SDK_INT >= 26 && platformTag != null && platformTag.startsWith("mnlive.")) {
+            try {
+                NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null && nm.areNotificationsEnabled()) {
+                    ensureLiveChannel(nm);
+                    Intent open = new Intent(this, MainActivity.class);
+                    open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    PendingIntent pi = PendingIntent.getActivity(this, platformTag.hashCode(), open, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+                    Notification.Builder b = Notification.Builder.recoverBuilder(this, notification);
+                    b.setChannelId(LIVE);
+                    b.setCategory(Notification.CATEGORY_CALL);
+                    b.setOngoing(true);
+                    b.setOnlyAlertOnce(true);
+                    b.setUsesChronometer(true);
+                    b.setShowWhen(true);
+                    b.setWhen(System.currentTimeMillis());
+                    b.setContentIntent(pi);
+                    b.setColor(0xFF34C759);
+                    b.setColorized(true);
+                    nm.notify(platformTag, platformId, b.build());
+                    return true;
+                }
+            } catch (RuntimeException e) { /* falls back to the ordinary notification below */ }
+            return super.onNotifyNotificationWithChannel(platformTag, platformId, notification, channelName);
+        }
         Matcher m = TAG.matcher(platformTag == null ? "" : platformTag);
         if (Build.VERSION.SDK_INT < 26 || !m.find()) {
             return super.onNotifyNotificationWithChannel(platformTag, platformId, notification, channelName);
@@ -69,6 +94,19 @@ public class CallService extends DelegationService {
         if (ex == null) return def;
         CharSequence c = ex.getCharSequence(key);
         return c == null ? def : c.toString();
+    }
+
+    static final String LIVE = "mn_live";
+
+    /** "a call is going on": quiet, always on top of the notification list, like a phone call */
+    static void ensureLiveChannel(NotificationManager nm) {
+        if (Build.VERSION.SDK_INT < 26 || nm.getNotificationChannel(LIVE) != null) return;
+        NotificationChannel ch = new NotificationChannel(LIVE, "Идущий звонок", NotificationManager.IMPORTANCE_DEFAULT);
+        ch.setDescription("Показывается, пока идёт звонок или голосовой чат");
+        ch.setSound(null, null);
+        ch.enableVibration(false);
+        ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        nm.createNotificationChannel(ch);
     }
 
     static void ensureChannel(NotificationManager nm) {

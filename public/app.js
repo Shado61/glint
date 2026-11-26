@@ -315,6 +315,7 @@ function pushSetup(){
     const m=e.data||{};
     if(m.t==='notif-chat'&&S.chats[m.chat]){if(S.chats[m.chat].server)S.view=S.chats[m.chat].server;openChat(m.chat)}
     if(m.t==='notif-gcall'&&S.chats[m.chat]){const c=S.chats[m.chat];if(c.server)S.view=c.server;openChat(m.chat);if(m.answer)gcStart(m.chat,(c.gcall&&c.gcall.kind)||'audio')}
+    if(m.t==='live-hangup'){liveHangup();return}
     if(m.t==='notif-call'){if(CALL&&CALL.id===m.callId&&CALL.state==='ringing'){if(m.answer)acceptCall()}else S.callAct={id:m.callId,answer:m.answer}}
   });
 }
@@ -651,6 +652,48 @@ function linkify(t){
 function hashTab(){const m=/^#tab\/(chats|contacts|calls|ai|settings)$/.exec(location.hash);if(!m||!S.me)return false;
   history.replaceState(null,'',location.pathname);if(m[1]==='settings'){if(S.cur)closeChat();settingsSheet();return true}
   if(S.cur&&mobile())closeChat();S.tab=m[1];S.q='';if(S.tab==='calls')S.calls=null;renderSide();return true}
+
+/* ================= calls keep going when you leave the app =================
+   While a call, a group call or a server voice chat is on: an "ongoing call" notification in the phone
+   (tap — back to the call, «Завершить» — hang up), call buttons in the phone's media controls,
+   the screen stays on while the app is open, and the camera comes back by itself when you return. */
+const LIVE={k:'',wl:null};
+function liveNow(){
+  if(CALL&&CALL.state==='active')return {k:'call:'+(CALL.id||''),title:(CALL.kind==='video'?'📹 Видеозвонок':'📞 Звонок')+' · '+nm(CALL.peer),video:CALL.kind==='video',mic:CALL.mic,cam:CALL.cam};
+  if(GC&&GC.state!=='connecting'){const c=S.chats[GC.chat];return {k:'gc:'+GC.chat,title:(GC.kind==='video'?'📹 Групповой видеозвонок':'📞 Групповой звонок')+(c?' · '+chatName(c):''),video:GC.kind==='video',mic:GC.mic,cam:GC.cam}}
+  if(VC&&VC.state!=='connecting'){const g=S.servers[VC.sid],ch=S.chats[VC.cid];return {k:'vc:'+VC.cid,title:'🔊 Голосовой чат'+(ch?' · '+ch.name:'')+(g?' · '+g.name:''),video:false,mic:!VC.mute,cam:false}}
+  return null}
+async function liveNotify(L){
+  try{const r=await navigator.serviceWorker.ready;(await r.getNotifications()).filter(n=>n.tag&&n.tag.startsWith('mnlive.')).forEach(n=>{if(!L||n.tag!=='mnlive.'+L.k.replace(/[^A-Za-z0-9_-]/g,'_'))n.close()});
+    if(!L||Notification.permission!=='granted')return;
+    await r.showNotification(L.title,{tag:'mnlive.'+L.k.replace(/[^A-Za-z0-9_-]/g,'_'),body:'Идёт сейчас · нажмите, чтобы вернуться',icon:'/icon-192.png',badge:'/icon-192.png',silent:true,renotify:false,requireInteraction:true,
+      data:{type:'live'},actions:[{action:'hangup',title:'❌ Завершить'}]})}catch(e){}}
+function liveMedia(L){const ms=navigator.mediaSession;if(!ms)return;
+  try{if(!L){ms.metadata=null;ms.playbackState='none';['hangup','togglemicrophone','togglecamera','enterpictureinpicture'].forEach(a=>{try{ms.setActionHandler(a,null)}catch(e){}});return}
+    ms.metadata=new MediaMetadata({title:L.title,artist:'Manasenger',artwork:[{src:'/icon-192.png',sizes:'192x192',type:'image/png'},{src:'/icon-512.png',sizes:'512x512',type:'image/png'}]});
+    ms.playbackState='playing';
+    const set=(a,f)=>{try{ms.setActionHandler(a,f)}catch(e){}};
+    set('hangup',liveHangup);
+    set('togglemicrophone',()=>{if(CALL)toggleMic();else if(GC)gcMic();else if(VC)voiceMute()});
+    set('togglecamera',()=>{if(CALL)toggleCam();else if(GC)gcCam()});
+    if(L.video)set('enterpictureinpicture',livePip);
+    try{ms.setMicrophoneActive&&ms.setMicrophoneActive(!!L.mic);ms.setCameraActive&&ms.setCameraActive(!!L.cam)}catch(e){}}catch(e){}}
+function liveHangup(){if(CALL)hangup();else if(GC)gcLeave();else if(VC)voiceLeave()}
+/* a video call shrinks into a small window over other apps when you leave Manasenger (where the phone allows it) */
+async function livePip(){try{if(document.pictureInPictureElement)return;const v=[...document.querySelectorAll('#callEl video,.gcall video')].find(x=>x.srcObject&&x.videoWidth&&!x.muted)||[...document.querySelectorAll('#callEl video,.gcall video')].find(x=>x.srcObject&&x.videoWidth);
+  if(v&&v.requestPictureInPicture)await v.requestPictureInPicture()}catch(e){}}
+async function liveWake(on){try{if(on&&!LIVE.wl&&'wakeLock' in navigator&&!document.hidden){LIVE.wl=await navigator.wakeLock.request('screen');LIVE.wl.addEventListener('release',()=>{LIVE.wl=null})}
+  else if(!on&&LIVE.wl){LIVE.wl.release();LIVE.wl=null}}catch(e){}}
+/* the camera is switched off by the phone while the app is in the background; bring it back */
+async function liveCamBack(){
+  try{if(CALL&&CALL.cam&&CALL.local){const t=CALL.local.getVideoTracks()[0];if(!t||t.readyState==='ended'){
+      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:CALL.facing||'user'}});const nt=st.getVideoTracks()[0];
+      if(t){CALL.local.removeTrack(t)}CALL.local.addTrack(nt);if(CALL.fx&&CALL.fx.setSource)CALL.fx.setSource(nt);pushVideo()}}}catch(e){}}
+function liveTick(){const L=liveNow(),k=L?L.k+'|'+L.mic+'|'+L.cam:'';
+  if(k!==LIVE.k){const changedCall=(LIVE.k.split('|')[0])!==(L?L.k:'');LIVE.k=k;if(changedCall)liveNotify(L);liveMedia(L);liveWake(!!L)}}
+setInterval(liveTick,1000);
+document.addEventListener('visibilitychange',()=>{const L=liveNow();if(!L)return;
+  if(document.hidden){if(L.video)livePip()}else{liveWake(true);liveCamBack();if(document.pictureInPictureElement)document.exitPictureInPicture().catch(()=>{})}});
 /* ================= friends map (like 2GIS): friends who added each other see where the other one is ================= */
 const MAP_STYLES={liberty:['Обычная','https://tiles.openfreemap.org/styles/liberty'],bright:['Яркая','https://tiles.openfreemap.org/styles/bright'],positron:['Светлая','https://tiles.openfreemap.org/styles/positron']};
 let MAPD={sharing:false,friends:[]},MAP=null,MAPV=null,MK=new Map(),MEMK=null,mapSel=null;
