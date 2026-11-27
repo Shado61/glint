@@ -64,6 +64,7 @@ const P={
   pin:'<path d="M12 22s7-6.1 7-12a7 7 0 0 0-14 0c0 5.9 7 12 7 12Z"/><circle cx="12" cy="10" r="2.6"/>',
   locate:'<path d="m3 11 19-9-9 19-2-8-8-2Z"/>',
   pad:'<rect x="3" y="3" width="7.5" height="7.5" rx="2"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="2"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="2"/><path d="M15 21v-6.5l5-1.5V19"/><circle cx="14" cy="21" r="1"/><circle cx="19" cy="19" r="1"/>',
+  down:'<path d="m6 9 6 6 6-6"/>',
   layers:'<path d="m12 2 10 5-10 5L2 7l10-5Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/>'
 };
 const ic=(n,cls='ico')=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
@@ -503,6 +504,7 @@ function renderMain(){
       <button class="gbtn ic" data-act="chatmenu" aria-label="Ещё">${ic('more')}</button></header>
     <div id="gban"></div>
     <div class="msgs" id="msgs"></div>
+    <button class="todown glass" id="todown" data-act="todown" aria-label="Вниз, к новым сообщениям" hidden>${ic('down')}<b></b></button>
     <div class="composer">
       <div id="stkp"></div>
       <div id="ctx"></div>
@@ -533,7 +535,7 @@ function renderStatus(){
 async function openChat(id){
   if(S.chats[id]&&S.chats[id].server)S.view=S.chats[id].server;else if(S.chats[id])S.view='home';
   if(S.cur&&$('#txt'))S.draft[S.cur]=$('#txt').value;
-  S.cur=id;S.reply=S.edit=null;
+  S.cur=id;S.reply=S.edit=null;S.below=0;PIN.on=true;
   history.replaceState(null,'','#'+id);
   const fresh=!$('#app').classList.contains('open');
   renderSide();renderMain();
@@ -1270,11 +1272,43 @@ function patchList(box,arr){
     for(const n of kids)box.insertBefore(n,cur)}
   while(cur){const nx=cur.nextSibling;cur.remove();cur=nx}
 }
+/* ---------- the chat always opens on the newest messages ----------
+   Messages far off screen are laid out with a guessed height on phones (that keeps scrolling light), and photos,
+   videos and link cards get their real size a moment later. So right after opening, the chat is held at the bottom
+   for a short while, on every size change, until it stops changing; it is shown only once it stands still,
+   so there is no visible jump. Any touch, wheel or drag by the person hands control back to them at once. */
+const PIN={on:true,raf:0,until:0,prog:0,box:null};
+function pinNow(box){PIN.prog=performance.now();box.scrollTop=box.scrollHeight}
+function pinHold(box,ms){PIN.on=true;cancelAnimationFrame(PIN.raf);const t0=performance.now();PIN.until=t0+ms;let lastH=-1,same=0;
+  const step=()=>{if(!box.isConnected)return;if(PIN.on)pinNow(box);const h=box.scrollHeight;same=h===lastH?same+1:0;lastH=h;
+    const t=performance.now();if(box.classList.contains('opening')&&(same>=2||t-t0>450))box.classList.remove('opening');
+    if(t<PIN.until&&PIN.on)PIN.raf=requestAnimationFrame(step);else box.classList.remove('opening')};step()}
+function pinStop(box){PIN.until=0;cancelAnimationFrame(PIN.raf);if(box)box.classList.remove('opening')}
+function downBtn(box){const b=$('#todown');if(!b||!box)return;const far=box.scrollHeight-box.scrollTop-box.clientHeight>Math.max(500,box.clientHeight*.8);
+  if(b.hidden===far){b.hidden=!far}const n=S.below||0,t=n?(n>99?'99+':String(n)):'';const bb=b.querySelector('b');if(bb.textContent!==t)bb.textContent=t;b.classList.toggle('n',!!n)}
+function wireMsgs(box){if(box._wired)return;box._wired=true;
+  const user=()=>pinStop(box);
+  box.addEventListener('touchstart',user,{passive:true});box.addEventListener('pointerdown',e=>{if(e.pointerType!=='touch')user()},{passive:true});
+  box.addEventListener('wheel',e=>{if(e.deltaY<0)user()},{passive:true});
+  box.addEventListener('scroll',()=>{
+    const d=box.scrollHeight-box.scrollTop-box.clientHeight;
+    if(performance.now()-PIN.prog>90)PIN.on=d<80;
+    if(d<80&&S.below){S.below=0}
+    downBtn(box);
+    /* older messages come up by themselves when the top is near; the place being read stays put */
+    if(box.scrollTop<Math.max(400,box.clientHeight*.6)&&!S.olderBusy){const c=S.cur,l=S.msgs[c];if(l&&(l.length>(S.win[c]||WIN)||S.more[c])){S.olderBusy=true;loadOlder().finally(()=>setTimeout(()=>S.olderBusy=false,250))}}
+  },{passive:true});
+  /* a photo, video or sticker got its real size: stay at the bottom if that is where we were */
+  const grow=()=>{if(PIN.on)pinNow(box)};
+  box.addEventListener('load',grow,true);box.addEventListener('loadedmetadata',grow,true);
+  try{new ResizeObserver(grow).observe(box)}catch(e){}
+}
 function renderMsgs(toBottom){
-  const box=$('#msgs'),c=S.chats[S.cur];if(!box||!c)return;
+  const box=$('#msgs'),c=S.chats[S.cur];if(!box||!c)return;wireMsgs(box);
   const list=S.msgs[c.id];
   if(!list){box.innerHTML='<div class="sys">Загружаем…</div>';return}
-  const near=box.scrollHeight-box.scrollTop-box.clientHeight<140;
+  const near=(PIN.on&&PIN.box===box)||box.scrollHeight-box.scrollTop-box.clientHeight<140;
+  const first=PIN.box!==box||!box._had;if(first&&list.length){box._had=true;box.classList.add('opening');toBottom=true}PIN.box=box;
   const win=S.win[c.id]||WIN,from=Math.max(0,list.length-win),shown=list.slice(from);
   const H=[];H.push((from>0||S.more[c.id])?`<button class="gbtn more" data-act="older">Показать раньше</button>`:'');
   if(!list.length)H.push(`<div class="sys glass pill" style="margin-top:auto">${c.type==='channel'?'Это начало канала '+esc(chatName(c))+' 👋':c.type==='self'?'Сохраняй сюда заметки, ссылки и фото. Пересылай важное из других чатов ⭐':'Напиши первое сообщение 👋'}</div>`);
@@ -1290,12 +1324,12 @@ function renderMsgs(toBottom){
   patchList(box,H);
   /* stay at the bottom after sending and when new messages come; otherwise keep the same place */
   const place=()=>{if(toBottom||near)box.scrollTop=box.scrollHeight;else if(toBottom===null)box.scrollTop=box.scrollHeight-prevH+prevT;else box.scrollTop=box.scrollHeight-box.clientHeight-fromBottom};
-  place();requestAnimationFrame(place);watchRounds();
+  place();if(toBottom||(near&&PIN.on))pinHold(box,first?1400:500);else requestAnimationFrame(place);watchRounds();downBtn(box);
   /* pictures that load later make the chat taller: keep the bottom in view */
   if(toBottom||near)box.querySelectorAll('img').forEach(im=>{if(!im.complete)im.addEventListener('load',()=>{if(box.scrollHeight-box.scrollTop-box.clientHeight<400)box.scrollTop=box.scrollHeight},{once:true})});
 }
 async function loadOlder(){
-  const c=S.cur,l=S.msgs[c];if(!l||!l.length)return;
+  const c=S.cur,l=S.msgs[c];if(!l||!l.length)return;const box=$('#msgs');if(box)pinStop(box);PIN.on=false;
   const win=S.win[c]||WIN;if(l.length>win){S.win[c]=win+WIN;renderMsgs(null);return}
   try{const r=await api(`/api/messages?chat=${c}&before=${l[0].ts}`);S.msgs[c]=r.messages.concat(l);S.more[c]=r.more;S.win[c]=(S.win[c]||WIN)+r.messages.length;if(S.cur===c)renderMsgs(null)}catch(e){toast(e.message)}
 }
@@ -1772,7 +1806,7 @@ function onWS(m){
         if(!here){c.unread=(c.unread||0)+1;if(c.type!=='channel'&&!c.muted)beep([880,1320],.07,.03,.05)}
         if(c.type!=='channel'||(m.msg.text||'').includes('@'+S.me.username))notify(chatName(c),c.type!=='dm'?`${nm(S.users[m.msg.from])}: ${lastText(m.msg)}`:lastText(m.msg),m.chat,m.chat);
       }
-      if(S.cur===m.chat){renderMsgs(mine?true:undefined);frameStatus();markRead()}
+      if(S.cur===m.chat){if(!mine&&!m.msg.sys&&!PIN.on)S.below=(S.below||0)+1;renderMsgs(mine?true:undefined);frameStatus();markRead()}
       frameSide();updateTitle();
       if(S.tab==='calls'&&m.msg.call)S.calls=null;
       return;
@@ -1853,15 +1887,19 @@ function micConstraints(){
   if(MIC.dev)AUDIO.deviceId={ideal:MIC.dev};
 }
 micConstraints();
+/* after a call the sound engine (noise filters, soundpad) is put to sleep, so it does not keep the processor
+   and battery busy in the background; the next call or soundpad tap wakes it */
+function micIdle(){clearTimeout(MICX.idleT);MICX.idleT=setTimeout(()=>{const c=MICX.ctx;
+  if(!c||c.state!=='running'||MICX.live.size||PAD.live.size||CALL||GC||VC)return;MICX.sleep=true;c.suspend().catch(()=>{})},15e3)}
 function micSave(){store.set('mic',MIC);micConstraints();MICX.live.forEach(ch=>ch.apply())}
 const MICX={ctx:null,mods:{},bins:{},live:new Set()};
 async function micCtx(){
-  if(MICX.ctx&&MICX.ctx.state!=='closed')return MICX.ctx;
+  if(MICX.ctx&&MICX.ctx.state!=='closed'){MICX.sleep=false;clearTimeout(MICX.idleT);if(MICX.ctx.state!=='running')MICX.ctx.resume().catch(()=>{});micIdle();return MICX.ctx}
   const A=window.AudioContext||window.webkitAudioContext;if(!A||!window.AudioWorkletNode)return null;
   try{MICX.ctx=new A({sampleRate:48000,latencyHint:'interactive'})}catch(e){try{MICX.ctx=new A({latencyHint:'interactive'})}catch(e2){return null}}
-  const c=MICX.ctx;c.resume().catch(()=>{}); /* called right inside the tap: iPhone lets the audio engine start only then */
-  c.onstatechange=()=>{if(c.state==='suspended'||c.state==='interrupted')c.resume().catch(()=>{})};
-  document.addEventListener('visibilitychange',()=>{if(c.state!=='running')c.resume().catch(()=>{})});
+  const c=MICX.ctx;c.resume().catch(()=>{});micIdle(); /* called right inside the tap: iPhone lets the audio engine start only then */
+  c.onstatechange=()=>{if(!MICX.sleep&&(c.state==='suspended'||c.state==='interrupted'))c.resume().catch(()=>{})};
+  document.addEventListener('visibilitychange',()=>{if(!MICX.sleep&&c.state!=='running')c.resume().catch(()=>{})});
   return c;
 }
 async function micMod(name){
@@ -1924,7 +1962,7 @@ async function micWrap(stream,force){
     await ch.wire();
     const t=ch.dst.stream.getAudioTracks()[0];if('contentHint' in t)t.contentHint='speech';
     const stop=t.stop.bind(t);
-    t.stop=()=>{stop();ch.raw.stop();MICX.live.delete(ch);setTimeout(()=>{try{ch.src.disconnect();ch.vol.disconnect();ch.ns&&ch.ns.destroy&&ch.ns.destroy()}catch(e){}},100)};
+    t.stop=()=>{stop();ch.raw.stop();MICX.live.delete(ch);micIdle();setTimeout(()=>{try{ch.src.disconnect();ch.vol.disconnect();ch.ns&&ch.ns.destroy&&ch.ns.destroy()}catch(e){}},100)};
     ch.raw.addEventListener('ended',()=>{try{t.dispatchEvent(new Event('ended'))}catch(e){}});
     t._mn=ch;MICX.live.add(ch);
     const out=new MediaStream([t].concat(stream.getVideoTracks()));out._mn=ch;return out;
@@ -2127,11 +2165,18 @@ async function padPlay(id){
   const g=ctx.createDynamicsCompressor();g.threshold.value=-4;g.knee.value=2;g.ratio.value=20;g.attack.value=.001;g.release.value=.08;g0.connect(g);
   if(ch&&ch.dst.context===ctx){if(!ch.pad){ch.pad=ctx.createGain();ch.pad.connect(ch.dst)}g.connect(ch.pad)}
   let mon=null;if(!live||PAD.me||!ch){mon=ctx.createGain();mon.gain.value=live&&ch?.45:1;g.connect(mon);mon.connect(ctx.destination)}
-  src.onended=()=>{PAD.live.delete(src);try{g0.disconnect();g.disconnect();if(mon)mon.disconnect()}catch(e){}};
+  /* in a call the sound I hear myself comes out of the phone's speaker, and the microphone would catch it again:
+     the others then got it twice — late, hollow and chopped by the noise filter. While it plays through the speaker
+     the microphone is turned down (my voice still goes through, quieter); with headphones nothing changes. */
+  const duck=!!(live&&ch&&mon&&ch.dst.context===ctx&&!padHeadset(ch));
+  if(duck){PAD.duck=(PAD.duck||0)+1;ch.vol.gain.setTargetAtTime(MIC.vol*.3,ctx.currentTime,.015)}
+  src.onended=()=>{PAD.live.delete(src);if(!PAD.live.size)micIdle();try{g0.disconnect();g.disconnect();if(mon)mon.disconnect()}catch(e){}
+    if(duck&&--PAD.duck<=0){PAD.duck=0;try{ch.vol.gain.setTargetAtTime(MIC.vol,ctx.currentTime,.12)}catch(e){}}};
   src.start();try{src.stop(ctx.currentTime+30)}catch(e){}
   PAD.live.add(src);
   if(live&&ch){padTell(id);if(!padMicOn())toast('🎙 Микрофон выключен — собеседники не услышат звук')}
 }
+const padHeadset=ch=>/headset|head|наушн|гарнит|bluetooth|airpods|buds|earphone|hands-free|usb/i.test((ch&&ch.raw&&ch.raw.label)||'');
 function padStop(){PAD.live.forEach(s=>{try{s.stop()}catch(e){}});PAD.live.clear()}
 /* the others get a small note who played what */
 function padTell(id){const now=Date.now();if(now-PAD.told<1200)return;PAD.told=now;
@@ -2219,6 +2264,14 @@ const mkOffer=(pc,o)=>{redFirst(pc);return pc.createOffer(o)};
 const mkAnswer=pc=>{redFirst(pc);return pc.createAnswer()};
 /* the receiving side: a slightly deeper jitter buffer on a shaky network, so the voice never stutters */
 function jitterFor(pc,bad){try{pc.getReceivers().forEach(r=>{if(r.track&&r.track.kind==='audio'){if('jitterBufferTarget' in r)r.jitterBufferTarget=bad?160:null;else if('playoutDelayHint' in r)r.playoutDelayHint=bad?.16:null}})}catch(e){}}
+/* ---------- low battery: calls use less ----------
+   Below 20% and not charging, video goes to 20 frames a second and a lower bitrate (the encoder works less,
+   the phone heats less); once charging or above 25% it goes back. */
+const BAT={low:false};
+try{navigator.getBattery&&navigator.getBattery().then(b=>{const f=()=>{const low=!b.charging&&b.level<(BAT.low?.25:.2);if(low!==BAT.low){BAT.low=low;tuneSenders();gcTune();camBattery()}};
+  f();b.addEventListener('levelchange',f);b.addEventListener('chargingchange',f)}).catch(()=>{})}catch(e){}
+function camBattery(){const st=CALL&&CALL.cam&&CALL.local||GC&&GC.cam&&GC.local;const t=st&&st.getVideoTracks()[0];if(!t||!t.applyConstraints)return;
+  t.applyConstraints({frameRate:{ideal:BAT.low?20:isLite()?24:30,max:BAT.low?20:isLite()?24:30}}).catch(()=>{})}
 /* weak phones encode H.264 in hardware, which is much lighter than doing VP8 in software */
 function preferCodecs(tv){
   try{
@@ -2333,7 +2386,8 @@ function tuneSenders(){
   const bad=CALL.q==='bad',mid=CALL.q==='mid',lite=isLite();
   const e=p.encodings[0];
   if(CALL.screen){e.maxBitrate=bad?1000e3:mid?2500e3:lite?2500e3:5000e3;e.maxFramerate=bad?12:mid?20:30;e.scaleResolutionDownBy=1}
-  else{e.maxBitrate=bad?250e3:mid?900e3:lite?1200e3:touch?2500e3:3500e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2.5:1}
+  else{e.maxBitrate=bad?250e3:mid?900e3:lite?1200e3:touch?2500e3:3500e3;e.maxFramerate=bad?15:lite?24:30;e.scaleResolutionDownBy=bad?2.5:1;
+    if(BAT.low){e.maxBitrate=Math.min(e.maxBitrate,1200e3);e.maxFramerate=Math.min(e.maxFramerate,20)}}
   e.priority='high';
   /* on a weak network keep the picture smooth (lower sharpness) instead of freezing */
   p.degradationPreference=CALL.screen?'maintain-resolution':bad?'maintain-framerate':'balanced';
@@ -2422,7 +2476,7 @@ function hangup(silent){
   if(CALL.id)wsSend({t:CALL.state==='ringing'?'call-reject':'call-end',callId:CALL.id});
   cleanupCall();
 }
-function cleanupCall(){SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
+function cleanupCall(){padStop();SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
   stopRing();
   if(!CALL)return;
   clearInterval(CALL.timer);clearInterval(CALL.statT);clearTimeout(CALL.discT);clearTimeout(CALL.failT);clearTimeout(CALL.idleT);
@@ -2779,7 +2833,7 @@ function gcTune(){
   const total=GC.screen?(lite?2000e3:5000e3):(lite?1500e3:4000e3),per=Math.max(200e3,Math.min(GC.screen?4000e3:2000e3,total/n));
   GC.peers.forEach(p=>{
     if(p.vs){const q=p.vs.getParameters();if(!q.encodings||!q.encodings.length)q.encodings=[{}];const e=q.encodings[0];
-      e.maxBitrate=per;e.maxFramerate=GC.screen?15:(n>3?20:24);e.scaleResolutionDownBy=GC.screen?1:(n>4?2:n>2?1.5:1);q.degradationPreference=GC.screen?'maintain-resolution':'maintain-framerate';p.vs.setParameters(q).catch(()=>{})}
+      e.maxBitrate=BAT.low?Math.min(per,900e3):per;e.maxFramerate=GC.screen?15:BAT.low?18:(n>3?20:24);e.scaleResolutionDownBy=GC.screen?1:(n>4?2:n>2?1.5:1);q.degradationPreference=GC.screen?'maintain-resolution':'maintain-framerate';p.vs.setParameters(q).catch(()=>{})}
     if(p.as){const q=p.as.getParameters();if(q.encodings&&q.encodings[0]){q.encodings[0].priority='high';q.encodings[0].networkPriority='high';p.as.setParameters(q).catch(()=>{})}}
   });
 }
@@ -2808,7 +2862,7 @@ async function gcPeer(uid,offer){
   const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle',iceCandidatePoolSize:2});
   const p={pc,uid,pending:[],stream:new MediaStream(),off:!!offer,kind:'grtc'};GC.peers.set(uid,p);
   if(offer){
-    p.as=pc.addTransceiver('audio',{direction:'sendrecv'}).sender;p.vs=pc.addTransceiver('video',{direction:'sendrecv'}).sender;
+    p.as=pc.addTransceiver('audio',{direction:'sendrecv'}).sender;const tv=pc.addTransceiver('video',{direction:'sendrecv'});preferCodecs(tv);p.vs=tv.sender;
     p.as.replaceTrack(GC.local.getAudioTracks()[0]||null);p.vs.replaceTrack(gcOutVideo());
   }
   pc.onicecandidate=e=>{if(e.candidate)wsSend({t:'grtc',to:uid,data:{cand:e.candidate.toJSON()}})};
@@ -2852,7 +2906,7 @@ async function onGroupMsg(m){
 }
 function gcClosePeer(p){try{p.pc.close()}catch(e){}if(p.audio){p.audio.srcObject=null;p.audio.remove()}}
 function gcLeave(silent){
-  if(!GC)return;const g=GC;GC=null;SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
+  if(!GC)return;padStop();const g=GC;GC=null;SPK.nodes.forEach(x=>{try{x.n.disconnect()}catch(e){}});SPK.nodes.clear();
   wsSend({t:'gleave'});g.peers.forEach(gcClosePeer);
   g.local&&g.local.getTracks().forEach(t=>t.stop());g.screenStream&&g.screenStream.getTracks().forEach(t=>t.stop());
   clearInterval(g.clock);if(!silent)beep([784,523],.09,.02,.05);
@@ -2958,7 +3012,7 @@ async function voiceJoin(sid,cid){
 }
 function voiceRejoin(){if(VC){const {sid,cid}=VC;VC.peers.forEach(p=>closePeer(p));VC.peers.clear();wsSend({t:'vjoin',channel:cid,mute:VC.mute,deaf:VC.deaf})}}
 function voiceLeave(silent){
-  if(!VC)return;
+  if(!VC)return;padStop();
   if(!silent)wsSend({t:'vleave'});
   VC.peers.forEach(p=>closePeer(p));
   VC.local&&VC.local.getTracks().forEach(t=>t.stop());VC.screenStream&&VC.screenStream.getTracks().forEach(t=>t.stop());voiceWatch(null);
@@ -3663,6 +3717,10 @@ document.addEventListener('click',async e=>{
     case 'send':sendMsg();$('#txt')&&!touch&&$('#txt').focus();break;
     case 'attach':$('#file').click();break;
     case 'older':loadOlder();break;
+    case 'todown':{const b=$('#msgs');if(!b)break;S.below=0;PIN.on=true;
+      /* far up in history: drop the extra loaded messages and jump; nearby: glide down */
+      if((S.win[S.cur]||WIN)>WIN||b.scrollHeight-b.scrollTop-b.clientHeight>b.clientHeight*4){S.win[S.cur]=WIN;renderMsgs(true)}
+      else{PIN.prog=performance.now()+600;b.scrollTo({top:b.scrollHeight,behavior:'smooth'});setTimeout(()=>{if(PIN.on)pinNow(b);downBtn(b)},450)}break}
     case 'msg':if(!touch&&e.detail>=2)break;if(e.target.closest('a,[data-act="zoom"],[data-act="jump"],.reacts,[data-act="onceopen"]'))break;msgMenu(id,e.clientX,e.clientY);break;
     case 'zoom':{const L=$('#layer');L.innerHTML=`<div class="lightbox" data-act="closemenu"><img decoding="async" src="${esc(el.src)}" alt=""></div>`;break}
     case 'jump':{const t=document.querySelector(`.m[data-id="${CSS.escape(id)}"]`);if(t){t.scrollIntoView({block:'center',behavior:'smooth'});t.classList.add('hl');setTimeout(()=>t.classList.remove('hl'),1300)}break}

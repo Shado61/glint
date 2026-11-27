@@ -645,7 +645,7 @@ class FX{
     this.r=Renderer(this.cv);
     if(!this.r)this.x2=this.cv.getContext('2d');
     this.fps=opts.fps||(LITE?20:30);
-    this.maxSide=maxSide;
+    this.maxSide=maxSide;this.maxBase=maxSide;this.trackSide=LITE?320:448;this.gv={n:0,t0:performance.now(),lvl:0,good:0,cost:0};
     this.out=!this.still&&!opts.noStream&&this.cv.captureStream?this.cv.captureStream(this.fps):null;
     this.sm=new Smooth(NV*2,LITE?1.2:1.6,8);this.face=null;this.parts=new Particles();this.last=performance.now();
     this.loop=this.loop.bind(this);
@@ -672,7 +672,7 @@ class FX{
   pause(on){this.paused=on;if(!on&&!this.still){this.last=performance.now();if(this.v.requestVideoFrameCallback)this.v.requestVideoFrameCallback(this.loop);else this.loop()}}
   /* the newest frame goes to the tracker; its answer is used whenever it comes */
   async feed(){
-    const k=Math.min(1,(LITE?320:448)/Math.max(this.vw,this.vh)),w=Math.max(2,Math.round(this.vw*k)),h=Math.max(2,Math.round(this.vh*k));
+    const k=Math.min(1,this.trackSide/Math.max(this.vw,this.vh)),w=Math.max(2,Math.round(this.vw*k)),h=Math.max(2,Math.round(this.vh*k));
     if(this.bg.id!=='none'&&!this.segging&&SG.w){this.segging=true;segment(this.v,w,h).then(r=>{this.segging=false;if(r&&r.mask&&this.alive)this.mask0=r.mask})}
     if(this.feeding||!this.needFace())return;
     this.feeding=true;const t0=performance.now();
@@ -694,8 +694,8 @@ class FX{
     const vw=this.v.videoWidth,vh=this.v.videoHeight;if(!vw||!vh)return;
     if(vw===this.vw&&vh===this.vh&&this.fitted)return;this.fitted=true;
     const W=this.cv.width,H=this.cv.height;this.vw=vw;this.vh=vh;
-    if(Math.abs(vw/vh-W/H)<.01&&Math.max(W,H)>=Math.min(this.maxSide,Math.max(vw,vh))*.98)return;
     const k=Math.min(1,this.maxSide/Math.max(vw,vh)),w=Math.round(vw*k)&~1,h=Math.round(vh*k)&~1;
+    if(Math.abs(w-W)<=2&&Math.abs(h-H)<=2)return;
     this.cv.width=w;this.cv.height=h;if(this.r)this.r.resize(w,h);this.bgDrawn=false;this.mask0=null;
   }
   tick(){
@@ -703,7 +703,23 @@ class FX{
     if(this.v.readyState<2)return;
     if(!this.still)this.fit();
     this.feed();this.draw(dt);
+    if(!this.still)this.govern(now,performance.now()-now);
   }
+  /* keeps effects smooth on weak phones: every 2 seconds the real frame rate is checked. If frames are being lost
+     because drawing or face tracking is too slow, the picture and the frame sent to the tracker get smaller,
+     one step at a time (down to about half); after 6 good seconds they grow back one step. */
+  govern(now,cost){
+    const g=this.gv;g.n++;g.cost=g.cost*.9+cost*.1;if(now-g.t0<2000)return;
+    const fps=g.n*1000/(now-g.t0);g.n=0;g.t0=now;
+    const heavy=g.cost>9||(this.needFace()&&(this.lat||0)>70);
+    if(fps<this.fps*.78&&heavy&&g.lvl<3){g.lvl++;g.good=0;this.level()}
+    else if(fps>=this.fps*.92&&g.lvl>0){if(++g.good>=3){g.good=0;g.lvl--;this.level()}}
+    else g.good=0;
+  }
+  level(){const l=this.gv.lvl;
+    this.maxSide=Math.max(320,Math.round(this.maxBase*[1,.8,.66,.52][l]));
+    this.trackSide=[LITE?320:448,320,256,224][l];
+    this.fitted=false;this.fit()}
   draw(dt){
     const W=this.cv.width,H=this.cv.height,mir=this.mirror?-1:1;
     if(!this.r){const x=this.x2;x.save();if(this.mirror){x.translate(W,0);x.scale(-1,1)}x.drawImage(this.v,0,0,W,H);x.restore();return}

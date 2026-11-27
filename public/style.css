@@ -1348,3 +1348,16 @@ button,a,[data-act],.row,.gbtn,.cbtn{touch-action:manipulation;-webkit-tap-highl
 .g-meme{--pk1:#5a6fd6;--pk2:#3a3f9e}.g-voice{--pk1:#d0628f;--pk2:#8e3466}.g-party{--pk1:#e3a13b;--pk2:#b0592a}
 .g-things{--pk1:#3f9fb5;--pk2:#2a5f86}.g-animals{--pk1:#5fae6a;--pk2:#2f7348}.g-synth{--pk1:#7c8496;--pk2:#4c5262}
 .pad-cr{font-size:11px;opacity:.6;margin-top:8px}
+/* the chat opens on the newest messages: it stays invisible for the few frames it takes to settle at the bottom */
+.msgs.opening{opacity:0}
+.msgs{transition:opacity .12s}
+/* "down" button: appears when you scroll up into history; the number is how many new messages came meanwhile */
+.todown{position:absolute;right:14px;bottom:calc(84px + var(--safe-b));z-index:5;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
+  color:var(--fg);border:1px solid var(--line,rgba(255,255,255,.12));cursor:pointer;animation:tdIn .18s ease-out;-webkit-tap-highlight-color:transparent}
+.todown[hidden]{display:none}
+.todown .ico{width:22px;height:22px}
+.todown b{position:absolute;top:-6px;right:-4px;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--acc,#4f7cff);color:#fff;font-size:11.5px;line-height:20px;text-align:center;display:none}
+.todown.n b{display:block}
+@media (max-width:760px){.todown{right:10px;bottom:calc(78px + var(--cb))}}
+html.kb .todown{bottom:78px}
+@keyframes tdIn{from{opacity:0;transform:translateY(8px) scale(.9)}to{opacity:1;transform:none}}
