@@ -1341,3 +1341,10 @@ button,a,[data-act],.row,.gbtn,.cbtn{touch-action:manipulation;-webkit-tap-highl
 /* the call bar with the soundpad: on narrow phones it wraps into two neat rows instead of going off screen */
 @media (max-width:520px){.call .bar{flex-wrap:wrap;justify-content:center;width:max-content;max-width:calc(100vw - 16px);border-radius:32px}.call .bar .cbtn{width:50px;height:50px}.call .bar .cbtn svg{width:23px;height:23px}
   .gc-bar{flex-wrap:wrap;justify-content:center}.gc-bar .cbtn{width:50px;height:50px}}
+/* soundpad: each group has its own colour, so the right button is found at a glance */
+.pad-grid[class*="g-"] .pad-k{background:linear-gradient(145deg,var(--pk1),var(--pk2));border-color:rgba(255,255,255,.14);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),0 4px 14px -8px var(--pk2)}
+.pad-grid[class*="g-"] .pad-k .pn{color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35)}
+.pad-grid[class*="g-"] .pad-k .pe{filter:drop-shadow(0 2px 3px rgba(0,0,0,.3))}
+.g-meme{--pk1:#5a6fd6;--pk2:#3a3f9e}.g-voice{--pk1:#d0628f;--pk2:#8e3466}.g-party{--pk1:#e3a13b;--pk2:#b0592a}
+.g-things{--pk1:#3f9fb5;--pk2:#2a5f86}.g-animals{--pk1:#5fae6a;--pk2:#2f7348}.g-synth{--pk1:#7c8496;--pk2:#4c5262}
+.pad-cr{font-size:11px;opacity:.6;margin-top:8px}

@@ -8,4 +8,7 @@ android {
   lint { checkReleaseBuilds false; abortOnError false }
   compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
 }
-dependencies { implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0' }
+dependencies {
+  implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+  implementation 'com.google.android.gms:play-services-location:21.3.0'
+}

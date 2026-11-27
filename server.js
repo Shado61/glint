@@ -158,17 +158,45 @@ function cleanImg(v){
 /* ---------- pictures: kept once, sent by link ----------
    Photos, stickers, avatars and stories are stored separately and messages carry only a short /img/… link.
    The phone downloads each picture once and keeps it, so chats open fast even on weak phones. */
-const IMGBUF=new Map();
+/* the bytes of a picture live in the glint_media table (key "i"+hash), not in the server's memory:
+   only a small recently-used set is kept in memory, limited by size */
+const IMGBUF=new Map();let IMGBUF_BYTES=0;const IMGBUF_MAX=48e6;
+function imgCache(h,b){if(IMGBUF.has(h))return b;IMGBUF.set(h,b);IMGBUF_BYTES+=b.b.length;
+  while(IMGBUF_BYTES>IMGBUF_MAX&&IMGBUF.size>1){const k=IMGBUF.keys().next().value;IMGBUF_BYTES-=IMGBUF.get(k).b.length;IMGBUF.delete(k)}return b}
+function imgUncache(h){const b=IMGBUF.get(h);if(b){IMGBUF_BYTES-=b.b.length;IMGBUF.delete(h)}}
+const IMG_PENDING=new Map();
+async function imgSave(h,buf){
+  try{await pool.query('INSERT INTO glint_media(k,b) VALUES($1,$2) ON CONFLICT(k) DO NOTHING',['i'+h,buf]);IMG_PENDING.delete(h);return true}
+  catch(e){IMG_PENDING.set(h,buf);console.error('[img]',e.message);return false}
+}
+setInterval(()=>{for(const [h,b] of IMG_PENDING)if(DB.imgs[h])imgSave(h,b);else IMG_PENDING.delete(h)},30e3).unref();
 function putImg(dataUrl){
   const m=/^data:(image\/(?:png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(String(dataUrl||''));if(!m)return '';
   const h=sha(m[2]).slice(0,24);
-  if(!DB.imgs[h]){DB.imgs[h]={t:m[1],d:m[2]};mark('i:'+h)}
+  if(!DB.imgs[h]){
+    if(pool){const buf=Buffer.from(m[2],'base64');DB.imgs[h]={t:m[1],n:buf.length};imgCache(h,{t:m[1],b:buf});imgSave(h,buf)}
+    else DB.imgs[h]={t:m[1],d:m[2]};
+    mark('i:'+h)}
   return '/img/'+h;
 }
-function dropImg(url){const h=String(url||'').slice(5);if(DB.imgs[h]){delete DB.imgs[h];IMGBUF.delete(h);mark('i:'+h)}}
-function imgBuf(h){
-  let b=IMGBUF.get(h);if(b)return b;const r=DB.imgs[h];if(!r)return null;
-  b={t:r.t,b:Buffer.from(r.d,'base64')};IMGBUF.set(h,b);if(IMGBUF.size>400)IMGBUF.delete(IMGBUF.keys().next().value);return b;
+function imgForget(h){if(!DB.imgs[h])return;delete DB.imgs[h];imgUncache(h);IMG_PENDING.delete(h);mark('i:'+h);
+  if(pool)pool.query('DELETE FROM glint_media WHERE k=$1',['i'+h]).catch(()=>{})}
+function dropImg(url){imgForget(String(url||'').slice(5))}
+async function imgBuf(h){
+  const hit=IMGBUF.get(h);if(hit){IMGBUF.delete(h);IMGBUF.set(h,hit);return hit}
+  const r=DB.imgs[h];if(!r)return null;
+  if(r.d)return imgCache(h,{t:r.t,b:Buffer.from(r.d,'base64')});
+  if(!pool)return null;
+  const pend=IMG_PENDING.get(h);if(pend)return imgCache(h,{t:r.t,b:pend});
+  try{const q=await pool.query('SELECT b FROM glint_media WHERE k=$1',['i'+h]);return q.rows[0]?imgCache(h,{t:r.t,b:q.rows[0].b}):null}catch(e){return null}
+}
+/* pictures saved by older versions sit inside glint_kv as text and are all loaded into memory at start;
+   they are moved into glint_media once, a few at a time, so memory goes down after the first start */
+async function imgMoveOut(){
+  if(!pool)return;const left=Object.entries(DB.imgs).filter(([,r])=>r.d);if(!left.length)return;let n=0;
+  for(const [h,r] of left){if(DB.imgs[h]!==r)continue;const buf=Buffer.from(r.d,'base64');if(await imgSave(h,buf)&&DB.imgs[h]===r){DB.imgs[h]={t:r.t,n:buf.length};mark('i:'+h);n++}
+    if(n%20===0)await new Promise(k=>setTimeout(k,50))}
+  console.log('  Картинки перенесены из памяти в базу:',n);
 }
 /* older data kept pictures inside messages; move them out once */
 function migrate(){
@@ -369,15 +397,15 @@ API['POST /api/once/open']=(req,res,b,u)=>{
 };
 function onceGone(c,m){
   if(!m.once||m.once.gone)return;m.once.gone=true;
-  if(m.img&&!Object.values(DB.msgs).some(l=>l.some(x=>x!==m&&x.img===m.img))){const h=m.img.replace(/^\/img\//,'');delete DB.imgs[h];IMGBUF.delete(h);mark('i:'+h)}
+  if(m.img&&!Object.values(DB.msgs).some(l=>l.some(x=>x!==m&&x.img===m.img)))imgForget(m.img.replace(/^\/img\//,''));
   if(m.media){const id=m.media.url.slice(7);mediaDelete(id)}
   delete m.img;delete m.media;mark('m:'+c.id);toChat(c,{t:'upd',chat:c.id,msg:msgOut(m)});
 }
-function serveOnce(req,res,t){
+async function serveOnce(req,res,t){
   const o=ONCE.get(t),u=userOf(req);
   /* the phone app's protected screen has no sign-in of its own: its private link is enough there */
   if(!o||o.exp<now()||(u?u.id!==o.uid:!o.native))return send(res,404,{error:'Ссылка устарела'});
-  if(o.img){const im=imgBuf(o.img.replace(/^\/img\//,''));if(!im)return send(res,404,{error:'нет'});
+  if(o.img){const im=await imgBuf(o.img.replace(/^\/img\//,''));if(!im)return send(res,404,{error:'нет'});
     res.writeHead(200,Object.assign({'Content-Type':im.t,'Content-Length':im.b.length,'Cache-Control':'no-store, private','Content-Disposition':'inline'},SEC));return res.end(im.b)}
   if(o.media)return serveMedia(req,res,o.media,true);
   send(res,404,{error:'нет'});
@@ -1333,7 +1361,8 @@ const server=http.createServer(async(req,res)=>{
     if(p.startsWith('/once/')&&/^[\w-]{20,40}$/.test(p.slice(6)))return serveOnce(req,res,p.slice(6));
     if(p.startsWith('/img/')){ /* pictures: only for signed-in people; a link never changes, so the phone keeps it */
       const h=p.slice(5);if(!/^[0-9a-f]{24}$/.test(h)||!userOf(req))return send(res,404,{error:'нет'});
-      const im=imgBuf(h);if(!im)return send(res,404,{error:'картинка удалена'});
+      const etag0='"'+h+'"';if(DB.imgs[h]&&req.headers['if-none-match']===etag0){res.writeHead(304,{ETag:etag0});return res.end()}
+      const im=await imgBuf(h);if(!im)return send(res,404,{error:'картинка удалена'});
       const etag='"'+h+'"';
       if(req.headers['if-none-match']===etag){res.writeHead(304,{ETag:etag});return res.end()}
       res.writeHead(200,Object.assign({'Content-Type':im.t,'Content-Length':im.b.length,'Cache-Control':'private, max-age=31536000, immutable',ETag:etag},SEC));return res.end(im.b);
@@ -1373,7 +1402,7 @@ server.on('upgrade',(req,sock,head)=>{
 });
 setInterval(()=>{wss.clients.forEach(ws=>{if(!ws.isAlive)return ws.terminate();ws.isAlive=false;ws.ping()})},25e3).unref();
 
-load().then(where=>{migrate();pushInit();return where}).then(where=>server.listen(PORT,()=>{
+load().then(where=>{migrate();pushInit();setTimeout(()=>imgMoveOut().catch(e=>console.error('[img]',e.message)),5000);return where}).then(where=>server.listen(PORT,()=>{
   console.log(`\n  Manasenger работает: ${BASE}  (порт ${PORT})`);
   console.log(`  Данные: ${where} · пользователей ${Object.keys(DB.users).length}`);
   relayServers().then(l=>console.log(`  Звонки: ${l.length?'STUN + TURN ('+ICE_CACHE.src+')':'только STUN — TURN не задан, у части людей звонки не соединятся'}\n`));

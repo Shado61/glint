@@ -20,6 +20,15 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 
+import com.google.android.gms.common.ConnectionResult;
+import com.google.android.gms.common.GoogleApiAvailability;
+import com.google.android.gms.location.FusedLocationProviderClient;
+import com.google.android.gms.location.LocationCallback;
+import com.google.android.gms.location.LocationRequest;
+import com.google.android.gms.location.LocationResult;
+import com.google.android.gms.location.LocationServices;
+import com.google.android.gms.location.Priority;
+
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -30,13 +39,35 @@ import java.util.Locale;
  * Sends this phone's position to friends on the Manasenger map every few seconds while moving
  * (and at least every 30 seconds while standing still) — also with the screen off or the app closed.
  * Shows a permanent notification while it works; switching sharing off in the app stops it.
+ *
+ * Uses Google's Fused Location Provider: it mixes GPS, Wi-Fi and the motion sensors, so it is more precise in town
+ * and much lighter on the battery than asking the GPS directly. Moving → a fix every 3 seconds;
+ * standing still for a minute → every 15 seconds with less GPS. Phones without Google services (Huawei and others)
+ * fall back to the system GPS/network as before.
  */
 public class GeoService extends Service implements LocationListener {
     static final String PREFS = "mn_geo";
     private static final String CHANNEL = "mn_geo";
     private static final int NOTE = 7101;
     private LocationManager lm;
+    private FusedLocationProviderClient fused;
+    private boolean fusedFast;
+    private long stillSince;
     private Location last;
+    private final LocationCallback fusedCb = new LocationCallback() {
+        @Override
+        public void onLocationResult(LocationResult r) {
+            Location l = r.getLastLocation();
+            if (l == null) return;
+            onLocationChanged(l);
+            // moving or standing: change how often the phone is asked
+            boolean moving = l.hasSpeed() && l.getSpeed() > 0.8f;
+            long t = System.currentTimeMillis();
+            if (moving) stillSince = 0; else if (stillSince == 0) stillSince = t;
+            boolean fast = moving || stillSince == 0 || t - stillSince < 60000;
+            if (fast != fusedFast) fusedRequest(fast);
+        }
+    };
     private long sentAt;
     private Location sentLoc;
     private final Handler h = new Handler(Looper.getMainLooper());
@@ -72,25 +103,74 @@ public class GeoService extends Service implements LocationListener {
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (lm == null) {
-            lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
-            if (lm != null) {
-                for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
-                    try {
-                        if (lm.isProviderEnabled(p)) {
-                            lm.requestLocationUpdates(p, 4000, 5, this, Looper.getMainLooper());
-                            Location l = lm.getLastKnownLocation(p);
-                            if (l != null && (last == null || l.getTime() > last.getTime())) last = l;
+        if (fused == null && lm == null) {
+            if (hasPlay()) {
+                fused = LocationServices.getFusedLocationProviderClient(this);
+                fusedRequest(true);
+                try {
+                    fused.getLastLocation().addOnSuccessListener(l -> {
+                        if (l != null && last == null) {
+                            last = l;
+                            send(l);
                         }
-                    } catch (RuntimeException ignored) {
-                    }
+                    });
+                } catch (RuntimeException ignored) {
                 }
-                if (last != null) send(last);
+            } else {
+                systemStart();
             }
             h.removeCallbacks(beat);
             h.postDelayed(beat, 30000);
         }
         return START_STICKY;
+    }
+
+    private boolean hasPlay() {
+        try {
+            return GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(this) == ConnectionResult.SUCCESS;
+        } catch (Throwable e) {
+            return false;
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private void fusedRequest(boolean fast) {
+        if (fused == null) return;
+        fusedFast = fast;
+        LocationRequest req = new LocationRequest.Builder(fast ? Priority.PRIORITY_HIGH_ACCURACY : Priority.PRIORITY_BALANCED_POWER_ACCURACY, fast ? 3000 : 15000)
+                .setMinUpdateIntervalMillis(fast ? 2000 : 10000)
+                .setMinUpdateDistanceMeters(fast ? 3 : 10)
+                .setWaitForAccurateLocation(false)
+                .build();
+        try {
+            fused.removeLocationUpdates(fusedCb);
+            fused.requestLocationUpdates(req, fusedCb, Looper.getMainLooper())
+                    .addOnFailureListener(e -> {
+                        fused = null;
+                        systemStart();
+                    });
+        } catch (RuntimeException e) {
+            fused = null;
+            systemStart();
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private void systemStart() {
+        if (lm != null) return;
+        lm = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
+        if (lm == null) return;
+        for (String p : new String[]{LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
+            try {
+                if (lm.isProviderEnabled(p)) {
+                    lm.requestLocationUpdates(p, 4000, 5, this, Looper.getMainLooper());
+                    Location l = lm.getLastKnownLocation(p);
+                    if (l != null && (last == null || l.getTime() > last.getTime())) last = l;
+                }
+            } catch (RuntimeException ignored) {
+            }
+        }
+        if (last != null) send(last);
     }
 
     private boolean allowed() {
@@ -181,6 +261,12 @@ public class GeoService extends Service implements LocationListener {
     @Override
     public void onDestroy() {
         h.removeCallbacks(beat);
+        if (fused != null) {
+            try {
+                fused.removeLocationUpdates(fusedCb);
+            } catch (RuntimeException ignored) {
+            }
+        }
         if (lm != null) {
             try {
                 lm.removeUpdates(this);

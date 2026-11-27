@@ -1,0 +1,9 @@
+Soundpad sounds in this folder (trimmed, made mono 48 kHz, evened out in loudness, MP3):
+
+boom womp nope clap ovation popper fire ding cash coins spring poof pop gong alarm ring doorbell thunder splash
+  — from "SFX Kit" by Wyzowl, https://github.com/wyzowl/sfx-kit, CC0 1.0 (public domain).
+
+rim sad win banjo drum laugh giggle evil burp scream boing quack sheep pig dog chicken
+  — "Oculus Audio Pack 01" by Oculus VR, LLC (https://developers.meta.com/vr/downloads/package/oculus-audio-pack-1/),
+    licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/). Taken from
+    https://github.com/facebookincubator/Meta-open-sound. Changes: trimmed, faded out, mono, loudness evened, converted to MP3.

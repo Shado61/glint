@@ -893,9 +893,13 @@ async function openMap(){
 }
 function closeMap(){if(!MAPV)return;const v=MAPV;MAPV=null;mapSel=null;ROUTE=null;TR.sel=null;TR.line=null;clearInterval(MAPT);MAPT=0;v.classList.remove('on');setTimeout(()=>{if(MAP){MAP.remove();MAP=null}MK.clear();MEMK=null;v.remove()},220)}
 /* a friend's dot glides to the new place instead of jumping */
-function mkMove(m,lng,lat){const a=m.getLngLat();if(Math.abs(a.lng-lng)<1e-7&&Math.abs(a.lat-lat)<1e-7)return;
-  if(m._anim)cancelAnimationFrame(m._anim);if(distKm({lat:a.lat,lng:a.lng},{lat,lng})>3||document.hidden){m.setLngLat([lng,lat]);return}
-  const t0=performance.now(),D=900,st=t=>{const k=Math.min(1,(t-t0)/D),e=1-Math.pow(1-k,3);m.setLngLat([a.lng+(lng-a.lng)*e,a.lat+(lat-a.lat)*e]);m._anim=k<1?requestAnimationFrame(st):0};m._anim=requestAnimationFrame(st)}
+/* a friend's pin glides at an even speed for about as long as the gap between two updates,
+   so it keeps moving until the next position arrives instead of jumping and then waiting */
+function mkMove(m,lng,lat){const a=m.getLngLat(),now=performance.now();if(Math.abs(a.lng-lng)<1e-7&&Math.abs(a.lat-lat)<1e-7)return;
+  const gap=m._at?now-m._at:1000;m._at=now;
+  if(m._anim)cancelAnimationFrame(m._anim);if(distKm({lat:a.lat,lng:a.lng},{lat,lng})>3||document.hidden){m.setLngLat([lng,lat]);m._anim=0;return}
+  const D=Math.max(700,Math.min(5000,gap*.95)),t0=now,st=t=>{const k=Math.min(1,(t-t0)/D),e=k-.15*Math.sin(2*Math.PI*k)/(2*Math.PI);
+    m.setLngLat([a.lng+(lng-a.lng)*e,a.lat+(lat-a.lat)*e]);m._anim=k<1?requestAnimationFrame(st):0};m._anim=requestAnimationFrame(st)}
 /* on opening: show everyone at once, even friends in another city or country */
 function mapFitAll(){if(!MAP||mapFitted)return;const pts=MAPD.friends.filter(f=>f.st==='ok'&&f.geo).map(f=>[f.geo.lng,f.geo.lat]),p=myPos();if(p)pts.push([p.lng,p.lat]);
   if(pts.length<2)return;mapFitted=true;const xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]);
@@ -1104,7 +1108,7 @@ async function mapRoute(id,mode){
     try{const p=await new Promise((ok,no)=>navigator.geolocation.getCurrentPosition(ok,no,{enableHighAccuracy:true,timeout:15e3,maximumAge:30e3}));GEO.last=p.coords;a=myPos();mapDraw()}
     catch(e){toast('Разрешите доступ к геопозиции, чтобы построить маршрут',4000);return}}
   const b={lat:f.geo.lat,lng:f.geo.lng};
-  routeClear();if(TR.sel)trClose(true);ROUTE={id,mode,a,b,busy:true};mapSel=id;mapBottom();
+  routeClear();if(TR.sel)trClose(true);ROUTE={id,mode,a,b,busy:true,at:Date.now()};mapSel=id;mapBottom();
   if(mode==='bus'){try{const bus=await busRoute(a,b);if(!ROUTE||ROUTE.id!==id||ROUTE.mode!=='bus')return;ROUTE.busy=false;ROUTE.bus=bus;busDraw()}
     catch(e){if(ROUTE&&ROUTE.mode==='bus'){ROUTE.busy=false;ROUTE.bus={opts:[],near:''}}}mapBottom();return}
   const prof={car:'routed-car',foot:'routed-foot',bike:'routed-bike'}[mode];
@@ -1150,14 +1154,14 @@ function geoStart(){
   GEO.watch=navigator.geolocation.watchPosition(p=>geoGot(p.coords),err=>{
     if(err.code===1){toast('Разрешите доступ к геопозиции для Manasenger в настройках телефона или браузера',5000);geoStop(true);return}
     geoLow()},{enableHighAccuracy:true,maximumAge:3e3,timeout:20e3});
-  clearInterval(GEO.tick);GEO.tick=setInterval(()=>{if(document.hidden)return;geoPoll();geoSend()},8e3);
+  clearInterval(GEO.tick);GEO.tick=setInterval(()=>{if(document.hidden)return;geoPoll();geoSend()},4e3);
   geoPoll();
   if(IN_APK_GEO()&&!GEO.native)setTimeout(()=>{if(GEO.watch!=null&&!GEO.native)geoNative(true)},1500);
   return true}
 /* sent when you've moved 10+ metres (no more often than every 4 seconds), and at least every 25 seconds anyway */
 function geoSend(force){const c=GEO.last;if(!c)return;const p={lat:c.latitude,lng:c.longitude},t=Date.now();
   const moved=GEO.sentPos?distKm(GEO.sentPos,p)*1000:1e9;
-  if(t-GEO.sentAt<4e3)return;
+  if(t-GEO.sentAt<3e3)return;
   if(!force&&moved<Math.max(10,Math.min(60,(c.accuracy||0)/2))&&t-GEO.sentAt<25e3)return;
   GEO.sentAt=t;GEO.sentPos=p;MAPD.sharing=true;api('/api/map/loc',{lat:p.lat,lng:p.lng,acc:c.accuracy}).catch(()=>{GEO.sentAt=0})}
 function geoStop(silent){if(GEO.watch!=null)navigator.geolocation.clearWatch(GEO.watch);GEO.watch=null;clearInterval(GEO.tick);GEO.sentAt=0;GEO.sentPos=null;
@@ -1329,6 +1333,7 @@ function sendMsg(img){
   S.reply=null;t.value='';S.draft[c.id]='';autosize(t);renderCtx();renderMsgs(true);
 }
 /* images are shrunk in the browser before sending: max 1600 px, JPEG */
+let SHRINK_WEBP=null;
 function shrink(file,max=1600,q=.82){
   return new Promise((ok,bad)=>{
     if(!/^image\//.test(file.type))return bad(new Error('Это не картинка'));
@@ -1336,8 +1341,10 @@ function shrink(file,max=1600,q=.82){
     img.onload=()=>{
       let w=img.naturalWidth,h=img.naturalHeight;const k=Math.min(1,max/Math.max(w,h));w=Math.round(w*k);h=Math.round(h*k);
       const cv=document.createElement('canvas');cv.width=w;cv.height=h;cv.getContext('2d').drawImage(img,0,0,w,h);URL.revokeObjectURL(url);
-      let d=cv.toDataURL('image/jpeg',q);
-      while(d.length>1.25e6&&q>.4){q-=.12;d=cv.toDataURL('image/jpeg',q)}
+      /* WebP is about a third smaller than JPEG at the same look; browsers that can't make it give back PNG, then JPEG is used */
+      const fmt=SHRINK_WEBP!==false&&(SHRINK_WEBP=SHRINK_WEBP??cv.toDataURL('image/webp',.5).startsWith('data:image/webp'))?'image/webp':'image/jpeg';
+      let d=cv.toDataURL(fmt,q);
+      while(d.length>1.25e6&&q>.4){q-=.12;d=cv.toDataURL(fmt,q)}
       d.length>1.6e6?bad(new Error('Картинка слишком большая')):ok(d);
     };
     img.onerror=()=>bad(new Error('Не удалось открыть картинку'));img.src=url;
@@ -1747,7 +1754,9 @@ const frameMsgs=()=>{FQ.m=true;frameSched()},frameSide=()=>{FQ.s=true;frameSched
 function onWS(m){
   switch(m.t){
     case 'map':if(!IOS)mapRefresh();return;
-    case 'mapLoc':{const f=MAPD.friends.find(x=>x.user.id===m.id);if(f){f.geo=m.geo;if(MAPV)mapDraw()}return}
+    case 'mapLoc':{const f=MAPD.friends.find(x=>x.user.id===m.id);if(f){f.geo=m.geo;if(MAPV)mapDraw();
+      /* the route follows a friend who keeps moving: rebuilt when they are 150+ m from its end, at most every 30 s */
+      if(m.geo&&ROUTE&&ROUTE.id===m.id&&ROUTE.mode!=='bus'&&!ROUTE.busy&&Date.now()-(ROUTE.at||0)>30e3&&distKm(ROUTE.b,m.geo)>.15){ROUTE.at=Date.now();mapRoute(m.id,ROUTE.mode)}}return}
     case 'msg':{
       const c=S.chats[m.chat];if(!c)return;
       const l=S.msgs[m.chat]||(S.cur===m.chat?(S.msgs[m.chat]=[]):null);
@@ -1995,10 +2004,46 @@ async function micReopen(){
    your own sounds (mp3, m4a, wav…) are kept on this device. */
 const PAD={vol:+store.get('padVol',.8)||.8,me:store.get('padMe',true)!==false,bufs:{},live:new Set(),edit:false,own:store.get('padOwn',[]),told:0};
 if(!Array.isArray(PAD.own))PAD.own=[];
-const PAD_SND=[['horn','📯','Дудка'],['rim','🥁','Ба-дум-тсс'],['sad','🎺','Грустный тромбон'],['boing','🌀','Боинг'],
-  ['fart','💨','Пук'],['quack','🦆','Кря'],['clap','👏','Аплодисменты'],['crick','🦗','Сверчки'],
-  ['drum','🪘','Барабанная дробь'],['cash','💰','Касса'],['siren','🚨','Сирена'],['pew','⚡','Пиу-пиу'],
-  ['up','⬆️','Свисток вверх'],['down','⬇️','Свисток вниз'],['pop','🫧','Чпок'],['gong','🔔','Гонг'],['scratch','💿','Скретч'],['wow','😮','Вау']];
+/* real recorded sounds (files in /vendor/pad, cleaned up and evened out in loudness); the last group is made by code */
+const PAD_SND=[
+  ["boom", "💥", "Бум", "meme"],
+  ["rim", "🥁", "Ба-дум-тсс", "meme"],
+  ["sad", "📉", "Провал", "meme"],
+  ["win", "🏆", "Победа", "meme"],
+  ["womp", "😬", "Упс", "meme"],
+  ["nope", "🚫", "Неа", "meme"],
+  ["banjo", "🪕", "Ну такое", "meme"],
+  ["drum", "🪘", "Барабаны", "meme"],
+  ["laugh", "😂", "Смех", "voice"],
+  ["giggle", "🤭", "Хихи", "voice"],
+  ["evil", "😈", "Злодей", "voice"],
+  ["burp", "🤢", "Отрыжка", "voice"],
+  ["scream", "😱", "А-а-а!", "voice"],
+  ["clap", "👏", "Аплодисменты", "party"],
+  ["ovation", "🎉", "Овации", "party"],
+  ["popper", "🎊", "Хлопушка", "party"],
+  ["fire", "🎆", "Салют", "party"],
+  ["ding", "✅", "Верно!", "party"],
+  ["cash", "💰", "Касса", "things"],
+  ["coins", "🪙", "Монетки", "things"],
+  ["boing", "🌀", "Боинг", "things"],
+  ["spring", "➰", "Пружина", "things"],
+  ["poof", "💨", "Пуф", "things"],
+  ["pop", "🫧", "Чпок", "things"],
+  ["gong", "🔔", "Гонг", "things"],
+  ["alarm", "⏰", "Будильник", "things"],
+  ["ring", "☎️", "Звонок", "things"],
+  ["doorbell", "🚪", "Дзынь-дон", "things"],
+  ["thunder", "⚡", "Гром", "things"],
+  ["splash", "💦", "Плюх", "things"],
+  ["quack", "🦆", "Кря", "animals"],
+  ["sheep", "🐑", "Бе-е", "animals"],
+  ["pig", "🐷", "Хрю", "animals"],
+  ["dog", "🐶", "Гав", "animals"],
+  ["chicken", "🐔", "Ко-ко", "animals"],
+  ["fart","💩","Пук","synth"],["horn","📯","Дудка","synth"],["crick","🦗","Сверчки","synth"],["siren","🚨","Сирена","synth"],["pew","🔫","Пиу-пиу","synth"]];
+const PAD_FILE=new Set(PAD_SND.filter(x=>x[3]!=='synth').map(x=>x[0])),PAD_V=2;
+const PAD_G=[['meme','Мемы'],['voice','Голоса'],['party','Праздник'],['things','Звуки'],['animals','Животные'],['synth','Классика']];
 const PAD_LEN={horn:1.2,rim:1.3,sad:2.5,boing:1,fart:1.15,quack:.65,clap:2.5,crick:2.3,drum:3.1,cash:1.4,siren:2.3,pew:.65,up:.95,down:.95,pop:.22,gong:3,scratch:.8,wow:1.6};
 function padSynth(id){
   const sr=44100,O=window.OfflineAudioContext||window.webkitOfflineAudioContext;if(!O)return Promise.resolve(null);
@@ -2049,8 +2094,10 @@ function padSynth(id){
 }
 function padDecode(ab){const c=MICX.ctx||ac();if(!c)return Promise.resolve(null);
   return new Promise(ok=>{try{const r=c.decodeAudioData(ab,ok,()=>ok(null));if(r&&r.then)r.then(ok,()=>ok(null))}catch(e){ok(null)}})}
+const padOwnId=id=>PAD.own.some(x=>x.id===id);
+function padFetch(id){return fetch(`/vendor/pad/${id}.mp3?v=${PAD_V}`).then(r=>r.ok?r.arrayBuffer():null).then(ab=>ab?padDecode(ab):null).catch(()=>null)}
 function padBuf(id){
-  if(!PAD.bufs[id]){const p=id[0]==='u'?IDB.get('pad:'+id).then(ab=>ab?padDecode(ab.slice(0)):null):padSynth(id);
+  if(!PAD.bufs[id]){const p=padOwnId(id)?IDB.get('pad:'+id).then(ab=>ab?padDecode(ab.slice(0)):null):PAD_FILE.has(id)?padFetch(id).then(b=>b||padSynth(id)):padSynth(id);
     PAD.bufs[id]=p.then(b=>{if(!b)delete PAD.bufs[id];return b},()=>{delete PAD.bufs[id];return null})}
   return PAD.bufs[id];
 }
@@ -2074,10 +2121,12 @@ async function padPlay(id){
   const live=padLive();let ch=null;
   if(live){ch=await padEnsure();if(!ch)toast('Не получилось подключить звук к звонку — слышите только вы')}
   if(PAD.live.size>=4){const o=PAD.live.values().next().value;try{o.stop()}catch(e){}PAD.live.delete(o)}
-  const src=ctx.createBufferSource(),g=ctx.createGain();src.buffer=buf;g.gain.value=PAD.vol;src.connect(g);
+  const src=ctx.createBufferSource(),g0=ctx.createGain();src.buffer=buf;g0.gain.value=PAD.vol;src.connect(g0);
+  /* a limiter per sound: at 150% volume a loud sound is held just under the top instead of crackling */
+  const g=ctx.createDynamicsCompressor();g.threshold.value=-4;g.knee.value=2;g.ratio.value=20;g.attack.value=.001;g.release.value=.08;g0.connect(g);
   if(ch&&ch.dst.context===ctx){if(!ch.pad){ch.pad=ctx.createGain();ch.pad.connect(ch.dst)}g.connect(ch.pad)}
   let mon=null;if(!live||PAD.me||!ch){mon=ctx.createGain();mon.gain.value=live&&ch?.45:1;g.connect(mon);mon.connect(ctx.destination)}
-  src.onended=()=>{PAD.live.delete(src);try{g.disconnect();if(mon)mon.disconnect()}catch(e){}};
+  src.onended=()=>{PAD.live.delete(src);try{g0.disconnect();g.disconnect();if(mon)mon.disconnect()}catch(e){}};
   src.start();try{src.stop(ctx.currentTime+30)}catch(e){}
   PAD.live.add(src);
   if(live&&ch){padTell(id);if(!padMicOn())toast('🎙 Микрофон выключен — собеседники не услышат звук')}
@@ -2105,17 +2154,20 @@ async function padAddFile(file){
   PAD.bufs[id]=Promise.resolve(b);
   toast(b.duration>30?'Звук добавлен. В звонке прозвучат первые 30 секунд':'Звук добавлен');padSheet();
 }
+function padWarm(){if(PAD.warm)return;PAD.warm=true;const ids=PAD_SND.map(x=>x[0]).concat(PAD.own.map(x=>x.id));let i=0;
+  const next=()=>{if(i>=ids.length)return;const id=ids[i++];padBuf(id).finally(()=>setTimeout(next,isLite()?60:0))};for(let k=0;k<3;k++)next()}
 function padSheet(){
-  const live=padLive();
+  const live=padLive();micCtx().then(()=>padWarm());
   const key=(id,e,n,own)=>`<button class="pad-k${own?' own':''}${PAD.edit&&own?' ed':''}" data-act="${PAD.edit&&own?'pad-edit':'pad-play'}" data-id="${esc(id)}"><span class="pe">${esc(e)}</span><span class="pn">${esc(n)}</span></button>`;
   sheet(`<h2>🎛 Саундпад</h2><p class="sub">${live?'Нажмите — звук услышат все в звонке':'Нажмите, чтобы послушать. Во время звонка звук услышат все'}</p>
-    <div class="pad-grid">${PAD_SND.map(([id,e,n])=>key(id,e,n)).join('')}</div>
+    ${PAD_G.map(([g,t])=>`<div class="section-t set-sec">${t}</div><div class="pad-grid g-${g}">${PAD_SND.filter(x=>x[3]===g).map(([id,e,n])=>key(id,e,n)).join('')}</div>`).join('')}
     <div class="section-t set-sec">Мои звуки</div>
     <div class="pad-grid">${PAD.own.map(s=>key(s.id,s.e,s.name,true)).join('')}<button class="pad-k add" data-act="pad-add"><span class="pe">＋</span><span class="pn">Свой звук</span></button></div>
     ${PAD.own.length?`<button class="gbtn" data-act="pad-editmode" style="margin-top:8px">${PAD.edit?'✓ Готово':'✎ Переименовать или удалить'}</button>`:'<p class="hint">Добавьте свой звук из файлов телефона: mp3, m4a или wav. Он хранится только на этом устройстве.</p>'}
     <div class="set-row" style="display:block;margin-top:10px"><b>Громкость звуков</b> <small class="mv">${Math.round(PAD.vol*100)}%</small><input type="range" min="0.1" max="1.5" step="0.05" value="${PAD.vol}" data-pad="vol"></div>
     <div class="set-row"><span class="mid"><b>Слышать самому</b><small>Звук играет и у вас, потише</small></span><button class="gbtn ${PAD.me?'primary':''}" data-act="pad-me">${PAD.me?'Вкл':'Выкл'}</button></div>
-    <div class="btns" style="margin-top:10px"><button class="gbtn" data-act="pad-stop">⏹ Тишина</button><button class="gbtn primary" data-act="closemenu">Готово</button></div>`);
+    <div class="btns" style="margin-top:10px"><button class="gbtn" data-act="pad-stop">⏹ Тишина</button><button class="gbtn primary" data-act="closemenu">Готово</button></div>
+    <p class="hint pad-cr">Звуки: SFX Kit (CC0) и «Oculus Audio Pack 01» © Oculus VR, LLC, CC BY 4.0</p>`);
 }
 function padEditSheet(id){const s=PAD.own.find(x=>x.id===id);if(!s)return;
   sheet(`<h2>Свой звук</h2>
