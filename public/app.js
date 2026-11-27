@@ -387,7 +387,8 @@ function pushSetup(){
 /* the server sends notifications only while Manasenger is not on screen */
 const sendVis=()=>wsSend({t:'vis',v:!document.hidden&&document.hasFocus()});
 ['visibilitychange','focus','blur'].forEach(ev=>(ev==='visibilitychange'?document:window).addEventListener(ev,sendVis));
-function setMe(r){if('ann' in r)showAnn(r.ann);if(!IOS)setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
+function setMe(r){if(!ICE)setTimeout(()=>iceServers().catch(()=>{}),2500); /* call relays are fetched ahead, so the first call starts without waiting */
+  if('ann' in r)showAnn(r.ann);if(!IOS)setTimeout(()=>{mapRefresh();if(store.get('geoShare',false))geoStart()},800);S.packs=r.packs||[];S.contacts=r.contacts||{};S.stars=new Set(r.stars||[]);if(r.tz!=null)S.tz=r.tz;if(S.pk!=='emoji'&&S.packs.length&&!S.packs.some(p=>p.id===S.pk))S.pk=S.packs[0].id}
 function renderShell(){
   $('#app').innerHTML=`<nav class="rail glass" id="rail" aria-label="Серверы"></nav><aside class="side glass" id="side"></aside><main class="main glass" id="main"></main>`;
   renderRail();renderSide();renderMain();
@@ -2272,7 +2273,7 @@ async function makePC(){
     }
     if(s==='disconnected'||s==='failed'){
       CALL.reconnecting=true;renderCall();clearTimeout(CALL.discT);
-      CALL.discT=setTimeout(restartIce,s==='failed'?0:2500);
+      CALL.discT=setTimeout(restartIce,s==='failed'?0:1500);
       clearTimeout(CALL.failT);CALL.failT=setTimeout(()=>{if(CALL&&CALL.pc===pc&&pc.connectionState!=='connected'){toast('Связь потеряна. Звонок завершён.');hangup()}},25000);
     }
   };
@@ -2784,9 +2785,28 @@ function gcTune(){
 }
 function gcOutVideo(){if(!GC||!GC.local)return null;if(GC.screen&&GC.screenTrack)return GC.screenTrack;return GC.cam?GC.local.getVideoTracks()[0]||null:null}
 function gcPush(){if(!GC||!GC.local)return;setTimeout(gcTune,300);const v=gcOutVideo(),a=GC.local.getAudioTracks()[0]||null;GC.peers.forEach(p=>{if(p.vs)p.vs.replaceTrack(v).catch(()=>{});if(p.as)p.as.replaceTrack(a).catch(()=>{})});wsSend({t:'gstate',mic:GC.mic,cam:!!(GC.cam||GC.screen),screen:GC.screen});gcRender()}
+/* ---------- getting a call back after the network changes (Wi-Fi ↔ mobile, a lift, a tunnel) ----------
+   Group calls and voice channels: the side that made the first offer finds a new path (ICE restart) and sends it;
+   the other side asks it to. Starts 1.5 s after the link drops, at once when it fails or the phone switches networks. */
+async function peerRecover(p){
+  if(!p||!p.pc||p.pc.signalingState==='closed'||p.pc.connectionState==='connected'&&!p.force)return;p.force=false;
+  if(Date.now()-(p.recAt||0)<3000)return;p.recAt=Date.now();
+  if(!p.off){wsSend({t:p.kind,to:p.uid,data:{restart:1}});return}
+  try{if(p.pc.signalingState!=='stable')return;const o=await mkOffer(p.pc,{iceRestart:true});await setLocal(p.pc,o,p.kind==='vrtc'?48:undefined);
+    wsSend({t:p.kind,to:p.uid,data:{sdp:p.pc.localDescription.toJSON()}})}catch(e){}
+}
+function peerWatch(p){const s=p.pc.connectionState;clearTimeout(p.recT);
+  if(s==='disconnected')p.recT=setTimeout(()=>peerRecover(p),1500);else if(s==='failed')peerRecover(p);else if(s==='connected')p.recAt=0}
+let NET_T=0,NET_TYPE=navigator.connection&&navigator.connection.type;
+function netChanged(){clearTimeout(NET_T);NET_T=setTimeout(()=>{
+  ICE_AT=0; /* fresh relay addresses for the new network */
+  if(CALL&&CALL.pc&&CALL.state==='active'){if(CALL.dir==='out'){try{CALL.pc.restartIce()}catch(e){}}else wsSend({t:'rtc',callId:CALL.id,data:{restart:1}})}
+  const all=[].concat(GC?[...GC.peers.values()]:[],VC?[...VC.peers.values()]:[]);all.forEach(p=>{p.force=true;p.recAt=0;peerRecover(p)})},600)}
+addEventListener('online',netChanged);
+try{navigator.connection&&navigator.connection.addEventListener('change',()=>{const t=navigator.connection.type;if(t&&t!==NET_TYPE){NET_TYPE=t;netChanged()}})}catch(e){}
 async function gcPeer(uid,offer){
-  const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle'});
-  const p={pc,uid,pending:[],stream:new MediaStream()};GC.peers.set(uid,p);
+  const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle',iceCandidatePoolSize:2});
+  const p={pc,uid,pending:[],stream:new MediaStream(),off:!!offer,kind:'grtc'};GC.peers.set(uid,p);
   if(offer){
     p.as=pc.addTransceiver('audio',{direction:'sendrecv'}).sender;p.vs=pc.addTransceiver('video',{direction:'sendrecv'}).sender;
     p.as.replaceTrack(GC.local.getAudioTracks()[0]||null);p.vs.replaceTrack(gcOutVideo());
@@ -2795,7 +2815,7 @@ async function gcPeer(uid,offer){
   pc.ontrack=e=>{p.stream.getTracks().filter(t=>t.kind===e.track.kind).forEach(t=>p.stream.removeTrack(t));p.stream.addTrack(e.track);
     if(e.track.kind==='audio'){if(!p.audio){p.audio=document.createElement('audio');p.audio.autoplay=true;p.audio.playsInline=true;document.body.appendChild(p.audio)}p.audio.srcObject=new MediaStream([e.track]);p.audio.play().catch(()=>{});setTimeout(applySpeaker,200)}
     e.track.onunmute=()=>gcRender();gcRender()};
-  pc.onconnectionstatechange=()=>{if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}if(pc.connectionState==='connected')gcTune();gcRender()};
+  pc.onconnectionstatechange=()=>{peerWatch(p);if(pc.connectionState==='connected')gcTune();gcRender()};
   if(offer){const o=await mkOffer(pc);await setLocal(pc,o);wsSend({t:'grtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
   return p;
 }
@@ -2826,7 +2846,7 @@ async function onGroupMsg(m){
           const a=await mkAnswer(p.pc);await setLocal(p.pc,a);wsSend({t:'grtc',to:m.from,data:{sdp:p.pc.localDescription.toJSON()}});
         }
         for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
-      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.pad)padHeard(m.from,d.pad);
+      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.restart){if(p)peerRecover(p)}else if(d.pad)padHeard(m.from,d.pad);
     }catch(e){console.error(e)}
   }
 }
@@ -2947,8 +2967,8 @@ function voiceLeave(silent){
 }
 function closePeer(p){try{p.pc.close()}catch(e){}if(p.audio){p.audio.srcObject=null;p.audio.remove()}}
 async function voicePeer(uid,offer){
-  const pc=new RTCPeerConnection({iceServers:await iceServers()});
-  const p={pc,uid,pending:[],audio:null};VC.peers.set(uid,p);
+  const pc=new RTCPeerConnection({iceServers:await iceServers(),bundlePolicy:'max-bundle',iceCandidatePoolSize:2});
+  const p={pc,uid,pending:[],audio:null,off:!!offer,kind:'vrtc'};VC.peers.set(uid,p);
   VC.local.getTracks().forEach(t=>pc.addTrack(t,VC.local));
   if(VC.screen&&VC.screenTrack&&offer)p.ss=pc.addTrack(VC.screenTrack,VC.screenStream);
   pc.onicecandidate=e=>{if(e.candidate)wsSend({t:'vrtc',to:uid,data:{cand:e.candidate.toJSON()}})};
@@ -2958,7 +2978,7 @@ async function voicePeer(uid,offer){
     const st=e.streams[0]||new MediaStream([e.track]);p.audio.srcObject=st;p.audio.muted=VC.deaf;p.audio.play().catch(()=>{});
     watchLevel(uid,st);
   };
-  pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected'&&VC&&VC.state!=='on'){VC.state='on';renderSide()}if(pc.connectionState==='failed'){try{pc.restartIce()}catch(e){}}};
+  pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected'&&VC&&VC.state!=='on'){VC.state='on';renderSide()}peerWatch(p)};
   if(offer){const o=await mkOffer(pc);await setLocal(pc,o,48);wsSend({t:'vrtc',to:uid,data:{sdp:pc.localDescription.toJSON()}})}
   return p;
 }
@@ -2977,7 +2997,7 @@ async function onVoiceMsg(m){
           /* I'm showing my screen and this person joined later: send it to them too */
           if(VC.screen&&VC.screenTrack&&!p.ss)setTimeout(()=>{if(VC&&VC.screen&&!p.ss){p.ss=p.pc.addTrack(VC.screenTrack,VC.screenStream);voiceRenego(p)}},300)}
         for(const c of p.pending.splice(0))await p.pc.addIceCandidate(c).catch(()=>{});
-      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.pad)padHeard(m.from,d.pad);
+      }else if(d.cand){if(!p)return;if(p.pc.remoteDescription)await p.pc.addIceCandidate(d.cand).catch(()=>{});else p.pending.push(d.cand)}else if(d.restart){if(p)peerRecover(p)}else if(d.pad)padHeard(m.from,d.pad);
     }catch(e){console.error(e)}
   }
 }
